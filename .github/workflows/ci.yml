@@ -45,7 +45,17 @@ jobs:
         run: python -m pyflakes python/anla python/anla1 python/tests conformance/make_vectors.py site tools
 
       - name: Conformance suite
-        run: python -m pytest python/tests -q
+        # -ra reports skips. Without it a module that skipped itself — the BLAKE3
+        # cross-check does exactly that when the Rust wheel is missing — is
+        # indistinguishable from one that passed, and a green run would prove less
+        # than it appears to.
+        run: python -m pytest python/tests -q -ra
+
+      - name: Both BLAKE3 paths are present
+        # Asserted rather than inferred from a green suite: the cross-check module
+        # skips itself when the extension is absent, so this is what makes "the two
+        # implementations agree" a claim about this run rather than some other one.
+        run: python tools/check_blake3.py
 
       - name: Frozen vectors match the writer
         run: python conformance/make_vectors.py --check --json
