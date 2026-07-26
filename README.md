@@ -11,6 +11,7 @@ the site that hosts a working version you can run in a browser tab.
 - **Site and live workbench:** https://anla.evemisslab.com
 - **Live test:** https://anla.evemisslab.com/demo/ — runs the suite in your browser
 - **Specification:** [`SPEC.md`](SPEC.md) — normative for `ANLA-MVP v0.1`
+- **1.0 container draft:** [`SPEC-1.0-DRAFT.md`](SPEC-1.0-DRAFT.md) — nothing frozen yet, and it says so
 - **Papers:** [`papers/`](papers/) — Traditional Chinese originals, English translations
 - **Conformance:** [`conformance/`](conformance/) — fixtures, frozen vectors, drivers
 - **Design record:** [`design/decisions-for-1.0.md`](design/decisions-for-1.0.md) — the whitepaper's fifteen open questions, answered or scoped
@@ -49,6 +50,22 @@ lists every divergence from the whitepaper's target and why each one exists.
 > ANLA archive the only copy of anything you cannot lose.
 
 ---
+
+## Two profiles
+
+`ANLA-MVP v0.1` is finished. `ANLA 1.0` is being specified alongside it, for Python
+and Rust, because 1.0 wants BLAKE3 and Zstandard and neither is a browser primitive.
+Rather than turn the browser implementation into a WebAssembly download, MVP stays
+what it is — the profile a stranger can verify in thirty seconds — and 1.0 becomes
+the profile a preservation system can adopt. Different jobs; the reasoning is in the
+[design record](design/decisions-for-1.0.md).
+
+The draft is held to the standard MVP was held to: **nothing is frozen until two
+independent implementations produce byte-identical archives and a differential fuzzer
+finds no divergence between them.** So far 1.0 has a canonical CBOR codec
+([`python/anla1/cbor.py`](python/anla1/cbor.py)) and a container specification that
+is explicitly not implemented yet. `SPEC-1.0-DRAFT.md` opens with a table of what
+exists, which is the first thing that changes when that changes.
 
 ## Two implementations, on purpose
 
@@ -129,7 +146,7 @@ archive.read('docs/readme.txt');
 python -m pytest python/tests -q
 ```
 
-201 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
+337 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
 without it. Everything runs on Linux, macOS and Windows in CI. Another 76
 assertions run in a browser on the [live test page](https://anla.evemisslab.com/demo/).
 

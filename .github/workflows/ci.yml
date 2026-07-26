@@ -42,7 +42,7 @@ jobs:
         run: python -m pip install --upgrade pip pytest pyflakes
 
       - name: Lint
-        run: python -m pyflakes python/anla python/tests conformance/make_vectors.py site
+        run: python -m pyflakes python/anla python/anla1 python/tests conformance/make_vectors.py site tools
 
       - name: Conformance suite
         run: python -m pytest python/tests -q

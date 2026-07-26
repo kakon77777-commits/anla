@@ -31,7 +31,7 @@ Source = "https://github.com/kakon77777-commits/anla"
 Specification = "https://anla.evemisslab.com/spec/"
 
 [tool.setuptools.packages.find]
-include = ["anla*"]
+include = ["anla*", "anla1*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

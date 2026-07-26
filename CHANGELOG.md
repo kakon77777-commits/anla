@@ -7,6 +7,48 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
+## 2026-07-27 (later) — Option B taken; the 1.0 container draft begins
+
+Neo chose **Option B**: `ANLA 1.0` is specified for Python and Rust, and `ANLA-MVP`
+stays frozen as the profile anyone can verify in a browser tab. Recorded with its
+consequences in [`design/decisions-for-1.0.md`](design/decisions-for-1.0.md).
+
+### Added
+
+- **[`SPEC-1.0-DRAFT.md`](SPEC-1.0-DRAFT.md)** — the container: new magic, header
+  with a real `header_size`, record frame with the `REQUIRED_FOR_EXTRACTION` /
+  `AUXILIARY_DISPOSABLE` flag bits and 8-byte padding, the footer chain, canonical
+  CBOR manifests, several Merkle roots, hash agility, a numeric codec registry, and
+  capability URIs.
+
+  It opens with a table of what is implemented versus what is only specified, and it
+  is held to the standard MVP was held to: **nothing is frozen until two independent
+  implementations produce byte-identical archives and the differential fuzzer finds
+  no divergence.** Two decisions are singled out as the reason a new magic number is
+  needed rather than a minor version: record flags change what a decoder does with
+  what it does not recognise, and the footer chain changes how it finds the manifest
+  at all.
+
+- **[`python/anla1/cbor.py`](python/anla1/cbor.py)** — canonical CBOR, no
+  dependencies, in both directions. The encoder emits one byte sequence per value;
+  **the strict decoder refuses non-canonical input** rather than normalizing it,
+  because the manifest hash is computed over manifest bytes and a decoder that
+  accepts two encodings of one logical manifest is a decoder through which two
+  archives with different hashes mean the same thing.
+
+  129 tests, including every encoding vector in RFC 8949 appendix A — the only way
+  to be confident an encoder written from prose emits CBOR rather than something
+  that merely round-trips through itself.
+
+### Fixed
+
+- **The new decoder crashed on deep nesting before it had any users.** Twenty
+  thousand nested arrays raised `RecursionError`, which is a crash where a refusal
+  was owed. Now bounded at 64 levels — deeper than any manifest, shallower than any
+  attack. Found by probing the parser with the question the differential fuzzer asks
+  ("does it refuse, or does it fall over?") rather than by reading it, which is the
+  habit worth keeping as 1.0 grows.
+
 ## 2026-07-27 — differential fuzzing, and a stated invariant nobody checked
 
 The whitepaper's open question 14 asked for cross-implementation parser

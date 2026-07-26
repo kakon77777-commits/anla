@@ -201,17 +201,30 @@ supported and honest about what it is. Two profiles, two audiences, one
 specification family — and `ANLA-MVP` was always described as a profile, not a
 lesser version.
 
-**Recommendation: B, and say so in the specification rather than letting it be
-discovered.** The browser profile earned its place — it is what makes the format
-checkable by a stranger in thirty seconds — and turning it into a WASM download in
-order to match a codec choice trades away the property that is actually rare.
-1.0's job is to be the format that a preservation system can adopt; MVP's job is to
-be the format anyone can verify. Those are different jobs.
+**Decided: B.** Neo chose it on 2026-07-26, and it is now the plan of record rather
+than a recommendation.
 
-If B is taken, one thing must be built early, not late: a `store`-only,
-BLAKE3-hashed 1.0 archive that the JavaScript implementation can *read* even if it
-cannot write. A format whose newest profile is invisible to its own demo page is a
-format that will drift.
+So: **`ANLA 1.0` is specified for Python and Rust. `ANLA-MVP` stays frozen,
+supported, and the profile anyone can verify in a browser tab in thirty seconds.**
+Two profiles, two audiences, one specification family — which is what `ANLA-MVP`
+was always described as, a profile rather than a lesser version.
+
+The browser profile earned its place, and turning it into a WebAssembly download in
+order to match a codec choice would have traded away the property that is actually
+rare. 1.0's job is to be the format a preservation system can adopt; MVP's job is to
+be the format anyone can check. Those are different jobs.
+
+Two consequences that must be honoured rather than discovered:
+
+1. **The JavaScript implementation must still be able to *read* a 1.0 archive** in
+   the `store`-only, SHA-256 case, even once it cannot write one. A format whose
+   newest profile is invisible to its own demo page is a format that will drift.
+   The container is being frozen with hash and codec agility precisely so this
+   stays possible.
+2. **`SPEC.md` and `SPEC-1.0-DRAFT.md` must never disagree about which is which.**
+   MVP is frozen and normative today. 1.0 is a draft, and stays a draft until two
+   implementations produce byte-identical archives from the same input — the same
+   standard MVP was held to, applied before the word "1.0" is used in public.
 
 ---
 
