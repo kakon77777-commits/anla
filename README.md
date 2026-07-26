@@ -79,7 +79,7 @@ compares a fixture against itself in front of you.
 There is also a [single-file build](https://anla.evemisslab.com/standalone.html):
 save it, open it offline, it still works.
 
-And a [live test page](https://anla.evemisslab.com/demo/) that runs 67 of the
+And a [live test page](https://anla.evemisslab.com/demo/) that runs 76 of the
 conformance assertions in your own browser — including the byte-for-byte
 comparison against hashes the Python writer produced. It fetches nothing: the
 fixtures and the frozen vectors are compiled into the page.
@@ -130,7 +130,7 @@ python -m pytest python/tests -q
 ```
 
 196 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
-without it. Everything runs on Linux, macOS and Windows in CI. Another 67
+without it. Everything runs on Linux, macOS and Windows in CI. Another 76
 assertions run in a browser on the [live test page](https://anla.evemisslab.com/demo/).
 
 What they cover, beyond the round trips: every rejection a decoder owes you (bad

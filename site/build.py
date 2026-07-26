@@ -29,6 +29,9 @@ import content as C  # noqa: E402
 from markdown import render_markdown, split_front_matter  # noqa: E402
 
 DIST = ROOT / "dist"
+#: Set once per build from the git revision; appended to every asset URL so a
+#: deploy invalidates the previous copy instead of waiting out its max-age.
+ASSET_STAMP = ""
 ASSETS = ROOT / "src" / "assets"
 CORE = REPO / "web" / "anla-core.js"
 VECTORS = REPO / "conformance" / "vectors"
@@ -59,6 +62,11 @@ def write(path: Path, text: str) -> None:
 
 def esc(value: str) -> str:
     return html.escape(str(value), quote=True)
+
+
+def asset(path: str) -> str:
+    """An asset URL carrying the build stamp."""
+    return f"/assets/{path}?v={ASSET_STAMP}" if ASSET_STAMP else f"/assets/{path}"
 
 
 NAV = (
@@ -106,7 +114,8 @@ def layout(lang: str, *, slug: str, title: str, description: str, body: str,
     # The workbench's translations load as an asset rather than an inline
     # script: it lets the site keep script-src 'self' with no inline exception,
     # and an exception is the one thing a content policy should not have.
-    runtime_json = (f'<script src="/assets/i18n.{lang}.js"></script>' if runtime else "")
+    runtime_json = (f'<script src="{asset(f"i18n.{lang}.js")}"></script>'
+                    if runtime else "")
 
     return f"""<!doctype html>
 <html lang="{s['html_lang']}">
@@ -125,7 +134,7 @@ def layout(lang: str, *, slug: str, title: str, description: str, body: str,
 <meta property="og:url" content="{url}">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="{asset('styles.css')}">
 {runtime_json}
 </head>
 <body>
@@ -404,7 +413,7 @@ def workbench_markup(lang: str) -> str:
 def page_workbench(lang: str) -> str:
     s = strings(lang)
     body = ('<main>' + workbench_markup(lang)
-            + '<script type="module" src="/assets/app.js"></script></main>')
+            + f'<script type="module" src="{asset("app.js")}"></script></main>')
     return layout(lang, slug="workbench/",
                   title=f"{s['wb_h2']} — ANLA",
                   description=s["meta_workbench"], body=body, runtime=True,
@@ -434,7 +443,7 @@ def page_demo(lang: str) -> str:
   <p class="section-desc" style="margin-top:26px">{esc(s['demo_source'])}
     <a href="/conformance/">{esc(s['nav_conformance'])} ↗</a></p>
 </section></div>
-<script type="module" src="/assets/demo.js"></script></main>"""
+<script type="module" src="{asset('demo.js')}"></script></main>"""
     return layout(lang, slug="demo/", title=f"{s['demo_h1']} — ANLA",
                   description=s["meta_demo"], body=body, runtime=True,
                   alternate=f"{base(other(lang))}demo/")
@@ -600,6 +609,20 @@ PAPERS = {
 }
 
 
+def stamp_imports(source: Path) -> str:
+    """Copy a module, stamping the build onto its relative import specifiers.
+
+    A query string on `<script src>` does not reach what that script imports, so
+    without this the page would fetch a new demo.js and have it import last hour's
+    anla-core.js — the worst of both states.
+    """
+    text = source.read_text(encoding="utf-8")
+    if not ASSET_STAMP:
+        return text
+    return re.sub(r"(from '\./)([A-Za-z0-9._-]+\.js)(')",
+                  lambda m: f"{m.group(1)}{m.group(2)}?v={ASSET_STAMP}{m.group(3)}", text)
+
+
 def fixtures_module() -> str:
     """conformance/fixtures.json, verbatim, as an ES module.
 
@@ -669,6 +692,8 @@ def git_revision() -> str:
 
 
 def main() -> int:
+    global ASSET_STAMP
+    ASSET_STAMP = git_revision()
     if DIST.exists():
         shutil.rmtree(DIST)
     DIST.mkdir(parents=True)
@@ -724,8 +749,8 @@ def main() -> int:
     # assets: the core is copied, never rewritten
     (DIST / "assets").mkdir(parents=True, exist_ok=True)
     shutil.copy2(ASSETS / "styles.css", DIST / "assets" / "styles.css")
-    shutil.copy2(ASSETS / "app.js", DIST / "assets" / "app.js")
     shutil.copy2(CORE, DIST / "assets" / "anla-core.js")
+    write(DIST / "assets" / "app.js", stamp_imports(ASSETS / "app.js"))
     write(DIST / "assets" / "icon.svg", ICON)
     written += ["assets/styles.css", "assets/app.js", "assets/anla-core.js",
                 "assets/icon.svg"]
@@ -739,7 +764,7 @@ def main() -> int:
     # The live test page's inputs travel with the page instead of being fetched.
     # That is not an optimisation: connect-src is 'none', so a page that fetched
     # its own fixtures would need that promise loosened to run its own tests.
-    shutil.copy2(ASSETS / "demo.js", DIST / "assets" / "demo.js")
+    write(DIST / "assets" / "demo.js", stamp_imports(ASSETS / "demo.js"))
     write(DIST / "assets" / "fixtures.js", fixtures_module())
     write(DIST / "assets" / "vectors.js", vectors_module())
     written += ["assets/demo.js", "assets/fixtures.js", "assets/vectors.js"]
@@ -776,13 +801,13 @@ def main() -> int:
 
     # A page that silently lost its script tag is worse than a build failure.
     checks = [
-        ("workbench/index.html", '<script type="module" src="/assets/app.js">'),
-        ("zh/workbench/index.html", '/assets/i18n.zh.js'),
+        ("workbench/index.html", '<script type="module" src="/assets/app.js?v='),
+        ("zh/workbench/index.html", '/assets/i18n.zh.js?v='),
         ("assets/i18n.zh.js", "window.ANLA_I18N"),
         ("standalone.html", "async function pack("),
         ("standalone.zh.html", "window.ANLA_I18N"),
-        ("workbench/index.html", '/assets/i18n.en.js'),
-        ("demo/index.html", '<script type="module" src="/assets/demo.js">'),
+        ("workbench/index.html", '/assets/i18n.en.js?v='),
+        ("demo/index.html", '<script type="module" src="/assets/demo.js?v='),
         ("zh/demo/index.html", 'suite_rej'.replace('suite_rej', 'runButton')),
         ("assets/fixtures.js", "export const FIXTURES"),
         ("assets/vectors.js", "export const VECTOR_SHA256"),
@@ -797,6 +822,10 @@ def main() -> int:
             problems.append(f"missing page: {relative}")
         elif needle not in target.read_text(encoding="utf-8"):
             problems.append(f"{relative} is missing {needle!r}")
+    for name in ("assets/demo.js", "assets/app.js"):
+        text = (DIST / name).read_text(encoding="utf-8")
+        if "from './anla-core.js'" in text:
+            problems.append(f"{name} imports anla-core.js without a build stamp")
     for name in ("standalone.html", "standalone.zh.html"):
         if "from './anla-core.js'" in (DIST / name).read_text(encoding="utf-8"):
             problems.append(f"{name} still imports an external module")

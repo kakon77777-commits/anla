@@ -26,7 +26,7 @@ implementations.
 ## Running it
 
 In a browser, with nothing installed: **<https://anla.evemisslab.com/demo/>** runs
-67 of these assertions live, including the byte-for-byte comparison against the
+76 of these assertions live, including the byte-for-byte comparison against the
 hashes committed here. It fetches nothing — the fixtures and vectors are compiled
 into the page — so a red row there is a real defect on your platform.
 
