@@ -210,6 +210,138 @@ export function hasNativeCompression() {
 }
 
 // ---------------------------------------------------------------------------
+// content-defined chunking — the `anla-cdc-1` profile
+//
+// Mirrors python/anla/fastcdc.py, which carries the full rationale. The two
+// things worth repeating here: the fingerprint is 32-bit because JavaScript's
+// bitwise operators are exactly 32-bit, so both implementations can be exact
+// without bignum arithmetic; and the gear table is *derived* from its identifier
+// rather than copied between codebases as 256 constants, because a table that
+// has to be transcribed is a table that will one day be transcribed wrongly.
+//
+// The derivation uses the software SHA-256 above, synchronously, so this module
+// still has no asynchronous initialization and no dependency on SubtleCrypto.
+// ---------------------------------------------------------------------------
+
+export const CDC_PROFILE_ID = 'anla-cdc-1';
+export const CDC_GEAR_TABLE_ID = 'anla-gear-1';
+
+export function buildGearTable(tableId = CDC_GEAR_TABLE_ID) {
+  // The separator is a NUL, matching python/anla/fastcdc.py exactly. Written as
+  // an explicit byte rather than inside a string literal: a raw control character
+  // in source is invisible to a reviewer and makes the file read as binary.
+  const seed = concatBytes(encoder.encode(tableId), new Uint8Array([0]));
+  const table = new Uint32Array(256);
+  for (let index = 0; index < 256; index += 1) {
+    const digest = sha256Software(concatBytes(seed, new Uint8Array([index])));
+    table[index] = new DataView(digest.buffer, digest.byteOffset).getUint32(0, false);
+  }
+  return table;
+}
+
+export const GEAR = buildGearTable();
+
+/** SHA-256 over the 256 gear words, big-endian. Pins the table for a third party. */
+export const GEAR_TABLE_DIGEST = (() => {
+  const flat = new Uint8Array(256 * 4);
+  const view = new DataView(flat.buffer);
+  for (let index = 0; index < 256; index += 1) view.setUint32(index * 4, GEAR[index], false);
+  return toHex(sha256Software(flat));
+})();
+
+export const DEFAULT_CDC = Object.freeze({
+  algorithm: 'fastcdc',
+  version: CDC_PROFILE_ID,
+  gear_table_id: CDC_GEAR_TABLE_ID,
+  min: 64 * 1024,
+  avg: 256 * 1024,
+  max: 1024 * 1024,
+  normalization: 2,
+});
+
+export function normalizeCdcProfile(input = {}) {
+  const p = { ...DEFAULT_CDC, ...input };
+  if (p.algorithm !== 'fastcdc') {
+    throw invalidInput('unsupported chunking algorithm', { algorithm: p.algorithm });
+  }
+  if (p.version !== CDC_PROFILE_ID || p.gear_table_id !== CDC_GEAR_TABLE_ID) {
+    throw invalidInput('unknown chunking profile',
+      { version: p.version, gear_table_id: p.gear_table_id });
+  }
+  for (const key of ['min', 'avg', 'max', 'normalization']) {
+    if (!Number.isSafeInteger(p[key]) || p[key] < 0) {
+      throw invalidInput(`chunking ${key} must be a non-negative integer`, { [key]: p[key] });
+    }
+  }
+  if (!(p.min >= 1 && p.min <= p.avg && p.avg <= p.max)) {
+    throw invalidInput('chunking sizes must satisfy 1 <= min <= avg <= max', p);
+  }
+  if ((p.avg & (p.avg - 1)) !== 0) {
+    throw invalidInput('chunking avg must be a power of two', { avg: p.avg });
+  }
+  const bits = Math.log2(p.avg);
+  if (p.normalization > 3 || bits - p.normalization < 1 || bits + p.normalization > 31) {
+    throw invalidInput('normalization is out of range for this average size',
+      { normalization: p.normalization, avgBits: bits });
+  }
+  return {
+    algorithm: p.algorithm,
+    version: p.version,
+    gear_table_id: p.gear_table_id,
+    gear_table_sha256: GEAR_TABLE_DIGEST,
+    min: p.min,
+    avg: p.avg,
+    max: p.max,
+    normalization: p.normalization,
+    fingerprint: 'gear32',
+    boundary: 'top-bits-zero',
+  };
+}
+
+/**
+ * The index one past the end of the chunk beginning at *start*.
+ *
+ * Kept as the plainest possible loop: its output is part of the format's
+ * identity, so this is the last place to be clever.
+ */
+export function nextCut(data, start, profile) {
+  const remaining = data.length - start;
+  if (remaining <= profile.min) return data.length;
+
+  const limit = start + Math.min(remaining, profile.max);
+  const normalEnd = start + Math.min(remaining, profile.avg);
+  const bits = Math.log2(profile.avg);
+  const strictShift = 32 - (bits + profile.normalization);
+  const looseShift = 32 - (bits - profile.normalization);
+
+  let fingerprint = 0;
+  let index = start + profile.min;
+  while (index < normalEnd) {
+    fingerprint = ((fingerprint >>> 1) + GEAR[data[index]]) >>> 0;
+    if ((fingerprint >>> strictShift) === 0) return index + 1;
+    index += 1;
+  }
+  while (index < limit) {
+    fingerprint = ((fingerprint >>> 1) + GEAR[data[index]]) >>> 0;
+    if ((fingerprint >>> looseShift) === 0) return index + 1;
+    index += 1;
+  }
+  return limit;
+}
+
+/** Split into `[start, end)` ranges that tile the input exactly. */
+export function cutPoints(data, profile) {
+  const ranges = [];
+  let at = 0;
+  while (at < data.length) {
+    const end = nextCut(data, at, profile);
+    ranges.push([at, end]);
+    at = end;
+  }
+  return ranges;
+}
+
+// ---------------------------------------------------------------------------
 // canonical JSON — SPEC.md section 6
 // ---------------------------------------------------------------------------
 
@@ -597,7 +729,7 @@ export function normalizePlan(plan = {}) {
   if (merged.preserve_mode) {
     throw invalidInput('preserve_mode is not implemented by ANLA-MVP v0.1');
   }
-  return {
+  const normalized = {
     plan_version: merged.plan_version,
     chunk_size: merged.chunk_size,
     compression: merged.compression,
@@ -607,6 +739,21 @@ export function normalizePlan(plan = {}) {
     preserve_mtime: Boolean(merged.preserve_mtime),
     verification: merged.verification,
   };
+  // Present only for content-defined chunking. Its absence *means* fixed-size
+  // cuts at chunk_size, which is what keeps every archive written before this
+  // existed byte-identical to what it was.
+  if (merged.chunking) normalized.chunking = normalizeCdcProfile(merged.chunking);
+  return normalized;
+}
+
+/** Where a plan cuts a file. The one place the two chunking modes meet. */
+export function sliceRanges(data, plan) {
+  if (plan.chunking) return cutPoints(data, plan.chunking);
+  const ranges = [];
+  for (let start = 0; start < data.length; start += plan.chunk_size) {
+    ranges.push([start, Math.min(data.length, start + plan.chunk_size)]);
+  }
+  return ranges;
 }
 
 function reasonFor(mode, codec) {
@@ -657,8 +804,8 @@ export async function pack(tree, planInput = {}, options = {}) {
     const data = entry.data;
     logicalBytes += data.length;
     const fileChunks = [];
-    for (let start = 0; start < data.length; start += plan.chunk_size) {
-      const raw = data.subarray(start, Math.min(data.length, start + plan.chunk_size));
+    for (const [start, end] of sliceRanges(data, plan)) {
+      const raw = data.subarray(start, end);
       const chunkId = await sha256Hex(raw);
       chunkReferences += 1;
       if (!Object.prototype.hasOwnProperty.call(chunks, chunkId)) {

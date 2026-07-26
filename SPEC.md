@@ -362,9 +362,85 @@ because extraction needs it.
  "verification":"full"}
 ```
 
-`chunking` in this profile is fixed-size only: file bytes are cut at
-`chunk_size` boundaries, so chunk `i` covers `[i·chunk_size, min(size, (i+1)·chunk_size))`.
-`chunk_size` MUST be ≥ 1. Content-defined chunking is not part of this profile.
+Chunking is fixed-size unless a `chunking` member is present. Fixed-size means
+file bytes are cut at `chunk_size` boundaries, so chunk `i` covers
+`[i·chunk_size, min(size, (i+1)·chunk_size))`, and `chunk_size` MUST be at least 1.
+
+### 8.3.1 Content-defined chunking — the `anla-cdc-1` profile
+
+Fixed-size chunking deduplicates badly. Insert one byte at the front of a file and
+every later boundary moves, so every chunk gets a new content id and nothing is
+shared with the previous version. Content-defined chunking cuts on the data
+itself, so an edit only disturbs the chunks around it.
+
+A writer using it MUST record the complete profile:
+
+```json
+"chunking": {
+  "algorithm": "fastcdc", "version": "anla-cdc-1", "gear_table_id": "anla-gear-1",
+  "gear_table_sha256": "ecdce4099dbb06b791d1255eb242b2ca9a0454541b6d6c376b5df5d17a7e66c2",
+  "min": 65536, "avg": 262144, "max": 1048576, "normalization": 2,
+  "fingerprint": "gear32", "boundary": "top-bits-zero"
+}
+```
+
+The whitepaper's open question 3 asks how FastCDC parameters can become a
+permanently stable profile. Writing `"fastcdc"` and three sizes is not enough:
+implementations would still disagree about the gear table and the mask, and
+therefore about where chunks begin. `anla-cdc-1` pins all of it.
+
+**Fingerprint.** 32-bit unsigned, `fp = ((fp >> 1) + gear[byte]) mod 2^32`. 32 bits
+so that a JavaScript implementation, whose bitwise operators are exactly 32-bit,
+can be exact without bignum arithmetic.
+
+**Gear table.** Derived, not published as 256 constants:
+
+```text
+gear[i] = big-endian uint32 of the first four bytes of
+          SHA-256( "anla-gear-1" || 0x00 || i )        for i in 0..255
+```
+
+`gear_table_sha256` is SHA-256 over the 256 words written big-endian and
+concatenated, and MUST equal the value above. A table that has to be transcribed
+between codebases is a table that will one day be transcribed wrongly; a derived
+one can be regenerated and checked in three lines.
+
+**Boundary.** A cut occurs after byte `i` when `fp >> (32 - k) == 0`, that is, when
+the top `k` bits are zero. The *top* bits, because in gear hashing the accumulated
+history lives there; masking the low bits would cut on almost nothing. Expected
+chunk length is `2^k`.
+
+**Normalization.** With `k = log2(avg)`, the predicate uses `k + normalization`
+bits while the candidate chunk is shorter than `avg`, and `k - normalization` bits
+after that. This is FastCDC's normalized chunking, which pulls the size
+distribution towards the average instead of the exponential tail plain CDC
+produces.
+
+**Search window.** The scan starts `min` bytes into the chunk and stops at `max`,
+which is then the cut. A remainder of `min` bytes or fewer is one final chunk.
+
+**Constraints.** `1 <= min <= avg <= max`, `avg` a power of two,
+`0 <= normalization <= 3`, and `1 <= k ± normalization <= 31`.
+
+The paper's spread masks are deliberately not used: they are tuned for a 64-bit
+fingerprint, and reproducing a mask constant by hand across implementations is
+exactly the failure this profile exists to prevent. The gear table supplies the
+diffusion; the mask only has to be unambiguous.
+
+Two consequences worth stating plainly:
+
+1. **A reader needs to know none of this.** Chunk references are chunk references
+   and the chunk map is explicit, so a decoder that has never heard of
+   `anla-cdc-1` reads a content-defined archive exactly as it reads any other.
+   Content-defined chunking therefore requires **no `format_version` bump**: it is
+   a writer capability, and `chunking` is descriptive, like the rest of `plan`.
+2. **When `chunking` is present, `chunk_size` carries no meaning.** It stays in the
+   plan because the plan's shape is frozen; a writer records whatever value it was
+   configured with, and nothing reads it.
+
+The absence of `chunking` *means* fixed-size at `chunk_size`. That is why archives
+written before this profile existed are still byte-identical to what they were —
+nothing was added to their plan.
 
 `compression: "auto"` means: try `deflate`, keep it only if
 `len(compressed) + 8 < len(raw)`, otherwise fall back to `store`. The `+ 8` is
@@ -556,6 +632,11 @@ for byte.
 | `T-AUX-1` | Stripping `auxiliary.decision_log` changes no extracted byte |
 | `T-REP-1` | Same input + same `(uuid, created_ns)` → byte-identical archive |
 | `T-GLB-1` | `*` does not cross `/`, `**` does, and a directory survives its excluded contents |
+| `T-CDC-1` | The gear table matches its derivation, and its pinned digest |
+| `T-CDC-2` | Cut ranges tile the input exactly, within `min`/`max`, averaging near `avg` |
+| `T-CDC-3` | An insertion at the front leaves nearly every chunk shared; fixed-size shares none |
+| `T-CDC-4` | Both implementations cut identically — the content-defined cases are byte-exact |
+| `T-CDC-5` | A reader with no knowledge of the profile still reads a content-defined archive |
 | `T-XIM-1` | Python writer → JavaScript reader, full verification |
 | `T-XIM-2` | JavaScript writer → Python reader, full verification |
 | `T-XIM-3` | Python and JavaScript writers agree byte for byte (`store` mode) |
@@ -586,7 +667,7 @@ experiment.
 | Record types `INDX AUXI META SIGN PARI FOOT` | `CHNK`, `MANF` only | Nothing else is implemented, so nothing else is claimed |
 | `REQUIRED_FOR_EXTRACTION` / `AUXILIARY_DISPOSABLE` flag bits | `flags` = 0 | No optional record classes exist to skip |
 | Footer chain (`previous_footer_offset`), append-only snapshots | single footer, `snapshot_sequence` = 1 | Incremental snapshots are Milestone 3 |
-| FastCDC | fixed-size chunking only | Milestone 3 |
+| FastCDC | implemented as the `anla-cdc-1` profile ([§8.3.1](#831-content-defined-chunking--the-anla-cdc-1-profile)); fixed-size remains the default | the whitepaper's open question 3 is answered there, and the profile needed no format change because a reader is unaffected |
 | POSIX / Windows / macOS metadata namespaces | `mtime_ns` only | Milestone 2 |
 | Encryption, COSE signatures, parity records | none | Later profiles |
 | Object identity by `object_id`, parent/child name components | path string per object | Rename tracking needs snapshots, which this profile lacks |

@@ -42,3 +42,9 @@ against.
 The concept paper argues why this boundary is the interesting one. The whitepaper
 turns it into invariants a writer can be held to. `SPEC.md` turns those invariants
 into byte offsets and a test suite.
+
+The whitepaper's part XVIII lists fifteen open questions.
+[`design/decisions-for-1.0.md`](../design/decisions-for-1.0.md) tracks them: which
+are answered (question 3 now has running code and a pinned profile), which are
+decided in principle, and what would settle the rest. A normative 1.0 cannot be
+written while they are open, because each one determines bytes.

@@ -34,6 +34,7 @@ from .format import (
     sha256_hex,
     uuid_text,
 )
+from .fastcdc import CdcProfile
 from .globs import matches_any
 
 __all__ = ["PackPlan", "SourceFile", "SourceTree", "PackResult", "pack", "collect_tree"]
@@ -46,6 +47,10 @@ class PackPlan:
     """A packing plan. Serialized verbatim into the manifest as audit evidence."""
 
     chunk_size: int = 1024 * 1024
+    #: Content-defined chunking, or None for fixed-size cuts at chunk_size.
+    #: Absent from the manifest when None, which is what keeps every archive
+    #: written before this existed byte-identical to what it was.
+    chunking: CdcProfile | None = None
     compression: str = "auto"
     deflate_level: int = 6
     exclude_globs: tuple[str, ...] = ()
@@ -71,7 +76,7 @@ class PackPlan:
             raise InvalidInput("preserve_mode is not implemented by ANLA-MVP v0.1")
 
     def as_manifest_member(self) -> dict:
-        return {
+        member = {
             "plan_version": self.plan_version,
             "chunk_size": self.chunk_size,
             "compression": self.compression,
@@ -81,6 +86,17 @@ class PackPlan:
             "preserve_mtime": self.preserve_mtime,
             "verification": self.verification,
         }
+        if self.chunking is not None:
+            member["chunking"] = self.chunking.as_manifest_member()
+        return member
+
+    def slice_ranges(self, size: int, data: bytes) -> list[tuple[int, int]]:
+        """Where this plan cuts *data*. The one place the two modes meet."""
+        if self.chunking is not None:
+            from .fastcdc import cut_points
+            return cut_points(data, self.chunking)
+        return [(start, min(size, start + self.chunk_size))
+                for start in range(0, size, self.chunk_size)]
 
 
 @dataclass
@@ -210,8 +226,8 @@ def pack(tree: SourceTree, plan: PackPlan | None = None, *,
         data = source.data
         logical_bytes += len(data)
         file_chunks: list[dict] = []
-        for start in range(0, len(data), plan.chunk_size):
-            raw = data[start:start + plan.chunk_size]
+        for start, end in plan.slice_ranges(len(data), data):
+            raw = data[start:end]
             chunk_id = sha256_hex(raw)
             chunk_references += 1
             if chunk_id not in chunks:

@@ -17,6 +17,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from anla import PackPlan, SourceFile, SourceTree  # noqa: E402
+from anla.fastcdc import CdcProfile  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 CONFORMANCE = REPO / "conformance"
@@ -35,7 +36,26 @@ class Case:
     byte_exact: bool
 
 
+def _lcg(spec: dict) -> bytes:
+    """A pinned linear congruential generator.
+
+    Lets a fixture carry a kilobyte of pseudo-random bytes as two numbers instead
+    of a wall of base64, without either implementation inventing its own idea of
+    "random". JavaScript must use Math.imul here: a plain 32-bit multiply exceeds
+    2**53 and would silently diverge from this.
+    """
+    state = int(spec["seed"]) & 0xFFFFFFFF
+    out = bytearray(int(spec["length"]))
+    for index in range(len(out)):
+        state = (1103515245 * state + 12345) & 0xFFFFFFFF
+        out[index] = (state >> 16) & 0xFF
+    return bytes(out)
+
 def _content(entry: dict) -> bytes:
+    if "concat" in entry:
+        return b"".join(_content(part) for part in entry["concat"])
+    if "lcg" in entry:
+        return _lcg(entry["lcg"])
     if "text" in entry:
         return entry["text"].encode("utf-8")
     if "base64" in entry:
@@ -83,6 +103,12 @@ def load_cases() -> list[Case]:
             tree_name=raw["tree"],
             plan=PackPlan(
                 chunk_size=plan_spec["chunk_size"],
+                chunking=(CdcProfile(
+                    min_size=plan_spec["chunking"]["min"],
+                    avg_size=plan_spec["chunking"]["avg"],
+                    max_size=plan_spec["chunking"]["max"],
+                    normalization=plan_spec["chunking"]["normalization"],
+                ) if "chunking" in plan_spec else None),
                 compression=plan_spec["compression"],
                 deflate_level=plan_spec["deflate_level"],
                 exclude_globs=tuple(plan_spec["exclude_globs"]),

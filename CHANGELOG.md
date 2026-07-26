@@ -7,6 +7,64 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
+## 2026-07-26 (evening) — content-defined chunking, and open question 3 answered
+
+Groundwork for 1.0, done in the cheap profile where getting it wrong is survivable.
+
+### Added
+
+- **The `anla-cdc-1` chunking profile** —
+  [SPEC.md §8.3.1](SPEC.md#831-content-defined-chunking--the-anla-cdc-1-profile),
+  [`python/anla/fastcdc.py`](python/anla/fastcdc.py), and the same in
+  [`web/anla-core.js`](web/anla-core.js). The whitepaper's open question 3 asked how
+  FastCDC parameters could become a permanently stable profile; writing `"fastcdc"`
+  and three sizes is not an answer, because two implementations would still disagree
+  about the gear table and the mask, and therefore about every chunk id in the
+  archive.
+
+  Everything is pinned: a 32-bit gear fingerprint (chosen so JavaScript can be exact
+  without bignum arithmetic), a single boundary predicate on the *top* k bits,
+  FastCDC's normalization rule, and the search window. The gear table is **derived**
+  — `gear[i] = SHA-256("anla-gear-1" ‖ 0x00 ‖ i)[0:4]` — rather than published as 256
+  constants, because a table that must be transcribed will one day be transcribed
+  wrongly, invisibly. `gear_table_sha256` pins the result and travels in every plan.
+
+  Both implementations cut identically: the `cdc-shifted-pair` fixture is byte-exact
+  across them. What it buys, measured on that fixture: prepend ten bytes to a file
+  and content-defined chunking keeps 54 of 55 chunks while fixed-size keeps none, so
+  the same tree packs **45% smaller**.
+
+- **No format version bump, deliberately.** A reader needs to know nothing about
+  chunking — chunk references are chunk references — so this is a writer capability
+  and `chunking` is descriptive, like the rest of `plan`. Its absence *means*
+  fixed-size, which is why every previously frozen vector is still byte-identical.
+
+- **[`design/decisions-for-1.0.md`](design/decisions-for-1.0.md)** — the whitepaper's
+  fifteen open questions, sorted into answered, decided-in-principle, and still-open
+  with what would settle each. Includes the decision the whitepaper does not
+  contain: 1.0 wants BLAKE3 and Zstandard, neither of which is a browser primitive,
+  so either the browser constraint survives as vendored WebAssembly or 1.0 is
+  specified for Python and Rust while `ANLA-MVP` stays the profile anyone can verify
+  in a tab. The recommendation, with reasons, is the latter.
+
+- **Live test rows for all of it** — the demo page grew a chunking suite: the gear
+  table checked against its own derivation, the tiling and size bounds, the
+  insertion-survival comparison, and the byte-exactness of both chunking modes.
+  76 assertions now, still starting on load.
+
+- **Two fixture content forms**, `lcg` and `concat`, so a fixture can carry 32 KiB
+  of pseudo-random bytes as two numbers instead of a wall of base64. The generator
+  is pinned in `fixtures.json`; JavaScript must use `Math.imul`, since a plain
+  32-bit multiply exceeds 2^53 and would diverge silently — which is the one thing
+  a shared fixture cannot tolerate.
+
+### Changed
+
+- The two large new vectors are not inlined into the live test page. Their hashes
+  still are, so the byte-exactness suite still checks them by packing the same cases
+  in the browser; the page says which ones it did not carry, because a silently
+  truncated test set reads as full coverage when it is not.
+
 ## 2026-07-26 (later) — a live test page, and one conformance gap closed
 
 ### Added

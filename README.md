@@ -13,6 +13,7 @@ the site that hosts a working version you can run in a browser tab.
 - **Specification:** [`SPEC.md`](SPEC.md) — normative for `ANLA-MVP v0.1`
 - **Papers:** [`papers/`](papers/) — Traditional Chinese originals, English translations
 - **Conformance:** [`conformance/`](conformance/) — fixtures, frozen vectors, drivers
+- **Design record:** [`design/decisions-for-1.0.md`](design/decisions-for-1.0.md) — the whitepaper's fifteen open questions, answered or scoped
 
 ```text
 Extract(Pack(F, P)) = F
@@ -30,7 +31,7 @@ and verified end to end, rather than a partial attempt at the whole target.
 |---|---|
 | Chunk identity | SHA-256 of the raw chunk |
 | Codecs | `store`, `deflate` (zlib, RFC 1950) |
-| Chunking | fixed size |
+| Chunking | fixed size, or content-defined (`anla-cdc-1`, pinned gear table) |
 | Manifest | canonical JSON, hashed into the footer |
 | Deduplication | across files, within the archive |
 | Verification | header, footer, manifest, every chunk, every file |
@@ -39,8 +40,8 @@ and verified end to end, rather than a partial attempt at the whole target.
 | Snapshots | one |
 
 Not implemented, and therefore not claimed: symbolic and hard links, permissions
-and ACLs, extended attributes, alternate data streams, sparse files, FastCDC,
-Zstandard, BLAKE3, encryption, signatures, parity, append-only snapshots, partial
+and ACLs, extended attributes, alternate data streams, sparse files, Zstandard,
+BLAKE3, encryption, signatures, parity, append-only snapshots, partial
 materialization. [SPEC.md §13](SPEC.md#13-known-divergences-from-the-whitepaper)
 lists every divergence from the whitepaper's target and why each one exists.
 
@@ -128,7 +129,7 @@ archive.read('docs/readme.txt');
 python -m pytest python/tests -q
 ```
 
-168 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
+196 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
 without it. Everything runs on Linux, macOS and Windows in CI. Another 67
 assertions run in a browser on the [live test page](https://anla.evemisslab.com/demo/).
 

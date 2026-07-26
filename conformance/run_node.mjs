@@ -39,11 +39,38 @@ function fixturePath(entry) {
   return entry.path;
 }
 
+/**
+ * The pinned LCG from fixtures.json.
+ *
+ * Math.imul is required: 1103515245 * 4294967295 exceeds 2**53, so a plain
+ * multiply would lose precision and diverge from the Python loader silently —
+ * which is the one failure mode a shared fixture cannot tolerate.
+ */
+function lcgBytes(spec) {
+  let state = Number(spec.seed) >>> 0;
+  const out = new Uint8Array(Number(spec.length));
+  for (let index = 0; index < out.length; index += 1) {
+    state = (Math.imul(1103515245, state) + 12345) >>> 0;
+    out[index] = (state >>> 16) & 0xff;
+  }
+  return out;
+}
+
 function fixtureData(entry) {
+  if (entry.concat) return concatParts(entry.concat.map(fixtureData));
+  if (entry.lcg) return lcgBytes(entry.lcg);
   if (typeof entry.text === 'string') return encoder.encode(entry.text);
   if (entry.base64 !== undefined) return fromBase64(entry.base64);
   if (entry.repeat) return repeatPattern(entry.repeat);
   throw new Error(`fixture ${fixturePath(entry)} has no content`);
+}
+
+function concatParts(parts) {
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const part of parts) { out.set(part, at); at += part.length; }
+  return out;
 }
 
 function buildTree(spec) {

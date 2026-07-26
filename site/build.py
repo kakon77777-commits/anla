@@ -613,6 +613,14 @@ def fixtures_module() -> str:
             "export const FIXTURES = " + raw.rstrip() + ";\n")
 
 
+#: Vectors larger than this are not inlined into the live test page. Every hash
+#: still is, so the byte-exactness suite still checks them: it packs the case here
+#: and compares against the committed hash, which exercises the same bytes through
+#: the writer instead of the reader. The page says how many it bundled, because a
+#: silently truncated test set reads as full coverage when it is not.
+VECTOR_BUNDLE_LIMIT = 24 * 1024
+
+
 def vectors_module() -> str:
     """The frozen vectors as base64, plus the committed SHA256SUMS.
 
@@ -623,8 +631,13 @@ def vectors_module() -> str:
     import base64 as b64
 
     entries = {}
+    omitted = {}
     for vector in sorted(VECTORS.glob("*.anla")):
-        entries[vector.name] = b64.b64encode(vector.read_bytes()).decode("ascii")
+        raw = vector.read_bytes()
+        if len(raw) > VECTOR_BUNDLE_LIMIT:
+            omitted[vector.name] = len(raw)
+            continue
+        entries[vector.name] = b64.b64encode(raw).decode("ascii")
     sums = {}
     for line in (VECTORS / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
         if line and not line.startswith("#"):
@@ -633,11 +646,17 @@ def vectors_module() -> str:
     missing = set(entries) - set(sums)
     if missing:
         raise SystemExit(f"vectors without a committed hash: {sorted(missing)}")
+    if omitted:
+        listing = ", ".join(f"{name} ({size // 1024} KiB)"
+                            for name, size in sorted(omitted.items()))
+        print(f"  not inlined into the live test page, hashes still checked: {listing}")
     return ("// Generated from conformance/vectors/ — do not edit.\n"
             "export const VECTOR_BYTES_BASE64 = "
             + json.dumps(entries, indent=0, sort_keys=True) + ";\n"
             "export const VECTOR_SHA256 = "
-            + json.dumps(sums, indent=1, sort_keys=True) + ";\n")
+            + json.dumps(sums, indent=1, sort_keys=True) + ";\n"
+            "export const VECTOR_NOT_BUNDLED = "
+            + json.dumps(omitted, indent=1, sort_keys=True) + ";\n")
 
 
 def git_revision() -> str:

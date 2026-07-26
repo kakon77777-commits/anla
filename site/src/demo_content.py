@@ -73,6 +73,26 @@ DEMO_STRINGS: dict[str, dict[str, str]] = {
                        "fails with the right error code instead of guessing. This half of "
                        "a preservation format is what makes the other half mean anything.",
 
+        "suite_cdc_t": "Content-defined chunking, pinned",
+        "suite_cdc_d": "The whitepaper's open question 3 asked how FastCDC "
+                       "parameters could become a permanently stable profile. These "
+                       "rows are the answer: the gear table is derived from its own "
+                       "name rather than copied as 256 constants, the boundary rule "
+                       "is a single predicate, and both implementations cut "
+                       "identically. The last row is why any of it matters.",
+        "row_gear_derived": "the gear table matches its own derivation",
+        "row_tiling": "cut ranges tile the input, inside min and max, near the average",
+        "row_shift": "an insertion at the front: how many chunks survive",
+        "row_cdc_saving": "the same tree, chunked both ways",
+        "row_reader_unaware": "a reader that never heard of the profile still reads it",
+        "vectors_not_bundled": "Too large to ship inside this page",
+        "vectors_covered_elsewhere": "their hashes are checked by the byte-exactness suite above, which packs the same cases here",
+        "words": "words",
+        "chunks_word": "chunks",
+        "mean_word": "mean",
+        "cdc_word": "content-defined",
+        "fixed_word": "fixed-size",
+        "smaller_word": "smaller",
         "row_reproducible": "the same call twice gives the same bytes",
         "row_uuid_varies": "without a fixed UUID, two archives differ",
         "row_dedup": "identical content is stored once",
@@ -161,6 +181,24 @@ DEMO_STRINGS: dict[str, dict[str, str]] = {
                        "封裝，並斷言解碼器必須以正確的錯誤碼失敗，而不是猜測。保存格式"
                        "的這一半，決定了另一半有沒有意義。",
 
+        "suite_cdc_t": "內容定義分塊，已釘死",
+        "suite_cdc_d": "白皮書第 18 部的 open question 3 問的是「FastCDC 參數如何形成"
+                       "永久穩定的 Profile」。這幾列就是答案：gear table 由它自己的"
+                       "名稱推導出來而不是抄 256 個常數、邊界規則只有一條判準、而且"
+                       "兩套實作切在完全相同的位置。最後一列說明這一切為什麼重要。",
+        "row_gear_derived": "gear table 與它自己的推導一致",
+        "row_tiling": "切出的區間完整鋪滿輸入，落在 min/max 之間、平均接近 avg",
+        "row_shift": "在檔案開頭插入位元組：有多少 chunk 存活",
+        "row_cdc_saving": "同一棵樹，兩種分塊方式",
+        "row_reader_unaware": "從沒聽過這個 Profile 的解碼器照樣讀得懂",
+        "vectors_not_bundled": "太大，沒有內嵌進這個頁面",
+        "vectors_covered_elsewhere": "它們的雜湊由上面那組逐位元測試檢查——那組會在這裡重新封裝同樣的案例",
+        "words": "個字",
+        "chunks_word": "個 chunk",
+        "mean_word": "平均",
+        "cdc_word": "內容定義",
+        "fixed_word": "固定大小",
+        "smaller_word": "更小",
         "row_reproducible": "同一次呼叫跑兩遍得到相同位元",
         "row_uuid_varies": "沒有固定 UUID 時兩個封裝必須不同",
         "row_dedup": "相同內容只保存一次",

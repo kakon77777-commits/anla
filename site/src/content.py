@@ -59,7 +59,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "Reference implementations",
         "fact_impl_v": "2, cross-verified",
         "fact_tests": "Conformance tests",
-        "fact_tests_v": "168 + 67 in-browser",
+        "fact_tests_v": "196 + 74 in-browser",
         "strip_1_t": "Local-first",
         "strip_1_d": "The workbench runs entirely in your tab: your files are read "
                      "into memory and never sent anywhere. The page makes no requests "
@@ -137,19 +137,19 @@ STRINGS: dict[str, dict[str, str]] = {
         "state_kicker": "Honest scope",
         "state_h2": "What this profile does not do.",
         "state_desc": "The whitepaper describes a larger format: BLAKE3, Zstandard, "
-                      "CBOR manifests, FastCDC, append-only snapshots, cross-platform "
+                      "CBOR manifests, append-only snapshots, cross-platform "
                       "metadata, encryption, signatures, parity. ANLA-MVP v0.1 "
                       "implements the smallest subset that can be finished and "
                       "verified end to end, and claims nothing else.",
         "state_yes_h": "Implemented and tested",
         "state_yes_p": "Single snapshot · ordinary files and directories · fixed-size "
-                       "chunking · Store and DEFLATE · SHA-256 chunk identity · "
+                       "and content-defined chunking · Store and DEFLATE · SHA-256 chunk identity · "
                        "canonical JSON manifest · cross-file deduplication · full "
                        "round-trip verification · reproducible output · safe paths · "
                        "resource limits · ZIP export.",
         "state_no_h": "Not implemented, not claimed",
         "state_no_p": "Symlinks · hard links · permissions and ACLs · extended "
-                      "attributes · alternate data streams · sparse files · FastCDC · "
+                      "attributes · alternate data streams · sparse files · "
                       "Zstandard · BLAKE3 · encryption · signatures · parity · "
                       "append-only snapshots · partial materialization.",
         "state_warn": "This is a research profile. Do not make an ANLA archive the "
@@ -238,13 +238,13 @@ STRINGS: dict[str, dict[str, str]] = {
                         "scope. It does not claim the whitepaper's full cross-platform "
                         "metadata model.",
         "wb_prof_1_h": "Implemented",
-        "wb_prof_1_p": "Single snapshot, ordinary files and directories, fixed "
-                       "chunking, Store and DEFLATE, SHA-256, canonical JSON "
+        "wb_prof_1_p": "Single snapshot, ordinary files and directories, fixed and "
+                       "content-defined chunking, Store and DEFLATE, SHA-256, canonical JSON "
                        "manifest, cross-file deduplication, full round trip, "
                        "reproducible output.",
         "wb_prof_2_h": "Not implemented",
         "wb_prof_2_p": "Symlinks, hard links, ACLs, alternate data streams, sparse "
-                       "files, FastCDC, Zstandard, BLAKE3, encryption, signatures, "
+                       "files, Zstandard, BLAKE3, encryption, signatures, "
                        "append-only snapshots.",
         "wb_prof_3_h": "Safety boundary",
         "wb_prof_3_p": "Declared lengths are bounded before allocation, unsafe and "
@@ -377,7 +377,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "參考實作",
         "fact_impl_v": "2 套，互相驗證",
         "fact_tests": "一致性測試",
-        "fact_tests_v": "168 項 + 瀏覽器 67 項",
+        "fact_tests_v": "196 項 + 瀏覽器 74 項",
         "strip_1_t": "本機優先",
         "strip_1_d": "工作台完全在你的分頁裡執行：檔案只讀進記憶體，不會被送到任何"
                      "地方。頁面本身不發出任何請求，其內容安全政策也禁止對外連線。",
@@ -444,17 +444,17 @@ STRINGS: dict[str, dict[str, str]] = {
         "state_kicker": "誠實的範圍",
         "state_h2": "這個 Profile 沒有做到什麼。",
         "state_desc": "白皮書描述的是更大的格式：BLAKE3、Zstandard、CBOR Manifest、"
-                      "FastCDC、追加式 Snapshot、跨平台 Metadata、加密、簽章、Parity。"
+                      "追加式 Snapshot、跨平台 Metadata、加密、簽章、Parity。"
                       "ANLA-MVP v0.1 只實作能夠端到端完成並驗證的最小子集，並且不"
                       "宣稱其他任何事。",
         "state_yes_h": "已實作並測試",
-        "state_yes_p": "單一 Snapshot · 普通檔案與目錄 · 固定分塊 · Store 與 DEFLATE "
+        "state_yes_p": "單一 Snapshot · 普通檔案與目錄 · 固定分塊與內容定義分塊 · Store 與 DEFLATE "
                        "· SHA-256 Chunk 身分 · Canonical JSON Manifest · 跨檔去重 · "
                        "完整 Round Trip 驗證 · 可重現輸出 · 安全路徑 · 資源限制 · "
                        "ZIP 匯出。",
         "state_no_h": "未實作，也不宣稱",
         "state_no_p": "Symlink · Hard Link · 權限與 ACL · Extended Attributes · "
-                      "Alternate Data Streams · 稀疏檔 · FastCDC · Zstandard · "
+                      "Alternate Data Streams · 稀疏檔 · Zstandard · "
                       "BLAKE3 · 加密 · 簽章 · Parity · 追加式 Snapshot · 局部物化。",
         "state_warn": "這是研究用 Profile。不要讓 ANLA 封裝成為任何不能遺失的資料的"
                       "唯一副本。",
@@ -532,12 +532,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "wb_profile_p": "這個頁面刻意維持在最小可驗證範圍，不宣稱完成白皮書的完整"
                         "跨平台 Metadata 模型。",
         "wb_prof_1_h": "已實作",
-        "wb_prof_1_p": "單 Snapshot、普通檔案與目錄、固定分塊、Store 與 DEFLATE、"
+        "wb_prof_1_p": "單 Snapshot、普通檔案與目錄、固定分塊與內容定義分塊、Store 與 DEFLATE、"
                        "SHA-256、Canonical JSON Manifest、跨檔去重、完整 Round Trip、"
                        "可重現輸出。",
         "wb_prof_2_h": "未實作",
         "wb_prof_2_p": "Symlink、Hard Link、ACL、Alternate Data Streams、稀疏檔、"
-                       "FastCDC、Zstandard、BLAKE3、加密、簽章、追加式 Snapshot。",
+                       "Zstandard、BLAKE3、加密、簽章、追加式 Snapshot。",
         "wb_prof_3_h": "安全邊界",
         "wb_prof_3_p": "所有宣告長度在配置記憶體前先設界，不安全與重複路徑一律拒絕，"
                        "未知 Codec 與未知 Record 類型會失敗而不是被跳過。",

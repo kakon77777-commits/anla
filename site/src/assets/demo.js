@@ -18,10 +18,11 @@ import {
   pack, openArchive, exportZip, canonical, canonicalBytes, safePath,
   buildHeader, buildRecord, buildFooter, crc32, sha256, sha256Hex, toHex,
   concatBytes, compareUtf8, HEADER_SIZE, FOOTER_SIZE,
+  GEAR, GEAR_TABLE_DIGEST, CDC_GEAR_TABLE_ID, normalizeCdcProfile, cutPoints,
   hasNativeCrypto, hasNativeCompression, DEFAULT_PLAN, AnlaError,
 } from './anla-core.js';
 import { FIXTURES } from './fixtures.js';
-import { VECTOR_BYTES_BASE64, VECTOR_SHA256 } from './vectors.js';
+import { VECTOR_BYTES_BASE64, VECTOR_SHA256, VECTOR_NOT_BUNDLED } from './vectors.js';
 
 const T = globalThis.ANLA_I18N ?? {};
 const t = (key, fallback = '') => (T[key] ?? fallback);
@@ -42,7 +43,25 @@ function fixturePath(entry) {
     ? String.fromCodePoint(...entry.path_codepoints) : entry.path;
 }
 
+/**
+ * The pinned LCG from fixtures.json.
+ *
+ * Math.imul is required: 1103515245 * 4294967295 exceeds 2**53, so a plain
+ * multiply would lose precision and diverge from the Python loader silently.
+ */
+function lcgBytes(spec) {
+  let state = Number(spec.seed) >>> 0;
+  const out = new Uint8Array(Number(spec.length));
+  for (let index = 0; index < out.length; index += 1) {
+    state = (Math.imul(1103515245, state) + 12345) >>> 0;
+    out[index] = (state >>> 16) & 0xff;
+  }
+  return out;
+}
+
 function fixtureData(entry) {
+  if (entry.concat) return concatBytes(...entry.concat.map(fixtureData));
+  if (entry.lcg) return lcgBytes(entry.lcg);
   if (typeof entry.text === 'string') return encoder.encode(entry.text);
   if (entry.base64 !== undefined) return fromBase64(entry.base64);
   if (entry.repeat) {
@@ -302,8 +321,109 @@ async function suiteCrossImplementation() {
   });
 }
 
+async function suiteChunking() {
+  const section = suiteNode('cdc', t('suite_cdc_t'), t('suite_cdc_d'));
+
+  await check(section, 'T-CDC-1', t('row_gear_derived'), async () => {
+    // Derived here, from the documented procedure, and compared with the table
+    // the implementation is actually using.
+    const expected = new Uint32Array(256);
+    for (let index = 0; index < 256; index += 1) {
+      const digest = await sha256(concatBytes(
+        encoder.encode(CDC_GEAR_TABLE_ID), new Uint8Array([0]), new Uint8Array([index])));
+      expected[index] = new DataView(digest.buffer, digest.byteOffset).getUint32(0, false);
+    }
+    assert(GEAR.every((word, index) => word === expected[index]),
+      'the gear table does not match its own derivation');
+    assert(new Set(GEAR).size === 256, 'the gear table has a collision');
+    assert(GEAR_TABLE_DIGEST
+      === 'ecdce4099dbb06b791d1255eb242b2ca9a0454541b6d6c376b5df5d17a7e66c2',
+      `digest is ${GEAR_TABLE_DIGEST}`);
+    return `256 ${t('words')} · ${GEAR_TABLE_DIGEST.slice(0, 16)}…`;
+  });
+
+  const profile = normalizeCdcProfile({ min: 1024, avg: 4096, max: 16384 });
+  const sample = lcgBytes({ seed: 7, length: 262144 });
+
+  await check(section, 'T-CDC-2', t('row_tiling'), async () => {
+    const ranges = cutPoints(sample, profile);
+    assert(ranges[0][0] === 0 && ranges[ranges.length - 1][1] === sample.length,
+      'the ranges do not span the input');
+    for (let i = 1; i < ranges.length; i += 1) {
+      assert(ranges[i - 1][1] === ranges[i][0], `gap or overlap at range ${i}`);
+    }
+    const sizes = ranges.map(([a, b]) => b - a);
+    for (const size of sizes.slice(0, -1)) {
+      assert(size >= profile.min && size <= profile.max, `chunk of ${size} is out of bounds`);
+    }
+    const mean = Math.round(sizes.reduce((a, b) => a + b, 0) / sizes.length);
+    assert(mean >= profile.avg / 2 && mean <= profile.avg * 2, `mean ${mean}`);
+    return `${sizes.length} ${t('chunks_word')} · ${t('mean_word')} ${mean} B`;
+  });
+
+  await check(section, 'T-CDC-3', t('row_shift'), async () => {
+    const shifted = concatBytes(encoder.encode('INSERTED..'), sample);
+    const key = (data, [a, b]) => toHex(data.subarray(a, Math.min(a + 32, b)))
+      + ':' + (b - a);
+    const before = new Set(cutPoints(sample, profile).map((r) => key(sample, r)));
+    const after = cutPoints(shifted, profile).map((r) => key(shifted, r));
+    const shared = after.filter((k) => before.has(k)).length;
+
+    const size = profile.avg;
+    const fixedBefore = new Set();
+    for (let at = 0; at < sample.length; at += size) {
+      fixedBefore.add(key(sample, [at, Math.min(at + size, sample.length)]));
+    }
+    let fixedShared = 0;
+    for (let at = 0; at < shifted.length; at += size) {
+      if (fixedBefore.has(key(shifted, [at, Math.min(at + size, shifted.length)]))) {
+        fixedShared += 1;
+      }
+    }
+    assert(fixedShared === 0, `fixed-size shared ${fixedShared} chunks, expected none`);
+    assert(shared >= after.length - 2,
+      `content-defined shared only ${shared}/${after.length}`);
+    return `${t('cdc_word')} ${shared}/${after.length} · ${t('fixed_word')} `
+      + `${fixedShared}/${Math.ceil(shifted.length / size)}`;
+  });
+
+  await check(section, 'T-CDC-4', t('row_cdc_saving'), async () => {
+    const cdc = CASES.find((c) => c.id === 'cdc-shifted-pair');
+    const fixed = CASES.find((c) => c.id === 'fixed-shifted-pair');
+    const a = await packCase(cdc);
+    const b = await packCase(fixed);
+    assert(b.statistics.unique_chunks === b.statistics.chunk_references,
+      'the fixed-size case was supposed to deduplicate nothing');
+    assert(a.statistics.unique_chunks < a.statistics.chunk_references,
+      'the content-defined case deduplicated nothing');
+    assert(a.bytes.length < b.bytes.length * 0.7,
+      `${a.bytes.length} vs ${b.bytes.length}`);
+    const saved = Math.round((1 - a.bytes.length / b.bytes.length) * 100);
+    return `${b.bytes.length} B → ${a.bytes.length} B · ${saved}% ${t('smaller_word')}`;
+  });
+
+  await check(section, 'T-CDC-5', t('row_reader_unaware'), async () => {
+    const { bytes } = await packCase(CASES.find((c) => c.id === 'cdc-shifted-pair'));
+    const archive = await openArchive(bytes, { full: true });
+    assert(archive.manifest.format_version === '0.1',
+      'a content-defined archive should need no version bump');
+    assert(archive.verification.status === 'ok', 'it did not verify');
+    return `format_version 0.1 · ${archive.verification.verified_chunks} chunks`;
+  });
+}
+
 async function suiteVectors() {
   const section = suiteNode('frz', t('suite_frz_t'), t('suite_frz_d'));
+  const skipped = Object.keys(VECTOR_NOT_BUNDLED);
+  if (skipped.length) {
+    // Not a pass or a fail: a statement of what this suite did not carry. The
+    // byte-exactness suite above packs these cases and checks the same hashes.
+    const note = document.createElement('p');
+    note.className = 'suite-desc';
+    note.textContent = `${t('vectors_not_bundled')}: ${skipped.join(', ')} — `
+      + t('vectors_covered_elsewhere');
+    section.querySelector('.rows').before(note);
+  }
   for (const name of Object.keys(VECTOR_BYTES_BASE64).sort()) {
     const id = name === 'browser-interop-v0.1.anla' ? 'T-ORG-1' : 'T-FRZ-1';
     await check(section, id, name, async () => {
@@ -660,6 +780,7 @@ async function run() {
   renderTally();
   try {
     await suiteCrossImplementation();
+    await suiteChunking();
     await suiteVectors();
     await suiteRoundTrip();
     await suiteRejections();

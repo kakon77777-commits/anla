@@ -36,7 +36,7 @@ Locally:
 python -m pytest python/tests -q
 ```
 
-168 tests. The cross-implementation tests skip themselves if `node` is not on
+196 tests. The cross-implementation tests skip themselves if `node` is not on
 `PATH`; everything else runs with nothing but a Python interpreter.
 
 Individual pieces, if you want them separately:
@@ -115,6 +115,11 @@ quietly worked around.
 | `T-ORG-1` | The original v0.1 release archive still verifies, in both implementations |
 | `T-BMB-1` | A chunk declaring an absurd `raw_size` is refused before allocation |
 | `T-BMB-2` | A DEFLATE payload expanding past its declared size is stopped mid-decode, in both implementations |
+| `T-CDC-1` | The gear table matches its derivation, and its pinned digest |
+| `T-CDC-2` | Cut ranges tile the input exactly, within min/max, averaging near avg |
+| `T-CDC-3` | An insertion at the front leaves nearly every chunk shared; fixed-size shares none |
+| `T-CDC-4` | Both implementations cut identically — the content-defined cases are byte-exact |
+| `T-CDC-5` | A reader with no knowledge of the profile still reads a content-defined archive |
 | `T-FRZ-1` | Every frozen vector still matches what the current writer produces |
 
 ---
