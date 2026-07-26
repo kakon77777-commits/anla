@@ -120,10 +120,18 @@ function writeU64(view, offset, value) {
 
 function readU64(view, offset) {
   const value = view.getBigUint64(offset, true);
-  // A JavaScript decoder must refuse a 64-bit field it cannot represent
-  // exactly rather than round it into a plausible-looking offset.
+  // A JavaScript decoder must refuse a 64-bit field it cannot represent exactly
+  // rather than round it into a plausible-looking offset.
+  //
+  // Classified as a malformed manifest, not a resource limit, and the reason is
+  // worth stating: a Uint8Array cannot hold 2^53 bytes in any engine, so a field
+  // this large necessarily points outside the archive. It is nonsense, not merely
+  // large. Differential fuzzing found this — Python, with unbounded integers,
+  // computed the extent and said "outside the archive", so the two
+  // implementations refused the same byte for different stated reasons.
   if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw limitExceeded('archive field exceeds the safe integer range', { offset });
+    throw manifestInvalid('archive field lies outside any representable archive',
+      { offset, value: value.toString() });
   }
   return Number(value);
 }
@@ -525,6 +533,9 @@ export function parseRecord(bytes, offset) {
   if (end > bytes.length) {
     throw manifestInvalid('record extent lies outside the archive',
       { offset, declaredEnd: end, archiveSize: bytes.length });
+  }
+  if (sequence < 1) {
+    throw manifestInvalid('record sequence must be at least 1', { offset, sequence });
   }
   const headerBytes = bytes.subarray(offset + RECORD_FRAME_SIZE,
     offset + RECORD_FRAME_SIZE + headerLength);
@@ -969,12 +980,20 @@ export async function openArchive(input, options = {}) {
       || manifest.chunks === null || Array.isArray(manifest.chunks)) {
     throw manifestInvalid('manifest objects must be an array and chunks an object');
   }
+  // SPEC.md section 4.3: one CHNK per unique chunk then one MANF, so the
+  // manifest's sequence is determined rather than merely increasing.
+  const expectedSequence = Object.keys(manifest.chunks).length + 1;
+  if (manifestRecord.sequence !== expectedSequence) {
+    throw manifestInvalid('manifest record sequence is not len(chunks) + 1',
+      { sequence: manifestRecord.sequence, expected: expectedSequence });
+  }
   if (manifest.objects.length > limits.maxObjects) {
     throw limitExceeded('archive declares more objects than the limit allows',
       { objects: manifest.objects.length, limit: limits.maxObjects });
   }
 
   const chunkCache = new Map();
+  const seenSequences = new Set();
   let verifiedChunks = 0;
   let verifiedFiles = 0;
   let declaredRaw = 0;
@@ -1014,6 +1033,16 @@ export async function openArchive(input, options = {}) {
     if (record.totalLength !== asInt(descriptor.record_length, 'record_length')) {
       throw integrityFailure('chunk record length disagrees with the descriptor', { chunkId });
     }
+    const chunkCount = Object.keys(manifest.chunks).length;
+    if (record.sequence < 1 || record.sequence > chunkCount) {
+      throw manifestInvalid('chunk record sequence is out of range',
+        { chunkId, sequence: record.sequence, chunks: chunkCount });
+    }
+    if (seenSequences.has(record.sequence)) {
+      throw manifestInvalid('two chunk records share a sequence number',
+        { chunkId, sequence: record.sequence });
+    }
+    seenSequences.add(record.sequence);
     if (record.header.chunk_id !== chunkId || record.header.codec !== descriptor.codec
         || record.header.raw_size !== rawSize) {
       throw integrityFailure('chunk record header disagrees with the descriptor', { chunkId });

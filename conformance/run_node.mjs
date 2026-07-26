@@ -4,11 +4,12 @@
 //   node conformance/run_node.mjs verify <archive> [...]     verify archives written elsewhere
 //   node conformance/run_node.mjs extract <archive> <outdir> verify, then restore
 //   node conformance/run_node.mjs selftest                   internal round trip
+//   node conformance/run_node.mjs fuzz <dir>                 verdict for every file in dir
 //
 // Every mode prints a single JSON object on stdout, so the pytest suite can
 // drive it without parsing prose.
 
-import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, stat, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -198,6 +199,37 @@ async function cmdExtract(archive, outdir) {
   return { mode: 'extract', implementation: 'javascript', destination: outdir, written };
 }
 
+/**
+ * A verdict per candidate, in one process.
+ *
+ * The differential fuzzer generates thousands of mutants; spawning Node for each
+ * one would cost more than the verification does. So it hands over a directory and
+ * gets back one verdict per file: accepted, or rejected with a code.
+ */
+async function cmdFuzz(dir) {
+  const names = (await readdir(dir)).filter((name) => name.endsWith('.anla')).sort();
+  const verdicts = {};
+  for (const name of names) {
+    const bytes = new Uint8Array(await readFile(path.join(dir, name)));
+    try {
+      const opened = await openArchive(bytes, { full: true });
+      // Reading every file is part of the verdict: a decoder that verifies and
+      // then cannot produce the bytes has accepted something it should not have.
+      for (const object of opened.manifest.objects) {
+        if (object.type === 'file') opened.read(object.path);
+      }
+      verdicts[name] = { accepted: true };
+    } catch (error) {
+      verdicts[name] = {
+        accepted: false,
+        code: error.code ?? 'ERROR',
+        message: String(error.message).slice(0, 200),
+      };
+    }
+  }
+  return { mode: 'fuzz', implementation: 'javascript', count: names.length, verdicts };
+}
+
 async function cmdSelftest() {
   const tree = {
     name: 'selftest',
@@ -241,6 +273,7 @@ async function main() {
     case 'verify': result = await cmdVerify(rest); break;
     case 'extract': result = await cmdExtract(rest[0], rest[1]); break;
     case 'selftest': result = await cmdSelftest(); break;
+    case 'fuzz': result = await cmdFuzz(rest[0]); break;
     default:
       process.stderr.write('usage: run_node.mjs pack|verify|extract|selftest …\n');
       process.exit(2);

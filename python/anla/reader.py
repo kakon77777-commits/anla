@@ -147,6 +147,15 @@ class Archive:
                 raise ManifestInvalid(f"manifest is missing required member: {member}")
         if not isinstance(manifest["objects"], list) or not isinstance(manifest["chunks"], dict):
             raise ManifestInvalid("manifest objects must be an array and chunks an object")
+        # SPEC.md section 4.3: the stream is one CHNK per unique chunk then one
+        # MANF, so the manifest's sequence is determined rather than merely
+        # increasing. Checked here because a reader that jumps straight to the
+        # manifest can check it, and one that cannot check an invariant does not
+        # have one.
+        expected_sequence = len(manifest["chunks"]) + 1
+        if record.sequence != expected_sequence:
+            raise ManifestInvalid("manifest record sequence is not len(chunks) + 1",
+                                  sequence=record.sequence, expected=expected_sequence)
         if len(manifest["objects"]) > self.limits.max_objects:
             raise ResourceLimitExceeded("archive declares more objects than the limit allows",
                                         objects=len(manifest["objects"]),
@@ -161,6 +170,7 @@ class Archive:
 
     def _verify_chunks(self, full: bool) -> None:
         declared_raw = 0
+        seen_sequences: set[int] = set()
         for chunk_id, descriptor in self.manifest["chunks"].items():
             if len(chunk_id) != 64 or not set(chunk_id) <= _HEX64:
                 raise ManifestInvalid("chunk id is not lowercase 64-hex", chunk_id=chunk_id[:80])
@@ -191,6 +201,14 @@ class Archive:
             if record.total_length != _as_int(descriptor["record_length"], "record_length"):
                 raise IntegrityFailure("chunk record length disagrees with the descriptor",
                                        chunk_id=chunk_id)
+            if not 1 <= record.sequence <= len(self.manifest["chunks"]):
+                raise ManifestInvalid("chunk record sequence is out of range",
+                                      chunk_id=chunk_id, sequence=record.sequence,
+                                      chunks=len(self.manifest["chunks"]))
+            if record.sequence in seen_sequences:
+                raise ManifestInvalid("two chunk records share a sequence number",
+                                      chunk_id=chunk_id, sequence=record.sequence)
+            seen_sequences.add(record.sequence)
             if (record.header.get("chunk_id") != chunk_id
                     or record.header.get("codec") != codec
                     or record.header.get("raw_size") != raw_size):

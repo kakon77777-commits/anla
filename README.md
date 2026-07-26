@@ -129,7 +129,7 @@ archive.read('docs/readme.txt');
 python -m pytest python/tests -q
 ```
 
-196 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
+201 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
 without it. Everything runs on Linux, macOS and Windows in CI. Another 76
 assertions run in a browser on the [live test page](https://anla.evemisslab.com/demo/).
 
@@ -140,8 +140,23 @@ file), reproducibility, the disposability of the intelligence plane, and the
 filesystem-collision case where an archive is valid but the target filesystem
 cannot restore it — where refusing is correct and silently dropping a file is not.
 
-See [`conformance/README.md`](conformance/README.md) for the assertion table and a
-suggested order for implementing this format somewhere else.
+Plus a differential fuzzer, which is the part that finds what the hand-written
+tests cannot:
+
+```bash
+python tools/fuzz_differential.py -n 20000 --seed 1
+```
+
+It mutates the frozen vectors and asks one question of each mutant — do both
+implementations reach the same verdict? Agreement needs no oracle; disagreement is
+always a defect in an implementation or in the specification. It has produced two
+findings, and the second is the argument for the whole exercise: record `sequence`
+was specified and checked by neither implementation, which no amount of writing
+more tests by hand would have surfaced, because the tests and the implementations
+shared the same blind spot.
+
+See [`conformance/README.md`](conformance/README.md) for the assertion table, the
+fuzzer, and a suggested order for implementing this format somewhere else.
 
 ---
 

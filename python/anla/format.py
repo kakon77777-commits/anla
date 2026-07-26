@@ -175,6 +175,9 @@ def parse_record(data: bytes, offset: int) -> Record:
     if end > len(data):
         raise ManifestInvalid("record extent lies outside the archive",
                               offset=offset, declared_end=end, archive_size=len(data))
+    if sequence < 1:
+        raise ManifestInvalid("record sequence must be at least 1",
+                              offset=offset, sequence=sequence)
     header_bytes = data[offset + RECORD_FRAME_SIZE:offset + RECORD_FRAME_SIZE + header_length]
     if crc32(header_bytes) != expected_crc:
         raise IntegrityFailure("record header CRC mismatch", offset=offset)

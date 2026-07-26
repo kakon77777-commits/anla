@@ -14,7 +14,8 @@ check about each other.
 | `vectors/*.anla` | Frozen archives, byte-exact, regenerable from the fixtures |
 | `vectors/SHA256SUMS` | Their hashes |
 | `vectors/browser-interop-v0.1.anla` | The archive shipped with the original v0.1 browser release, kept as a read-compatibility vector — **not** regenerated |
-| `run_node.mjs` | Driver for the JavaScript implementation: `pack`, `verify`, `extract`, `selftest` |
+| `run_node.mjs` | Driver for the JavaScript implementation: `pack`, `verify`, `extract`, `selftest`, `fuzz` |
+| `../tools/fuzz_differential.py` | Differential fuzzer: mutates the vectors and compares both implementations' verdicts |
 | `make_vectors.py` | Regenerates the frozen vectors, or checks them with `--check` |
 
 The Python side of the suite lives in [`../python/tests/`](../python/tests/) and
@@ -36,7 +37,7 @@ Locally:
 python -m pytest python/tests -q
 ```
 
-196 tests. The cross-implementation tests skip themselves if `node` is not on
+201 tests. The cross-implementation tests skip themselves if `node` is not on
 `PATH`; everything else runs with nothing but a Python interpreter.
 
 Individual pieces, if you want them separately:
@@ -120,6 +121,11 @@ quietly worked around.
 | `T-CDC-3` | An insertion at the front leaves nearly every chunk shared; fixed-size shares none |
 | `T-CDC-4` | Both implementations cut identically — the content-defined cases are byte-exact |
 | `T-CDC-5` | A reader with no knowledge of the profile still reads a content-defined archive |
+| `T-SEQ-1` | A record sequence of zero is rejected |
+| `T-SEQ-2` | An absurd record sequence is rejected, by both implementations, with the same code |
+| `T-SEQ-3` | The manifest record's sequence must equal `len(chunks) + 1` |
+| `T-SEQ-4` | Two chunk records may not share a sequence number |
+| `T-FUZZ-1` | A bounded differential fuzz run finds no divergence, on fixed seeds |
 | `T-FRZ-1` | Every frozen vector still matches what the current writer produces |
 
 ---
@@ -142,6 +148,50 @@ The order that makes this least painful:
    [§8.1](../SPEC.md#81-objects).
 5. **Compress.** Add `deflate`, remembering it is the zlib wrapper (RFC 1950), not
    raw DEFLATE.
+
+---
+
+## Differential fuzzing
+
+```bash
+python tools/fuzz_differential.py -n 20000 --seed 1 --keep
+```
+
+The suite proves the two implementations agree on the inputs someone thought of,
+which is a weaker statement than it looks. The fuzzer mutates the frozen vectors —
+bit flips, truncation, hostile length and offset fields with the covering CRC
+repaired, and manifest-level defects re-sealed so every hash is correct — and asks
+one question of each mutant: **do both implementations reach the same verdict?**
+
+Not "is the verdict right": that needs an oracle. Agreement needs none, and
+disagreement is always a defect in an implementation or in this specification for
+having left the case open.
+
+Two grades:
+
+- **Divergence** — one accepts, the other refuses. Always a bug. Fails the run.
+- **Code mismatch** — both refuse, with different codes. SPEC.md fixes the
+  verification order, so for a mutant with one defect the codes should match. This
+  is reported, kept as a file, and does not fail the run, because it may be a
+  specification gap and the triage belongs to a person.
+
+It has produced two findings so far, and both were invisible to the hand-written
+suite:
+
+1. A 64-bit field above `Number.MAX_SAFE_INTEGER` was a resource-limit error in
+   JavaScript and a malformed-manifest error in Python. Both refused; one was
+   misclassifying. [SPEC.md §11](../SPEC.md#11-decoder-safety) now says which.
+2. **Record `sequence` was specified and unchecked.** The spec said "1-based,
+   strictly increasing" and neither implementation looked at the field. Python
+   accepted `sequence = 2^63`; JavaScript refused it only because it could not
+   represent the number. The rule is now stated as arithmetic a reader can actually
+   evaluate ([SPEC.md §4.3](../SPEC.md#43-record-sequence)) and both enforce it.
+
+The second one is the argument for the whole exercise: no amount of writing more
+tests by hand would have found it, because the tests and the implementations shared
+the same blind spot.
+
+---
 
 If a vector disagrees with your reading of the specification, the specification is
 what is wrong — open an issue. A frozen vector and a normative document that

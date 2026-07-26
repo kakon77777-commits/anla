@@ -12,3 +12,5 @@ _extract/
 *.zip
 conformance/out-check/
 conformance/out/
+conformance/fuzz-findings/
+conformance/.fuzz-work/

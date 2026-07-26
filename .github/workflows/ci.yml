@@ -53,6 +53,25 @@ jobs:
       - name: JavaScript self-test
         run: node conformance/run_node.mjs selftest
 
+      - name: Differential fuzzing
+        # The suite already runs a bounded version; this is a longer pass on a
+        # seed derived from the run number, so the space keeps being searched
+        # rather than the same 240 mutants being re-checked forever.
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
+        run: python tools/fuzz_differential.py -n 3000 --seed ${{ github.run_number }} --json --keep
+
+      - name: Keep any fuzz findings
+        # Code mismatches do not fail the run — they may be specification gaps, and
+        # triage belongs to a person. They still have to leave the machine, or the
+        # job below would be reporting on an artifact nobody produced.
+        if: always() && matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: conformance/fuzz-findings
+          if-no-files-found: ignore
+          retention-days: 30
+
       - name: CLI smoke test
         shell: bash
         run: |
@@ -99,3 +118,24 @@ jobs:
           name: site
           path: site/dist
           retention-days: 7
+
+  fuzz-findings:
+    name: fuzz findings, if any
+    needs: conformance
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: fuzz-findings
+          path: findings
+      - name: Show anything the fuzzer kept
+        run: |
+          if [ -d findings ] && [ -n "$(ls -A findings 2>/dev/null)" ]; then
+            echo "findings were written — these are code mismatches, which do not"
+            echo "fail the run but do need triage:"
+            cat findings/*.json
+          else
+            echo "no findings"
+          fi

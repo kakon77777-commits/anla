@@ -111,7 +111,7 @@ record header, followed by an opaque payload:
 | 10 | 2 | `flags` = `0` |
 | 12 | 4 | `header_length` — byte length of the JSON record header |
 | 16 | 8 | `payload_length` |
-| 24 | 8 | `sequence` — 1-based, strictly increasing across the archive |
+| 24 | 8 | `sequence` — see [§4.3](#43-record-sequence) |
 | 32 | 4 | `header_crc32` — CRC-32 of the JSON record header bytes |
 | 36 | 4 | `reserved` = `0` |
 
@@ -140,6 +140,28 @@ unknown record type MUST fail rather than skip, because it cannot know whether
 the record was required. (The full format solves this with a
 `AUXILIARY_DISPOSABLE` flag bit; this profile does not need it, and guessing is
 worse than refusing.)
+
+### 4.3 Record sequence
+
+The record stream of this profile contains exactly one `CHNK` record per unique
+chunk, followed by exactly one `MANF` record. Sequence numbers are therefore fully
+determined, and a decoder MUST enforce it:
+
+- every record has `sequence >= 1`;
+- each `CHNK` record's sequence lies in `1 .. len(chunks)`, and no two share one;
+- the `MANF` record's sequence equals `len(chunks) + 1`.
+
+This is stated as arithmetic rather than as "strictly increasing" because the
+looser phrasing is unenforceable by a reader that does not walk the whole stream —
+and a reader that follows the footer to the manifest and then jumps to each chunk
+descriptor, which is the access pattern the format is designed for, does not walk
+it. An invariant a conforming decoder cannot check is not an invariant; it is a
+comment.
+
+Differential fuzzing is what surfaced this. A mutant with `sequence = 2^63` was
+accepted by the Python reader, which has unbounded integers and never looked at
+the field, and refused by the JavaScript reader, which could not represent the
+value. Both behaviours were defensible and neither was checking the rule.
 
 ### 4.1 `CHNK`
 
@@ -581,8 +603,16 @@ A conforming decoder MUST enforce, before allocating from any declared length:
 1. `header_length ≤ 16 MiB`.
 2. Every record extent lies inside the archive.
 3. Every declared offset and length is checked with arithmetic that cannot
-   silently overflow (Python integers are unbounded; JavaScript decoders MUST
-   reject any 64-bit field above `Number.MAX_SAFE_INTEGER` rather than round it).
+   silently overflow. Python integers are unbounded; a JavaScript decoder MUST
+   reject any 64-bit field above `Number.MAX_SAFE_INTEGER` rather than round it
+   into a plausible-looking offset, and MUST classify that rejection as a
+   malformed manifest rather than a resource limit. The distinction matters for
+   interoperability: no runtime can hold 2^53 bytes in memory, so a field that
+   large necessarily points outside the archive — it is nonsense, not merely
+   large, and a decoder with unbounded integers will reach the same conclusion by
+   comparing the extent against the archive size. Differential fuzzing found the
+   two reference implementations refusing the same byte for different stated
+   reasons, which is how this sentence came to exist.
 4. A configurable cap on total decoded output and on per-chunk decoded size,
    which MUST be checked while decoding, not after.
 5. Path validation per [§9](#9-paths) for every object.
@@ -644,6 +674,8 @@ for byte.
 | `T-ORG-1` | The v0.1 archive shipped in the original release still verifies |
 | `T-BMB-1` | A chunk declaring an absurd `raw_size` is refused, not allocated |
 | `T-BMB-2` | A DEFLATE payload expanding past its declared size is stopped mid-decode |
+| `T-SEQ-1..4` | Record sequence: zero, absurd, wrong manifest count, and duplicates each rejected |
+| `T-FUZZ-1` | A differential fuzz run finds no verdict divergence between implementations |
 | `T-FRZ-1` | Every frozen vector still matches what the current writer produces |
 
 `T-ORG-1` exists because a format profile that cannot read the artifact it

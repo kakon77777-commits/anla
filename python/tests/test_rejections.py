@@ -33,6 +33,7 @@ from anla.format import (
     build_header,
     build_record,
     crc32,
+    parse_record,
     sha256_digest,
     sha256_hex,
     uuid_text,
@@ -259,6 +260,79 @@ def test_offset_beyond_the_safe_integer_range_is_refused_not_rounded():
     data = forge(chunks, objects, footer_manifest_offset=(1 << 60))
     with pytest.raises((ManifestInvalid, ResourceLimitExceeded)):
         open_archive(data)
+
+
+# ---------------------------------------------------------------------------
+# T-SEQ-1..4 — found by differential fuzzing, not by reading
+# ---------------------------------------------------------------------------
+
+def _reseal(data: bytes, patch) -> bytes:
+    """Rewrite a record frame field and re-emit nothing else.
+
+    The sequence lives in the frame, which no CRC covers, so a mutant needs no
+    repair to reach the semantic checks — which is exactly why the field went
+    unvalidated for so long.
+    """
+    out = bytearray(data)
+    patch(out)
+    return bytes(out)
+
+
+def test_record_sequence_of_zero_is_rejected():
+    """T-SEQ-1."""
+    data = _reseal(valid_archive(),
+                   lambda out: struct.pack_into("<Q", out, HEADER_SIZE + 24, 0))
+    with pytest.raises(ManifestInvalid, match="sequence must be at least 1"):
+        open_archive(data)
+
+
+def test_absurd_record_sequence_is_rejected():
+    """T-SEQ-2. A JavaScript reader cannot represent this value at all; a Python
+    reader can, and used to accept it. Differential fuzzing is what noticed."""
+    data = _reseal(valid_archive(),
+                   lambda out: struct.pack_into("<Q", out, HEADER_SIZE + 24, 2 ** 63))
+    with pytest.raises(ManifestInvalid, match="sequence is out of range"):
+        open_archive(data)
+
+
+def test_manifest_sequence_must_be_chunks_plus_one():
+    """T-SEQ-3: SPEC.md section 4.3 states the count as arithmetic, so it can be
+    checked by a reader that jumps straight to the manifest."""
+    data = bytearray(valid_archive())
+    from anla.format import parse_footer, parse_header
+    header = parse_header(bytes(data))
+    footer = parse_footer(bytes(data), header)
+    struct.pack_into("<Q", data, footer.manifest_record_offset + 24, 9)
+    with pytest.raises(ManifestInvalid, match=r"len\(chunks\) \+ 1"):
+        open_archive(bytes(data))
+
+
+def test_two_chunk_records_may_not_share_a_sequence():
+    """T-SEQ-4."""
+    content_a, content_b = b"first chunk", b"second chunk"
+    id_a, id_b = sha256_hex(content_a), sha256_hex(content_b)
+    objects = [
+        {"type": "file", "path": "a.txt", "size": len(content_a), "sha256": id_a,
+         "chunks": [{"id": id_a, "length": len(content_a)}], "metadata": {}},
+        {"type": "file", "path": "b.txt", "size": len(content_b), "sha256": id_b,
+         "chunks": [{"id": id_b, "length": len(content_b)}], "metadata": {}},
+    ]
+    chunks = [(id_a, "store", content_a, len(content_a)),
+              (id_b, "store", content_b, len(content_b))]
+    data = bytearray(forge(chunks, objects))
+    # Give the second chunk record the first one's sequence.
+    second = parse_record(bytes(data), HEADER_SIZE)
+    struct.pack_into("<Q", data, HEADER_SIZE + second.total_length + 24, 1)
+    with pytest.raises(ManifestInvalid, match="share a sequence"):
+        open_archive(bytes(data))
+
+
+def test_the_frozen_vectors_all_satisfy_the_sequence_rule():
+    """A rule that the format's own artifacts violate is a wrong rule."""
+    from conftest import VECTORS
+    for vector in sorted(VECTORS.glob("*.anla")):
+        archive = open_archive(vector, full=False)
+        assert archive.verification["status"] == "ok", vector.name
 
 
 # ---------------------------------------------------------------------------

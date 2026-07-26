@@ -50,6 +50,31 @@ which is itself a finding: see Q15.
 
 *Cost of getting this wrong:* every chunk id in every archive.
 
+### Q14 — Cross-implementation parser differential testing
+
+**Answered, and it immediately earned its keep.**
+[`tools/fuzz_differential.py`](../tools/fuzz_differential.py) mutates the frozen
+vectors and compares both implementations' verdicts. It asks only whether they
+*agree* — which needs no oracle — and treats disagreement as a defect in an
+implementation or in the specification for leaving the case open.
+
+Twenty thousand mutants produced two findings, and the second is why this belongs
+before 1.0 rather than after:
+
+1. A 64-bit field above `Number.MAX_SAFE_INTEGER` was classified as a resource
+   limit by one implementation and a malformed manifest by the other.
+2. **Record `sequence` was specified and unchecked by both.** "1-based, strictly
+   increasing" is unenforceable by a reader that does not walk the whole stream —
+   and the access pattern this format is designed for does not walk it. Python
+   accepted `sequence = 2^63`; JavaScript refused it only because it could not
+   represent the number. Neither was checking the rule.
+
+The lesson for 1.0: the whitepaper's target format has *far* more stated
+invariants than this profile — flag bits, capability URIs, footer chains, metadata
+namespaces, signature bindings. Every one of them is a candidate for the same
+failure, where the prose says something and no code evaluates it. The fuzzer should
+grow alongside the format rather than be bolted on when it is called frozen.
+
 ### Q1 — BLAKE3 only, or SHA-256 as well?
 
 **Decision: `hash_algorithms` stays a list, BLAKE3-256 is the required core, and
@@ -151,7 +176,7 @@ a parity feature.
 | Q11 | How does a planner prove nothing was left unpacked? | A coverage proof over the *selection*, not the archive. MVP does the easy half: every declared object is fully covered by chunks, and every exclusion is recorded in the plan. The hard half is proving the selection was what the user approved, which is an interface problem wearing a format costume. |
 | Q12 | Formal coverage verification of a packing plan | Q11 with a stronger word for "prove". Worth attempting only after Q11's evidence trail exists. |
 | Q13 | Stopping a planner trading extraction latency for ratio | A decode-latency budget in the plan, enforced by the writer during its round trip, and refusal if the measured budget is exceeded. This is implementable now and is the most under-rated item on the list: it is the one place where "an AI may plan" could quietly make archives worse. |
-| Q14 | Cross-implementation parser differential testing | Partly answered in practice: `T-XIM-*` compares two implementations on every fixture, and every rejection has a required error code. What is missing is a fuzzer that feeds both the same mutated corpus and diffs their verdicts. That is a tool, not a spec question, and it should exist before 1.0 is called frozen. |
+
 
 ---
 
@@ -212,5 +237,7 @@ is where the risk actually sits.
 5. **Crypto last.** Signatures and encryption after the container is frozen, because
    both sign or wrap bytes that must have stopped moving.
 
-The step before step 1 is a fuzzer (Q14). Two implementations that agree on every
-fixture agree only about the inputs someone thought of.
+The step before step 1 was a fuzzer (Q14). It exists now, and it found a stated
+invariant that neither implementation checked — inside a profile small enough to
+hold in one's head. The target format is much larger. Two implementations that
+agree on every fixture agree only about the inputs someone thought of.

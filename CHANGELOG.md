@@ -7,6 +7,62 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
+## 2026-07-27 — differential fuzzing, and a stated invariant nobody checked
+
+The whitepaper's open question 14 asked for cross-implementation parser
+differential testing. It is answered, and it earned its keep on the first run.
+
+### Added
+
+- **[`tools/fuzz_differential.py`](tools/fuzz_differential.py)** — mutates the
+  frozen vectors and compares both implementations' verdicts. Bit flips,
+  truncation, hostile length and offset fields with the covering CRC repaired, and
+  manifest-level defects re-sealed so every hash is correct — the last category
+  being where the findings live, since a byte flip usually dies at a hash and
+  proves only that hashing works.
+
+  It asks whether the two implementations *agree*, which needs no oracle.
+  Disagreement is always a defect in an implementation, or in the specification for
+  leaving the case open. A divergence or an uncaught exception fails the run; a
+  code mismatch is reported and kept as a file, because it may be a specification
+  gap and triage belongs to a person.
+
+- **`T-SEQ-1..4`** — regression tests for the sequence rule, and **`T-FUZZ-1`**, a
+  bounded fuzz run on fixed seeds in the suite. CI runs 3000 mutants on a seed
+  derived from the run number, so the space keeps being searched rather than the
+  same mutants re-checked forever, and keeps any findings as an artifact.
+
+  The suite also asserts the fuzzer *can* fail: it rigs a verdict and confirms the
+  comparison notices. A fuzzer that cannot fail is a progress bar.
+
+### Fixed
+
+- **Record `sequence` was specified and unchecked by both implementations.** The
+  spec said "1-based, strictly increasing across the archive" and no code evaluated
+  it. Python, with unbounded integers, accepted `sequence = 2^63`; JavaScript
+  refused it only because it could not represent the value. The phrasing was the
+  root cause: "strictly increasing" is unenforceable by a reader that does not walk
+  the whole stream, and the access pattern this format is designed for — footer to
+  manifest, then jump to each chunk descriptor — does not walk it.
+
+  [SPEC.md §4.3](SPEC.md#43-record-sequence) now states it as arithmetic a reader
+  can actually evaluate: every sequence at least 1, each `CHNK` in
+  `1..len(chunks)` and distinct, the `MANF` exactly `len(chunks) + 1`. Both
+  implementations enforce all three.
+
+- **A 64-bit field above `Number.MAX_SAFE_INTEGER` is now a malformed manifest, not
+  a resource limit.** No runtime can hold 2^53 bytes, so such a field necessarily
+  points outside the archive: it is nonsense, not merely large — and a decoder with
+  unbounded integers reaches the same conclusion by comparing the extent against
+  the archive size. [SPEC.md §11](SPEC.md#11-decoder-safety) says which
+  classification is correct, because the fuzzer found both implementations refusing
+  the same byte for different stated reasons.
+
+### Verified
+
+- 20,000 mutants across five seeds: no divergences, no code mismatches, no uncaught
+  exceptions. 201 tests in the suite.
+
 ## 2026-07-26 (evening) — content-defined chunking, and open question 3 answered
 
 Groundwork for 1.0, done in the cheap profile where getting it wrong is survivable.
