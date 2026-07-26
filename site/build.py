@@ -11,6 +11,8 @@ apart. The build fails if a page is missing from a language that should have it.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import html
 import json
 import re
@@ -100,12 +102,10 @@ def layout(lang: str, *, slug: str, title: str, description: str, body: str,
             for code, href in sorted(pairs.items())
         ) + f'\n<link rel="alternate" hreflang="x-default" href="https://{C.HOST}/">'
 
-    runtime_json = ""
-    if runtime:
-        payload = {key: s[key] for key in C.RUNTIME_KEYS}
-        runtime_json = ('<script>window.ANLA_I18N='
-                        + json.dumps(payload, ensure_ascii=False, sort_keys=True)
-                        + ';</script>')
+    # The workbench's translations load as an asset rather than an inline
+    # script: it lets the site keep script-src 'self' with no inline exception,
+    # and an exception is the one thing a content policy should not have.
+    runtime_json = (f'<script src="/assets/i18n.{lang}.js"></script>' if runtime else "")
 
     return f"""<!doctype html>
 <html lang="{s['html_lang']}">
@@ -125,6 +125,7 @@ def layout(lang: str, *, slug: str, title: str, description: str, body: str,
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/styles.css">
+{runtime_json}
 </head>
 <body>
 <header class="topbar"><div class="wrap inner">
@@ -139,7 +140,6 @@ def layout(lang: str, *, slug: str, title: str, description: str, body: str,
   <span><a href="{C.REPO}/blob/main/LICENSE" rel="noreferrer">{esc(s['footer_license'])}</a>
     · <a href="{C.FAMILY}" rel="noreferrer">{esc(s['footer_family'])}</a></span>
 </div></footer>
-{runtime_json}
 </body>
 </html>
 """
@@ -408,7 +408,7 @@ def page_workbench(lang: str) -> str:
                   alternate=f"{base(other(lang))}workbench/")
 
 
-def build_standalone(lang: str) -> str:
+def build_standalone(lang: str) -> tuple[str, str]:
     """One file, no requests: the css, the core and the app inlined.
 
     The core and the app are the same sources the hosted page and the test suite
@@ -428,7 +428,16 @@ def build_standalone(lang: str) -> str:
 
     runtime = json.dumps({key: s[key] for key in C.RUNTIME_KEYS},
                          ensure_ascii=False, sort_keys=True)
-    return f"""<!doctype html>
+
+    # One inline module, hashed, so the served copy needs no 'unsafe-inline' for
+    # scripts. The translations go inside it rather than in a second script tag:
+    # two inline scripts would mean two hashes to keep in step. Opened from a
+    # file:// URL there is no CSP at all, which is the point of this build.
+    script_body = f"\nwindow.ANLA_I18N={runtime};\n{core_inline}\n{app_inline}\n"
+    script_hash = "sha256-" + base64.b64encode(
+        hashlib.sha256(script_body.encode("utf-8")).digest()).decode("ascii")
+
+    document = f"""<!doctype html>
 <html lang="{s['html_lang']}">
 <head>
 <meta charset="utf-8">
@@ -450,14 +459,11 @@ def build_standalone(lang: str) -> str:
 <footer class="footer"><div class="wrap inner">
   <span>{esc(s['footer_left'])}</span><span>{esc(s['footer_right'])}</span>
 </div></footer>
-<script>window.ANLA_I18N={runtime};</script>
-<script type="module">
-{core_inline}
-{app_inline}
-</script>
+<script type="module">{script_body}</script>
 </body>
 </html>
 """
+    return document, script_hash
 
 
 # --------------------------------------------------------------------------
@@ -617,8 +623,11 @@ def main() -> int:
         notes=[], alternate=None))
 
     # standalone single-file builds
-    emit("standalone.html", build_standalone("en"))
-    emit("standalone.zh.html", build_standalone("zh"))
+    standalone_hashes = {}
+    for lang, name in (("en", "standalone.html"), ("zh", "standalone.zh.html")):
+        document, script_hash = build_standalone(lang)
+        emit(name, document)
+        standalone_hashes[name] = script_hash
 
     # assets: the core is copied, never rewritten
     (DIST / "assets").mkdir(parents=True, exist_ok=True)
@@ -628,6 +637,12 @@ def main() -> int:
     write(DIST / "assets" / "icon.svg", ICON)
     written += ["assets/styles.css", "assets/app.js", "assets/anla-core.js",
                 "assets/icon.svg"]
+    for lang in C.LANGS:
+        payload = {key: strings(lang)[key] for key in C.RUNTIME_KEYS}
+        write(DIST / "assets" / f"i18n.{lang}.js",
+              "window.ANLA_I18N="
+              + json.dumps(payload, ensure_ascii=False, sort_keys=True) + ";\n")
+        written.append(f"assets/i18n.{lang}.js")
 
     # downloadable conformance vectors
     vectors_out = DIST / "downloads" / "vectors"
@@ -648,7 +663,7 @@ def main() -> int:
           '<?xml version="1.0" encoding="UTF-8"?>\n'
           '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
           f"{entries}</urlset>\n")
-    write(DIST / "_headers", HEADERS)
+    write(DIST / "_headers", headers_file(standalone_hashes))
 
     revision = git_revision()
     write(BUILD_ID_FILE, json.dumps({
@@ -662,9 +677,11 @@ def main() -> int:
     # A page that silently lost its script tag is worse than a build failure.
     checks = [
         ("workbench/index.html", '<script type="module" src="/assets/app.js">'),
-        ("zh/workbench/index.html", 'window.ANLA_I18N'),
+        ("zh/workbench/index.html", '/assets/i18n.zh.js'),
+        ("assets/i18n.zh.js", "window.ANLA_I18N"),
         ("standalone.html", "async function pack("),
         ("standalone.zh.html", "window.ANLA_I18N"),
+        ("workbench/index.html", '/assets/i18n.en.js'),
         ("spec/index.html", "Bootstrap Header"),
         ("papers/anla-whitepaper/index.html", "Extract(Pack(F,P))=F"),
         ("zh/papers/anla-whitepaper/index.html", "保存平面"),
@@ -696,30 +713,47 @@ ICON = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
  fill="#f6f4f0"/></svg>
 """
 
-HEADERS = """/*
-  Referrer-Policy: no-referrer
-  X-Content-Type-Options: nosniff
-  Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Cross-Origin-Opener-Policy: same-origin
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+def base_csp(script_hashes: list[str]) -> str:
+    """The site-wide policy.
 
-# The standalone build inlines its script and style on purpose: it has to work
-# from a local file with no other requests. connect-src stays 'none' either way —
-# neither page has any reason to send your files anywhere.
-/standalone.html
-  Content-Security-Policy: default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'
-  Referrer-Policy: no-referrer
+    The hashes are the standalone builds' single inline module. They are in the
+    global policy rather than only in a per-path rule because path matching for
+    an extension-stripped URL is host behaviour, and a security header that
+    depends on host behaviour is a security header that will one day not apply.
+    Adding a hash does not loosen 'self' for anything else: an injected script
+    would have to hash to exactly one of these.
 
-/standalone.zh.html
-  Content-Security-Policy: default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'
-  Referrer-Policy: no-referrer
+    Inline styles are allowed because the standalone build inlines its
+    stylesheet; a style is a far smaller surface than a script, and a hash for it
+    is not reliably supported everywhere.
+    """
+    sources = " ".join(f"'{h}'" for h in sorted(script_hashes))
+    return (f"default-src 'self'; script-src 'self' {sources}; "
+            f"style-src 'self' 'unsafe-inline'; connect-src 'none'; "
+            f"img-src 'self' data:; object-src 'none'; base-uri 'none'; "
+            f"form-action 'none'; frame-ancestors 'none'")
 
-/assets/*
-  Cache-Control: public, max-age=3600
 
-/downloads/*
-  Cache-Control: public, max-age=86400
-"""
+def headers_file(standalone_hashes: dict[str, str]) -> str:
+    """Build `_headers`.
+
+    `connect-src 'none'` is the load-bearing line: neither page has any reason to
+    send your files anywhere, so it is denied at the policy level rather than left
+    to the code's good behaviour.
+
+    One policy for every path. Per-path rules were tried and removed: the host
+    serves `/standalone.html` from `/standalone`, so a path-keyed rule produced a
+    second CSP header for the browser to intersect with the first, which is a
+    confusing way to say what one header already said.
+    """
+    blocks = [f"/*\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n"
+              f"  Permissions-Policy: camera=(), microphone=(), geolocation=()\n"
+              f"  Cross-Origin-Opener-Policy: same-origin\n"
+              f"  Content-Security-Policy: "
+              f"{base_csp(list(standalone_hashes.values()))}\n"]
+    blocks.append("/assets/*\n  Cache-Control: public, max-age=3600\n")
+    blocks.append("/downloads/*\n  Cache-Control: public, max-age=86400\n")
+    return "\n".join(blocks)
 
 
 if __name__ == "__main__":

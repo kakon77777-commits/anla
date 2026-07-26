@@ -70,8 +70,8 @@ workbench a visitor runs is the implementation the tests ran.
 ### In a browser
 
 Open https://anla.evemisslab.com/workbench/ — pick a folder, build a real `.anla`,
-open it again, restore it as a ZIP. Nothing is uploaded; the page declares no
-network access at all. Append `?selftest=1` and it packs, verifies, re-packs and
+open it again, restore it as a ZIP. Your files are read in the tab and never sent
+anywhere; the page makes no requests of its own. Append `?selftest=1` and it packs, verifies, re-packs and
 compares a fixture against itself in front of you.
 
 There is also a [single-file build](https://anla.evemisslab.com/standalone.html):

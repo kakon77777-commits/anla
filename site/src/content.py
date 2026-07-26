@@ -61,8 +61,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_tests": "Conformance tests",
         "fact_tests_v": "165 passing",
         "strip_1_t": "Local-first",
-        "strip_1_d": "The workbench runs entirely in your tab. Nothing is uploaded; "
-                     "the page declares no network access at all.",
+        "strip_1_d": "The workbench runs entirely in your tab: your files are read "
+                     "into memory and never sent anywhere. The page makes no requests "
+                     "of its own, and its content policy forbids outbound connections.",
         "strip_2_t": "Deterministic",
         "strip_2_d": "Same input, same archive bytes — proven by two implementations "
                      "in two languages producing identical output.",
@@ -180,7 +181,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "wb_desc": "This is not a simulator. The page runs web/anla-core.js — the same "
                    "reference implementation the conformance suite runs under Node — "
                    "using Web Crypto for SHA-256 and the platform's compression "
-                   "streams for DEFLATE. Your files never leave the tab.",
+                   "streams for DEFLATE. Your files are read in this tab and are never "
+                   "sent anywhere.",
         "wb_shell_title": "ANLA Standalone Workbench · Browser runtime",
         "wb_no_backend": "No backend required",
         "wb_tab_1": "01 · Build",
@@ -374,8 +376,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_tests": "一致性測試",
         "fact_tests_v": "165 項通過",
         "strip_1_t": "本機優先",
-        "strip_1_d": "工作台完全在你的分頁裡執行。不上傳任何資料，這個頁面根本沒有"
-                     "宣告網路權限。",
+        "strip_1_d": "工作台完全在你的分頁裡執行：檔案只讀進記憶體，不會被送到任何"
+                     "地方。頁面本身不發出任何請求，其內容安全政策也禁止對外連線。",
         "strip_2_t": "確定性",
         "strip_2_d": "相同輸入產生相同的封裝位元——由兩種語言的兩套實作產生完全一致"
                      "的輸出來證明。",
