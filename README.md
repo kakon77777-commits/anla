@@ -63,8 +63,9 @@ the profile a preservation system can adopt. Different jobs; the reasoning is in
 The draft is held to the standard MVP was held to: **nothing is frozen until two
 independent implementations produce byte-identical archives and a differential fuzzer
 finds no divergence between them.** So far 1.0 has a canonical CBOR codec
-([`python/anla1/cbor.py`](python/anla1/cbor.py)) and a container specification that
-is explicitly not implemented yet. `SPEC-1.0-DRAFT.md` opens with a table of what
+([`python/anla1/cbor.py`](python/anla1/cbor.py)) and the container itself
+([`python/anla1/container.py`](python/anla1/container.py)) — header, record frame with
+flags, footer chain, capabilities — with the manifest contents still only sketched. `SPEC-1.0-DRAFT.md` opens with a table of what
 exists, which is the first thing that changes when that changes.
 
 ## Two implementations, on purpose
@@ -146,7 +147,7 @@ archive.read('docs/readme.txt');
 python -m pytest python/tests -q
 ```
 
-337 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
+378 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
 without it. Everything runs on Linux, macOS and Windows in CI. Another 76
 assertions run in a browser on the [live test page](https://anla.evemisslab.com/demo/).
 

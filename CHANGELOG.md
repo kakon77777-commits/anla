@@ -7,6 +7,48 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
+## 2026-07-27 (evening) — the 1.0 container, implemented
+
+Milestone 0 continues. [`python/anla1/container.py`](python/anla1/container.py) is
+the byte level of [`SPEC-1.0-DRAFT.md`](SPEC-1.0-DRAFT.md): header, record frame with
+flags and 8-byte padding, the footer chain, and capability checking. 41 tests.
+
+### Added
+
+- **Record flags, with refusal as the default.** A reader meeting an unknown record
+  type consults `AUXILIARY_DISPOSABLE`; with neither that nor
+  `REQUIRED_FOR_EXTRACTION` set it refuses, because a writer that wanted the record
+  skippable had a bit to say so. A record claiming to be both is an error in each
+  direction.
+- **The footer chain.** One `FOOT` per snapshot, chained by
+  `previous_footer_offset`, never rewritten. A cycle is refused rather than followed;
+  a chain that does not descend, or whose snapshot sequence does not decrease, is
+  refused too.
+- **Capability checking** — unknown *required* capabilities refuse, unknown
+  *optional* ones are ignored silently and recorded as ignored, so a caller can see
+  what was skipped without being handed a warning it might treat as an error.
+
+### Changed in the specification, because implementing it said so
+
+- **`latest_footer_hint` MUST NOT be used to determine which snapshot is latest.**
+  The draft previously said a reader must verify the hint and fall back to scanning.
+  That is not strong enough: a hint pointing at an *older but perfectly valid* footer
+  passes verification, and a reader that accepts it reports an older snapshot as
+  current with every hash checking out. The latest footer is now found by scanning
+  backwards, always. Tests: a lying hint, four kinds of nonsense hint, an interrupted
+  append, and a corrupt trailing footer all resolve to the correct snapshot.
+
+- **The footer names its own hash algorithm.** A consequence of hash agility that
+  only appears once the reader exists — the footer is read *before* the manifest that
+  declares `hash_algorithms`, so it cannot inherit the choice from it. An unknown
+  algorithm there is refused, not guessed.
+
+- **The magic-number paragraph was wrong.** It claimed the 1.0 and MVP magics differ
+  by one byte. They differ by four: both open with `ANLA`, the fifth byte is the
+  generation digit, and inserting it shifts the CR/LF/SUB trailer along. The test
+  comparing them is what caught it, which is the argument for writing tests against
+  the specification rather than against the code.
+
 ## 2026-07-27 (later) — Option B taken; the 1.0 container draft begins
 
 Neo chose **Option B**: `ANLA 1.0` is specified for Python and Rust, and `ANLA-MVP`

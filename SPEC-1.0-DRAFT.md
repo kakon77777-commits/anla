@@ -35,7 +35,8 @@ editing `SPEC.md` and hoping.
 |---|---|
 | Canonical CBOR encoder and strict decoder | **implemented** — [`python/anla1/cbor.py`](python/anla1/cbor.py), 129 tests |
 | Content-defined chunking (`anla-cdc-1`) | **implemented and cross-verified**, reused unchanged from MVP |
-| Container layout (§2–§6 below) | **specified here, not yet implemented** |
+| Container: header, record frame, flags, footer chain, capabilities | **implemented** — [`python/anla1/container.py`](python/anla1/container.py), 41 tests |
+| Manifest contents (§5.2), objects, chunk map | specified in sketch, not implemented |
 | BLAKE3-256 | decided (§7), not implemented |
 | Zstandard | decided (§8), not implemented |
 | Metadata namespaces, snapshots beyond one, signatures, encryption, parity | later milestones |
@@ -95,8 +96,9 @@ reader for — which is refutation condition 7.3 in the concept paper.
 
 Unlike MVP, the footer is **not** at a fixed offset from the end, because there is
 one footer per snapshot and they accumulate. A reader locates the latest footer by
-scanning backwards for the footer magic and verifying it, using the header's hint as
-a starting guess and never as an authority (§3, §6).
+scanning backwards for the footer magic and verifying it. The header's hint is
+**not** used to decide which footer is latest — see §6, where implementing the
+reader sharpened that rule.
 
 All integers are little-endian and unsigned. Records are packed end to end with
 padding to an 8-byte boundary (§4) — a change from MVP, where there was none,
@@ -119,20 +121,51 @@ adopted so that a memory-mapped reader can align payload access.
 | 56 | 4 | `header_crc32` | CRC-32 of `[0, 56)` |
 | 60 | 4 | `reserved` | MUST be `0` |
 
-The magic differs from MVP's in one byte — `31` where MVP has `41` — so the two
-are distinguishable at the first read and neither can be mistaken for a corrupted
-version of the other.
+Both magics open with the same four bytes, `ANLA`, because both are this format.
+The fifth byte is the **generation digit** — `31`, ASCII `"1"`, here — and the
+rest is the CR / LF / SUB sequence PNG uses, so that a naive text-mode transfer
+corrupts the magic detectably instead of corrupting the payload silently.
+
+```text
+MVP  41 4E 4C 41 0D 0A 1A 0A     A N L A   CR LF SUB LF
+1.0  41 4E 4C 41 31 0D 0A 1A     A N L A 1 CR LF SUB
+```
+
+So four bytes differ, not one: inserting the digit shifts the trailer along. What
+matters is that a reader can tell which profile it is holding from the first eight
+bytes, that neither can be mistaken for a damaged copy of the other, and that a
+third generation has an obvious place to put its digit.
+
+(An earlier draft of this paragraph claimed the two magics were one byte apart.
+They are not, and the test that compares them is what said so — which is the
+argument for writing tests against the specification rather than against the
+code.)
+
+So four bytes differ, not one — inserting the digit shifts the trailer along. What
+matters is that a reader can decide which profile it is holding from the first eight
+bytes, that neither can be mistaken for a damaged copy of the other, and that a
+third generation has an obvious place to put its digit.
+
+(An earlier draft of this section claimed the two magics were one byte apart. They
+are not, and the test that compares them said so — which is the whole argument for
+writing the tests against the specification rather than against the code.)
 
 `header_size` is a real field here, unlike MVP's `reserved_a`. A reader MUST use it
 to find the first record rather than assuming 64, so that a future minor version can
 extend the header without moving the record stream.
 
-**`latest_footer_hint` is a hint.** A decoder MUST verify whatever it finds there
-and MUST fall back to scanning backwards from the end for `FOOT` magic. This is
-stated forcefully because the failure it prevents is subtle: an interrupted append
-can leave a hint pointing at a footer that was never completely written, and a
-decoder that trusts it will report an older snapshot as the latest one — silently, and
-with every hash checking out.
+**`latest_footer_hint` MUST NOT be used to determine which snapshot is latest.**
+
+The earlier wording here said a decoder must verify the hint and fall back to
+scanning. Implementing the reader showed that is not strong enough: a hint pointing
+at an *older but perfectly valid* footer passes verification, and a decoder that
+accepts it reports an older snapshot as current with every hash checking out. So the
+rule is now the stronger one — the latest footer is found by scanning backwards from
+the end, always, and the hint is at most a cross-check that may be ignored.
+
+A writer MAY maintain the hint, which means rewriting the 64-byte header on each
+append. That the field can therefore be stale, or torn if the process dies
+mid-write, is precisely why no reader is permitted to depend on it.
 
 ---
 
@@ -302,7 +335,17 @@ S(t+1) = (S(t), ΔO, ΔC, ΔM)
 
 A footer record's payload carries: snapshot sequence; manifest offset and length;
 primary index offset and length; **previous footer offset**; `preservation_root`;
-`auxiliary_root`; a digest of the footer's own fields; a CRC.
+and `auxiliary_root`. Absent values are omitted, never encoded as `null` — the CBOR
+profile has no null, and absence is the absence of a key.
+
+Payload integrity lives in the record header (`payload_hash`), not in a field inside
+the payload, which would be self-referential.
+
+**The footer names its own hash algorithm** in that record header. This is a
+consequence of hash agility that only becomes visible once the reader exists: the
+footer is read *before* the manifest that declares `hash_algorithms`, so it cannot
+inherit the choice from it. An unknown algorithm there is refused rather than
+guessed at.
 
 Old footers are never rewritten. That is what makes an append crash-safe: an
 interrupted write leaves a trailing partial footer, the previous one is still intact
