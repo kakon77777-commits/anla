@@ -7,6 +7,71 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
+## 2026-07-28 — Milestone 0 closes: the manifest, its roots, and a whole archive
+
+The 1.0 container can now be written and read end to end, by one implementation.
+That is not "1.0 works" — the freeze rule needs two — but it is the point at which
+the container stops being a document.
+
+### Added
+
+- **[`python/anla1/merkle.py`](python/anla1/merkle.py)** — the Merkle construction,
+  pinned. Three choices in it are load-bearing and each closes a hole a plausible
+  alternative leaves open:
+  - **domain separation** (`H(0x00 || leaf)`, `H(0x01 || left || right)`), closing
+    the classic second-preimage attack where a two-leaf tree and a one-leaf tree
+    share a root;
+  - **odd nodes promoted, never duplicated** — duplicating makes `[a,b,c]` and
+    `[a,b,c,c]` collide, which is CVE-2012-2459, and the suite asserts the collision
+    is absent rather than trusting it;
+  - **a defined empty root**, because empty is a legitimate state and a
+    construction with no answer for it invites each implementation to invent one.
+
+  Inclusion proofs are part of it, not an addition: a root nobody can prove against
+  is only a checksum, and partial materialization has to show that what it extracted
+  belongs to the snapshot it claims. 65 tests, including every leaf of every tree
+  size up to 40.
+
+- **[`python/anla1/manifest.py`](python/anla1/manifest.py)** — objects, chunk map,
+  the five roots, and verification that recomputes every root from the manifest's
+  own contents. A declared root that disagrees with what it sits beside is refused;
+  without that check a root would only prove the manifest had not been edited, not
+  that it describes what it claims to. 32 tests.
+
+- **Nine end-to-end tests** that assemble a real archive from the primitives and
+  read it back the way a decoder would — tail first, verify, then extract.
+  Deliberately not going through a convenience layer: a smoke test that uses the
+  same helper the implementation uses can pass while the format does not hold
+  together.
+
+- **[`schemas/anla-1.0.cddl`](schemas/anla-1.0.cddl)** — shape only, and it says so
+  at the top. It cannot express canonical encoding, the Merkle construction, or that
+  a declared root must equal the recomputed one, so a validator that accepts a
+  document against it has checked considerably less than a reader does.
+
+### Found while implementing
+
+- **`preservation_root` does not cover the manifest's policy fields** —
+  `required_capabilities`, `hash_algorithms`, `created_unix_ns`, the packing plan.
+  Editing them leaves the root identical; verified, not assumed. They are still
+  protected by the `MANF` record's payload hash, but it means **a signature over
+  `preservation_root` alone would not bind them**, and an archive could be
+  re-labelled with different capability requirements while its signature still
+  verified.
+
+  So a signature MUST bind `snapshot_id`, the hash of the canonical manifest
+  encoding. The whitepaper already signs `archive_id ‖ snapshot_id ‖
+  preservation_root`; [SPEC-1.0-DRAFT.md §5.3](SPEC-1.0-DRAFT.md) now records *why*
+  the `snapshot_id` term is load-bearing, because it is exactly the term a later
+  simplification would drop as redundant.
+
+### Fixed
+
+- A duplicated paragraph in the draft, left by the previous commit's line splice.
+- An obscure index calculation in `merkle_path` rewritten to be readable. It passed
+  its tests either way; in a file that defines part of the format, "the tests pass"
+  is not sufficient, because the tests are the only other reader.
+
 ## 2026-07-27 (evening) — the 1.0 container, implemented
 
 Milestone 0 continues. [`python/anla1/container.py`](python/anla1/container.py) is

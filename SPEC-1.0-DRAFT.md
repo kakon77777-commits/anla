@@ -36,7 +36,11 @@ editing `SPEC.md` and hoping.
 | Canonical CBOR encoder and strict decoder | **implemented** — [`python/anla1/cbor.py`](python/anla1/cbor.py), 129 tests |
 | Content-defined chunking (`anla-cdc-1`) | **implemented and cross-verified**, reused unchanged from MVP |
 | Container: header, record frame, flags, footer chain, capabilities | **implemented** — [`python/anla1/container.py`](python/anla1/container.py), 41 tests |
-| Manifest contents (§5.2), objects, chunk map | specified in sketch, not implemented |
+| Merkle construction and the five roots (§5.3) | **implemented** — [`python/anla1/merkle.py`](python/anla1/merkle.py), 65 tests |
+| Manifest: objects, chunk map, roots, verification (§5) | **implemented** — [`python/anla1/manifest.py`](python/anla1/manifest.py), 32 tests |
+| A complete archive, written and read back | **implemented** — 9 end-to-end tests |
+| CDDL schemas | [`schemas/anla-1.0.cddl`](schemas/anla-1.0.cddl), shape only |
+| Object name model (whitepaper Q4) | one `path`, deliberately not settled |
 | BLAKE3-256 | decided (§7), not implemented |
 | Zstandard | decided (§8), not implemented |
 | Metadata namespaces, snapshots beyond one, signatures, encryption, parity | later milestones |
@@ -140,15 +144,6 @@ third generation has an obvious place to put its digit.
 They are not, and the test that compares them is what said so — which is the
 argument for writing tests against the specification rather than against the
 code.)
-
-So four bytes differ, not one — inserting the digit shifts the trailer along. What
-matters is that a reader can decide which profile it is holding from the first eight
-bytes, that neither can be mistaken for a damaged copy of the other, and that a
-third generation has an obvious place to put its digit.
-
-(An earlier draft of this section claimed the two magics were one byte apart. They
-are not, and the test that compares them said so — which is the whole argument for
-writing the tests against the specification rather than against the code.)
 
 `header_size` is a real field here, unlike MVP's `reserved_a`. A reader MUST use it
 to find the first record rather than assuming 64, so that a future minor version can
@@ -319,6 +314,68 @@ change `preservation_root` — one comparison, no re-hashing. MVP proved the ope
 is wanted (`anla strip` exists because a decision log records what a model was told
 and chose, which is not always something to hand over with the data), and MVP had to
 rebuild the entire manifest to do it.
+
+```text
+objects_root ┐
+chunks_root  ├─► preservation_root
+metadata_root┘
+auxiliary_root      (outside, on purpose)
+```
+
+#### The Merkle construction
+
+Pinned, for the same reason the gear table is: two implementations that build the
+tree differently compute different roots for identical content, and the
+disagreement is invisible until somebody compares two archives.
+
+```text
+leaf(data)         = H(0x00 || data)
+node(left, right)  = H(0x01 || left || right)
+empty tree         = H(0x02)
+preservation_root  = H(0x03 || objects_root || chunks_root || metadata_root)
+object_id          = H(0x10 || canonical CBOR of the object without its id)
+```
+
+Levels are built pairwise from the left. **An odd node is promoted unchanged, never
+duplicated.** Three choices there are load-bearing:
+
+- **Domain separation.** Without the `0x00` / `0x01` prefixes, a tree over two
+  leaves and a tree over one leaf whose data happens to be `left || right` produce
+  the same root, so a proof for one is a proof for the other. One byte per hash
+  closes the classic Merkle second-preimage attack.
+- **Promotion, not duplication.** Duplicating the odd node — Bitcoin's original
+  choice — makes `[a, b, c]` and `[a, b, c, c]` produce the same root
+  (CVE-2012-2459). The conformance suite asserts that collision is *absent* rather
+  than trusting that it is.
+- **A defined empty root.** Empty is a legitimate state — no metadata namespaces, no
+  intelligence plane — and a construction with no answer for it invites every
+  implementation to invent one.
+
+Leaf order is part of the definition: objects by `object_id`, chunks by `chunk_id`,
+metadata by its encoded entry. Sorted by encoded bytes, as everywhere else here,
+because that is the order two implementations can agree on without agreeing on a
+collation.
+
+A root nobody can produce a proof against is only a checksum, so an inclusion proof
+is part of the construction rather than a later addition — partial materialization
+has to be able to show that what it extracted belongs to the snapshot it claims.
+
+#### What `preservation_root` does not cover, and what that means for signatures
+
+It covers objects, chunks and metadata. It does **not** cover the manifest's policy
+fields: `required_capabilities`, `hash_algorithms`, `created_unix_ns`, the packing
+plan. Editing those leaves `preservation_root` identical — verified, not assumed.
+
+They are not unprotected: the `MANF` record header hashes the manifest payload, so
+any edit changes that hash. But it does mean a **signature over `preservation_root`
+alone would not bind the policy fields**, and an archive could then be re-labelled
+with different capability requirements while its signature still verified.
+
+So a signature MUST bind `snapshot_id` — the hash of the canonical manifest
+encoding — and not merely the preservation root. The whitepaper's chapter 30 already
+signs `archive_id ‖ snapshot_id ‖ preservation_root`; this paragraph exists so that
+the `snapshot_id` term is understood as load-bearing rather than as belt and braces,
+because it is exactly the term a later simplification would drop.
 
 Still open: whether `metadata_root` is per-namespace. Probably, so that metadata a
 reader cannot apply is a subtree it reports on rather than a verification failure.
