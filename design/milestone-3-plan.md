@@ -1,9 +1,13 @@
 # Milestone 3 — append-only snapshots and cross-snapshot deduplication
 
-Status: **planned, not started.** Written before the code so the decisions below can
-be argued with rather than discovered afterwards. `SPEC-1.0-DRAFT.md` §6 specifies the
-footer chain; this document specifies the layer above it, which the draft currently
-leaves as one line: `S(t+1) = (S(t), ΔO, ΔC, ΔM)`.
+Status: **implemented in one implementation** — [`python/anla1/snapshot.py`](../python/anla1/snapshot.py),
+28 tests. Written before the code so the decisions below could be argued with rather
+than discovered afterwards; the record of what implementing them changed is at the
+bottom. All five decisions survived. The specification gained §6.1–§6.6 from them and
+§4.4 from a defect they did not predict.
+
+`SPEC-1.0-DRAFT.md` §6 specified the footer chain; this document specified the layer
+above it, which the draft had left as one line: `S(t+1) = (S(t), ΔO, ΔC, ΔM)`.
 
 ## Why this before metadata namespaces
 
@@ -120,6 +124,44 @@ Each gets a test before the writer that would produce it exists:
    region and assert the archive still reads as the previous snapshot, for every
    truncation point. This is the property the footer chain exists for and it has
    only been tested at a handful of offsets.
+
+---
+
+## What implementing it changed
+
+The five decisions held. Two things they did not anticipate came out of the code, and
+both are now in the specification rather than only in this document.
+
+**A writer must resume an append at the end of the newest complete snapshot, not at
+the end of the file** — now `SPEC-1.0-DRAFT.md` §4.4 and §6.6. Step 5's crash
+simulation was supposed to test only that a torn archive still *reads*; the test that
+went one further and appended to a torn archive failed. A torn write leaves the file
+at an arbitrary length, so resuming at its end puts every following record at an
+offset that is not a multiple of eight — and `find_latest_footer` scans backwards in
+alignment-sized steps, so the new footer is never probed. The archive keeps reading
+as the older snapshot, every hash in it correct, nothing reporting an error.
+
+This is the third member of a family: `latest_footer_hint`, record `sequence`, and
+now record alignment. Each was a rule that looked like a consequence of another rule
+— padding implies alignment, the way "strictly increasing" implied checkability — and
+each turned out to need its own sentence about how a reader checks it. "Records are
+padded to eight bytes" is not "records begin at multiples of eight"; the first is
+about what a writer emits and the second is what a reader depends on.
+
+**Deduplication needs a stable chunk-id hash within an archive.** Two hash algorithms
+in one archive means two namespaces of chunk id sharing one lookup, so identical bytes
+get stored twice and deduplication quietly stops working while everything verifies.
+Hash agility is per archive, not per snapshot — §6.2. It is the first boundary the
+agility from Milestone 0 has hit, and it comes from content addressing rather than
+from the container.
+
+One test bug worth recording because it is the vacuous-assertion shape again: the
+content-defined sharing test first used arithmetic content, on which the gear
+fingerprint cycles through too few values to satisfy the boundary condition. Every
+cut landed on `max_size`, chunking degenerated to fixed-size, a shifted copy shared
+nothing — and the test was asserting that it shared almost everything. It failed
+loudly, which is the only reason this is a note rather than a defect: an assertion
+one constant away from passing vacuously is not a strong test.
 
 ## The freeze rule still applies
 

@@ -38,12 +38,13 @@ editing `SPEC.md` and hoping.
 | Container: header, record frame, flags, footer chain, capabilities | **implemented** — [`python/anla1/container.py`](python/anla1/container.py), 41 tests |
 | Merkle construction and the five roots (§5.3) | **implemented** — [`python/anla1/merkle.py`](python/anla1/merkle.py), 65 tests |
 | Manifest: objects, chunk map, roots, verification (§5) | **implemented** — [`python/anla1/manifest.py`](python/anla1/manifest.py), 32 tests |
-| A complete archive, written and read back | **implemented** — 9 end-to-end tests |
+| A complete archive, written and read back | **implemented** — 15 end-to-end tests |
+| Append-only snapshots and cross-snapshot deduplication (§6) | **implemented** — [`python/anla1/snapshot.py`](python/anla1/snapshot.py), 28 tests |
 | CDDL schemas | [`schemas/anla-1.0.cddl`](schemas/anla-1.0.cddl), shape only |
 | Object name model (whitepaper Q4) | one `path`, deliberately not settled |
 | BLAKE3-256 | **implemented** — [`python/anla1/blake3.py`](python/anla1/blake3.py), a dependency-free reference plus the Rust fast path, 55 tests |
 | Zstandard | decided (§8), not implemented |
-| Metadata namespaces, snapshots beyond one, signatures, encryption, parity | later milestones |
+| Metadata namespaces, signatures, encryption, parity | later milestones |
 
 Anything not in the "implemented" rows is a claim about intent, not about code. This
 table is the first thing to update when that changes, and it is deliberately at the
@@ -244,6 +245,26 @@ fuzzing. The lesson is not "check sequences" — it is that **every invariant in
 document needs a sentence saying how a reader checks it**, and any that cannot be
 written that way should be deleted rather than left as decoration.
 
+### 4.4 Alignment is a rule about starts, not only about padding
+
+Every record MUST begin at an offset that is a multiple of eight.
+
+This does not follow from "records are padded to eight bytes". Padding keeps a
+sequence of records aligned only while every writer also *starts* at an aligned
+offset, and the case where one does not is not hypothetical: a torn append leaves a
+file at an arbitrary length, and a writer that resumes at the end of that file puts
+every subsequent record at a misaligned offset.
+
+The consequence is worse than untidy. `find_latest_footer` scans backwards in
+alignment-sized steps (§6), so a misaligned footer is never probed — the archive
+reads as the previous snapshot, with every hash in it correct, and no error anywhere.
+It is the same failure class as trusting `latest_footer_hint`, reached by a
+different route, and it was found by appending to a deliberately torn archive rather
+than by reading this document.
+
+A writer therefore MUST resume an append at the end of the newest complete snapshot
+rather than at the end of the file. See §6.
+
 ---
 
 ## 5. Manifest
@@ -411,6 +432,91 @@ and verifiable, and the archive reads as the older snapshot rather than as damag
 A reader MUST be able to enumerate snapshots by walking `previous_footer_offset`
 backwards, and MUST detect a cycle rather than following one.
 
+### 6.1 A manifest describes its whole snapshot
+
+A snapshot's `MANF` MUST list every object in that snapshot's tree and a descriptor
+for every chunk it references — including chunks whose `CHNK` records were written
+for an earlier snapshot. A manifest is never a delta.
+
+So extracting any snapshot reads exactly one manifest, and `preservation_root`
+covers a tree the document containing it actually describes. The alternative was
+considered and rejected: a delta manifest makes snapshot *N* unreadable without all
+*N* of its ancestors, and makes a root cover something absent from its own document,
+which is not a root.
+
+The delta therefore lives in the payload records — `ΔC` above — which is where the
+bytes are.
+
+The cost is that a manifest grows with the tree rather than with the change. Two
+things absorb it: `FLAG_COMPRESSED_METADATA` (§4.2), which exists for exactly this
+and is set by nothing else so far, and the fact that consecutive manifests are
+nearly identical, which is the case compression is good at.
+
+### 6.2 A chunk is stored once per archive
+
+If a chunk id is already present anywhere in the archive, a new snapshot MUST
+reference the existing record rather than writing the bytes again.
+
+This requires a chunk id to descriptor lookup across prior snapshots. Walking those
+manifests is sufficient and requires nothing new. An `INDX` record MAY carry a
+cumulative index, and if present it is a **cache**: a reader MUST produce identical
+results with it ignored, and MUST resolve any disagreement in favour of the
+manifests. An index permitted to win is a second format.
+
+**One archive uses one hash algorithm for its chunk ids.** Chunk ids are hashes, so
+two algorithms in one archive means two namespaces of chunk id sharing one lookup —
+identical bytes stored twice and deduplication silently doing nothing. Hash agility
+(§7) is per archive, not per snapshot. This is the one place where agility has a
+boundary, and it is a consequence of content addressing rather than a limitation of
+the container.
+
+### 6.3 Lineage is checked
+
+- `parent_snapshot` MUST be absent when `snapshot_sequence` is 1, and present
+  otherwise.
+- `parent_snapshot` MUST equal the `snapshot_id` of the snapshot that the footer
+  chain points back to.
+- `snapshot_sequence` MUST be exactly one greater than its parent's.
+- The oldest snapshot in a chain MUST have `snapshot_sequence` 1. (Single-volume
+  only; question 9 above is what would relax this.)
+
+Note what an archive violating the second rule does *not* need in order to look
+correct: nothing else changes. `parent_snapshot` is not covered by
+`preservation_root` — the gap §5.3 records — so an archive can name any ancestor at
+all, or a different one, with every root and every payload hash still verifying.
+Checked here, or it is decoration.
+
+### 6.4 No forward references
+
+A chunk descriptor MUST NOT point at a record that begins at, or extends past, the
+offset of the `MANF` that references it.
+
+In an append-only file every byte a snapshot depends on was written before it, which
+turns this from a plausibility judgement into arithmetic a reader can evaluate while
+holding one manifest and one footer.
+
+### 6.5 One chunk id, one descriptor
+
+If two snapshots reference the same chunk id, their descriptors MUST be identical in
+every field. The same content id with different stored bytes, or a different place
+to find them, means one of the two snapshots is wrong about what it stored, and a
+content-addressed format cannot be indifferent to which.
+
+### 6.6 Appending
+
+A writer MUST resume at the end of the newest complete snapshot — the end of its
+`FOOT` record — and not at the end of the file.
+
+Everything beyond that footer belongs to no snapshot: it can only be an append that
+did not finish, since a chunk record can be referenced only by a manifest written
+after it. Discarding it reclaims the space, and, by §4.4, is what keeps the next
+record aligned. A writer that appends after the abandoned bytes produces an archive
+whose newest footer cannot be found.
+
+Old bytes are otherwise never modified. The one exception is `latest_footer_hint` in
+the bootstrap header, which is advisory and which no reader may use to decide what is
+latest (§3), so moving it cannot change how anything reads.
+
 **Open (whitepaper question 9):** multi-volume atomicity. MVP's footer is one
 96-byte record at a known offset; with two volumes there is no such place, and the
 chain has to become a first-class object rather than a convenience. Not decided, and
@@ -532,11 +638,12 @@ only that chunk — true in MVP, and a conformance requirement here.
 1. **Milestone 0 — freeze the container.** Header, record frame with flags, footer
    chain, capability URIs, the CBOR manifest, CDDL schemas. Two implementations
    reading each other's bytes, and the differential fuzzer pointed at them, before
-   any codec work. *Canonical CBOR is done; the rest of this list is not.*
+   any codec work. *Done in one implementation, which is not the same as frozen.*
 2. **Milestone 3 before Milestone 2.** Append-only snapshots and cross-snapshot
    deduplication, reusing `anla-cdc-1` unchanged. Snapshots are the structural
    change; metadata namespaces are breadth, and doing breadth first means doing it
-   twice.
+   twice. *Done in one implementation — §6.1 to §6.6 are what implementing it
+   settled, and §4.4 is what it found.*
 3. **Milestone 2 — metadata namespaces**, one platform at a time, with the fidelity
    report as the deliverable rather than an afterthought.
 4. **Milestone 4 — the planner**, rule-based first, with Q13's latency budget

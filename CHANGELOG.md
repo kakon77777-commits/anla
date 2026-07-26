@@ -7,6 +7,50 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
+## 2026-07-27 — Milestone 3: append-only snapshots, and an invisible footer
+
+### Added
+
+- **[`python/anla1/snapshot.py`](python/anla1/snapshot.py)** — appending a snapshot
+  to an existing 1.0 archive, reusing every chunk already in it. 28 tests.
+  `append_snapshot`, `list_snapshots`, `extract_snapshot`, `verify_archive`, `diff`.
+
+  A second snapshot of an unchanged tree writes no chunk records at all — a manifest
+  and a footer. With `anla-cdc-1`, prepending ten bytes to a 300 KB file shares 65 of
+  66 chunks with the previous snapshot.
+
+- **[`design/milestone-3-plan.md`](design/milestone-3-plan.md)**, written before the
+  code, and **`SPEC-1.0-DRAFT.md` §6.1–§6.6**, written from what the code settled: a
+  manifest describes its whole snapshot and never a delta; a chunk is stored once per
+  archive; lineage is checked against the chain; no forward references; one chunk id
+  has one descriptor.
+
+### Fixed
+
+- **A writer must resume an append at the end of the newest complete snapshot, not
+  at the end of the file** (`SPEC-1.0-DRAFT.md` §4.4 and §6.6). A torn write leaves
+  the file at an arbitrary length; appending onto that end puts every following
+  record at an offset that is not a multiple of eight. `find_latest_footer` scans
+  backwards in alignment-sized steps, so the new footer is **never probed** — the
+  archive keeps reading as the older snapshot, with every hash in it correct and
+  nothing reporting an error.
+
+  "Records are padded to eight bytes" is not the same statement as "records begin at
+  multiples of eight". The first is about what a writer emits; the second is what a
+  reader depends on. This is the third rule in this format that looked like a
+  consequence of another rule and was not — after `latest_footer_hint` and record
+  `sequence`.
+
+### Changed
+
+- **One archive uses one hash algorithm for its chunk ids** (§6.2). Chunk ids are
+  hashes, so two algorithms in one archive means two namespaces of chunk id sharing
+  one lookup: identical bytes stored twice, deduplication silently doing nothing,
+  and every check still passing. Hash agility is per archive, not per snapshot — the
+  first boundary the agility added in Milestone 0 has run into.
+
+---
+
 ## 2026-07-27 — BLAKE3, and the first real exercise of hash agility
 
 ### Added
