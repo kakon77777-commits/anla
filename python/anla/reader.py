@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
+from .canonical import canonical_bytes
 from .errors import (
     FidelityDegraded,
     IntegrityFailure,
@@ -34,6 +35,8 @@ from .format import (
     FORMAT_VERSION,
     Footer,
     Header,
+    build_footer,
+    build_record,
     decode_chunk,
     parse_footer,
     parse_header,
@@ -325,6 +328,32 @@ class Archive:
         stripped = dict(self.manifest)
         stripped["auxiliary"] = {"decision_log": [], "disposable": True}
         return stripped
+
+    def rewrite_without_auxiliary(self) -> bytes:
+        """Return a new, valid archive with the intelligence plane emptied.
+
+        This is the disposability claim as an operation rather than an assertion.
+        A planner's decision log records what a model was told and what it chose,
+        which is exactly the sort of thing you might not want to hand to someone
+        along with the data — so being able to drop it, and still have an archive
+        that verifies and extracts identically, is a feature and not only a test.
+
+        Only the manifest record and the footer are rebuilt. Every chunk record
+        keeps its bytes and its offset, so the chunk descriptors stay true.
+        """
+        manifest = self.without_auxiliary()
+        payload = canonical_bytes(manifest)
+        record = parse_record(self.data, self.footer.manifest_record_offset)
+        prefix = self.data[:self.footer.manifest_record_offset]
+        rebuilt = build_record(
+            "MANF",
+            {"encoding": "canonical-json",
+             "payload_sha256": sha256_hex(payload),
+             "preservation_required": True},
+            payload, record.sequence,
+        )
+        return prefix + rebuilt + build_footer(
+            len(prefix), len(rebuilt), self.header.archive_uuid, sha256_digest(payload))
 
     # -- extraction -------------------------------------------------------
 

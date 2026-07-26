@@ -64,6 +64,7 @@ def esc(value: str) -> str:
 NAV = (
     ("nav_home", "", True),
     ("nav_workbench", "workbench/", True),
+    ("nav_demo", "demo/", True),
     ("nav_spec", "/spec/", False),
     ("nav_papers", "papers/", True),
     ("nav_conformance", "/conformance/", False),
@@ -160,6 +161,7 @@ def page_home(lang: str) -> str:
     <p class="lead">{esc(s['hero_lead'])}</p>
     <div class="actions">
       <a class="btn primary" href="{b}workbench/">{esc(s['hero_cta_1'])}</a>
+      <a class="btn" href="{b}demo/">{esc(s['cta_demo_t'])}</a>
       <a class="btn" href="/spec/">{esc(s['hero_cta_2'])}</a>
     </div>
   </div>
@@ -242,6 +244,7 @@ def page_home(lang: str) -> str:
     <h2>{esc(s['get_h2'])}</h2></div>
   <div class="filecards">
     {_filecard(f"{b}workbench/", s['cta_workbench_t'], s['cta_workbench_d'], 'HTML · no backend')}
+    {_filecard(f"{b}demo/", s['cta_demo_t'], s['cta_demo_d'], '67 assertions')}
     {_filecard("/standalone.html" if lang == "en" else "/standalone.zh.html",
                s['cta_standalone_t'], s['cta_standalone_d'], 'single file')}
     {_filecard("/spec/", s['cta_spec_t'], s['cta_spec_d'], 'EN')}
@@ -408,6 +411,35 @@ def page_workbench(lang: str) -> str:
                   alternate=f"{base(other(lang))}workbench/")
 
 
+def page_demo(lang: str) -> str:
+    s = strings(lang)
+    body = f"""<main><div class="wrap"><section class="section">
+  <div class="section-head"><span class="kicker">{esc(s['demo_kicker'])}</span>
+    <h1>{esc(s['demo_h1'])}</h1>
+    <p class="section-desc">{esc(s['demo_desc'])}</p></div>
+
+  <div class="runbar">
+    <button class="btn primary" id="runButton">{esc(s['demo_run'])}</button>
+    <span class="badge" id="tally">—</span>
+    <span class="badge" id="env">…</span>
+    <span class="runmeta">{esc(s['demo_counts'])}: <b id="counts">…</b>
+      <small>{esc(s['demo_counts_note'])}</small></span>
+  </div>
+
+  <div class="callout"><strong>▸</strong> {esc(s['demo_headline'])}</div>
+  <div class="callout" id="verdict" hidden></div>
+
+  <div id="results" class="suites"></div>
+
+  <p class="section-desc" style="margin-top:26px">{esc(s['demo_source'])}
+    <a href="/conformance/">{esc(s['nav_conformance'])} ↗</a></p>
+</section></div>
+<script type="module" src="/assets/demo.js"></script></main>"""
+    return layout(lang, slug="demo/", title=f"{s['demo_h1']} — ANLA",
+                  description=s["meta_demo"], body=body, runtime=True,
+                  alternate=f"{base(other(lang))}demo/")
+
+
 def build_standalone(lang: str) -> tuple[str, str]:
     """One file, no requests: the css, the core and the app inlined.
 
@@ -568,6 +600,46 @@ PAPERS = {
 }
 
 
+def fixtures_module() -> str:
+    """conformance/fixtures.json, verbatim, as an ES module.
+
+    Verbatim matters: the live test page compares what it packs against hashes
+    the Python writer produced, so if this file were massaged on the way in, the
+    comparison would be measuring the massaging.
+    """
+    raw = (REPO / "conformance" / "fixtures.json").read_text(encoding="utf-8")
+    json.loads(raw)  # fail the build rather than ship a broken module
+    return ("// Generated from conformance/fixtures.json — do not edit.\n"
+            "export const FIXTURES = " + raw.rstrip() + ";\n")
+
+
+def vectors_module() -> str:
+    """The frozen vectors as base64, plus the committed SHA256SUMS.
+
+    The hashes are what make the page's headline claim checkable in front of the
+    reader: they were produced by the Python writer, and the browser has to
+    arrive at the same ones from the same fixtures.
+    """
+    import base64 as b64
+
+    entries = {}
+    for vector in sorted(VECTORS.glob("*.anla")):
+        entries[vector.name] = b64.b64encode(vector.read_bytes()).decode("ascii")
+    sums = {}
+    for line in (VECTORS / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#"):
+            digest, name = line.split("  ", 1)
+            sums[name] = digest
+    missing = set(entries) - set(sums)
+    if missing:
+        raise SystemExit(f"vectors without a committed hash: {sorted(missing)}")
+    return ("// Generated from conformance/vectors/ — do not edit.\n"
+            "export const VECTOR_BYTES_BASE64 = "
+            + json.dumps(entries, indent=0, sort_keys=True) + ";\n"
+            "export const VECTOR_SHA256 = "
+            + json.dumps(sums, indent=1, sort_keys=True) + ";\n")
+
+
 def git_revision() -> str:
     try:
         out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=str(REPO),
@@ -593,6 +665,7 @@ def main() -> int:
         prefix = "" if lang == "en" else "zh/"
         emit(f"{prefix}index.html", page_home(lang))
         emit(f"{prefix}workbench/index.html", page_workbench(lang))
+        emit(f"{prefix}demo/index.html", page_demo(lang))
         emit(f"{prefix}papers/index.html", page_papers(lang))
         for slug, spec in PAPERS.items():
             s = strings(lang)
@@ -644,6 +717,14 @@ def main() -> int:
               + json.dumps(payload, ensure_ascii=False, sort_keys=True) + ";\n")
         written.append(f"assets/i18n.{lang}.js")
 
+    # The live test page's inputs travel with the page instead of being fetched.
+    # That is not an optimisation: connect-src is 'none', so a page that fetched
+    # its own fixtures would need that promise loosened to run its own tests.
+    shutil.copy2(ASSETS / "demo.js", DIST / "assets" / "demo.js")
+    write(DIST / "assets" / "fixtures.js", fixtures_module())
+    write(DIST / "assets" / "vectors.js", vectors_module())
+    written += ["assets/demo.js", "assets/fixtures.js", "assets/vectors.js"]
+
     # downloadable conformance vectors
     vectors_out = DIST / "downloads" / "vectors"
     vectors_out.mkdir(parents=True, exist_ok=True)
@@ -682,6 +763,10 @@ def main() -> int:
         ("standalone.html", "async function pack("),
         ("standalone.zh.html", "window.ANLA_I18N"),
         ("workbench/index.html", '/assets/i18n.en.js'),
+        ("demo/index.html", '<script type="module" src="/assets/demo.js">'),
+        ("zh/demo/index.html", 'suite_rej'.replace('suite_rej', 'runButton')),
+        ("assets/fixtures.js", "export const FIXTURES"),
+        ("assets/vectors.js", "export const VECTOR_SHA256"),
         ("spec/index.html", "Bootstrap Header"),
         ("papers/anla-whitepaper/index.html", "Extract(Pack(F,P))=F"),
         ("zh/papers/anla-whitepaper/index.html", "保存平面"),

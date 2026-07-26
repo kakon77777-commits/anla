@@ -118,21 +118,39 @@ def test_unicode_paths_round_trip_byte_exact():
 
 
 def test_auxiliary_plane_is_disposable():
-    """T-AUX-1: emptying the intelligence plane changes no extracted byte."""
+    """T-AUX-1: emptying the intelligence plane changes no extracted byte.
+
+    Asserted against a *rewritten archive*, not against the same manifest object
+    twice. Comparing an archive with itself after calling a method that returns a
+    copy would pass no matter what the method did.
+    """
     tree = build_tree(TREES["compressible"])
     archive = open_archive(pack(tree, PackPlan(chunk_size=16384)).data)
-    before = {o["path"]: archive.read(o["path"]) for o in archive.files()}
-    stripped = archive.without_auxiliary()
-
-    from anla.canonical import canonical_bytes
-    assert canonical_bytes(stripped) != canonical_bytes(archive.manifest)
-    assert stripped["objects"] == archive.manifest["objects"]
-    assert stripped["chunks"] == archive.manifest["chunks"]
-    # And the decision log carried real content, so this is not a vacuous pass.
+    # The decision log has to carry real content, or this proves nothing.
     assert archive.manifest["auxiliary"]["decision_log"]
+    before = {o["path"]: archive.read(o["path"]) for o in archive.files()}
 
-    after = {o["path"]: archive.read(o["path"]) for o in archive.files()}
-    assert after == before
+    stripped_bytes = archive.rewrite_without_auxiliary()
+    assert stripped_bytes != archive.data
+    assert len(stripped_bytes) < len(archive.data)
+
+    rewritten = open_archive(stripped_bytes, full=True)
+    assert rewritten.verification["status"] == "ok"
+    assert rewritten.manifest["auxiliary"] == {"decision_log": [], "disposable": True}
+    # The preservation plane is untouched, down to the chunk offsets.
+    assert rewritten.manifest["objects"] == archive.manifest["objects"]
+    assert rewritten.manifest["chunks"] == archive.manifest["chunks"]
+    assert {o["path"]: rewritten.read(o["path"]) for o in rewritten.files()} == before
+
+
+def test_stripping_twice_is_a_fixed_point():
+    """Stripping an already-stripped archive changes nothing, which is what makes
+    the operation safe to run without checking first."""
+    tree = build_tree(TREES["compressible"])
+    archive = open_archive(pack(tree, PackPlan(chunk_size=16384)).data)
+    once = archive.rewrite_without_auxiliary()
+    twice = open_archive(once).rewrite_without_auxiliary()
+    assert once == twice
 
 
 def test_decision_log_records_a_real_codec_choice():

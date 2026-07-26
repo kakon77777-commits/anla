@@ -475,12 +475,36 @@ async function deflate(raw) {
   return new Uint8Array(await new Response(stream.readable).arrayBuffer());
 }
 
-async function inflate(payload) {
+/**
+ * Inflate, refusing to produce more than *limit* bytes.
+ *
+ * SPEC.md section 11 requires the output cap to be enforced *while* decoding.
+ * Buffering the whole stream and checking the length afterwards would mean a
+ * chunk that declares a kilobyte and expands to a gigabyte gets the gigabyte
+ * allocated first — which is the entire point of a compression bomb.
+ */
+async function inflateBounded(payload, limit) {
   const stream = new DecompressionStream('deflate');
   const writer = stream.writable.getWriter();
-  writer.write(payload);
-  writer.close();
-  return new Uint8Array(await new Response(stream.readable).arrayBuffer());
+  // Errors surface from read(). The trailing catch covers both the write and the
+  // close, because cancelling the reader below rejects the close — and an
+  // unhandled rejection would take the whole process down instead of the archive.
+  writer.write(payload).then(() => writer.close()).catch(() => {});
+  const reader = stream.readable.getReader();
+  const parts = [];
+  let total = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) {
+      await reader.cancel().catch(() => {});
+      throw limitExceeded('chunk decodes to more bytes than it declares',
+        { declaredRawSize: limit, producedAtLeast: total });
+    }
+    parts.push(value);
+  }
+  return concatBytes(...parts);
 }
 
 export async function encodeChunk(raw, compression) {
@@ -513,7 +537,7 @@ export async function decodeChunk(payload, codec, rawSize, maxChunkOutput = null
   if (!hasNativeCompression()) {
     throw unsupported('this runtime cannot decode DEFLATE streams', { codec });
   }
-  const raw = await inflate(payload);
+  const raw = await inflateBounded(payload, rawSize);
   if (raw.length !== rawSize) {
     throw integrityFailure('decompressed chunk length mismatch',
       { declared: rawSize, actual: raw.length });
@@ -970,6 +994,30 @@ export async function openArchive(input, options = {}) {
     /** The manifest with the intelligence plane emptied — see SPEC.md 8.5. */
     withoutAuxiliary() {
       return { ...manifest, auxiliary: { decision_log: [], disposable: true } };
+    },
+    /**
+     * A new, valid archive with the intelligence plane emptied.
+     *
+     * The disposability claim as an operation rather than an assertion. A
+     * planner's decision log records what a model was told and what it chose,
+     * which is not always something you want to hand over with the data — so
+     * dropping it and still having an archive that verifies and extracts
+     * identically is a feature, not only a test.
+     *
+     * Only the manifest record and the footer are rebuilt; every chunk record
+     * keeps its bytes and its offset, so the chunk descriptors stay true.
+     */
+    async rewriteWithoutAuxiliary() {
+      const payload = canonicalBytes(this.withoutAuxiliary());
+      const hash = await sha256(payload);
+      const prefix = bytes.subarray(0, footer.manifestRecordOffset);
+      const rebuilt = buildRecord('MANF', {
+        encoding: 'canonical-json',
+        payload_sha256: toHex(hash),
+        preservation_required: true,
+      }, payload, manifestRecord.sequence);
+      return concatBytes(prefix, rebuilt.bytes,
+        buildFooter(prefix.length, rebuilt.totalLength, header.archiveUuid, hash));
     },
   };
 }

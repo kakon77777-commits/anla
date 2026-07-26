@@ -163,6 +163,37 @@ def test_javascript_rejects_what_python_rejects(node, tmp_path):
     assert result["code"] == "ANLA_INTEGRITY_FAILURE"
 
 
+def test_javascript_stops_a_compression_bomb_mid_decode(node, tmp_path):
+    """T-BMB-2, on the JavaScript side.
+
+    SPEC.md section 11 requires the output cap to be enforced while decoding.
+    Buffering a stream and checking its length afterwards passes the same
+    assertions while allocating the whole bomb first, so this test exists to pin
+    the behaviour rather than the error message: eight megabytes of zeros declared
+    as one kilobyte must be refused with the resource-limit code.
+    """
+    import zlib
+
+    from test_rejections import forge  # the layout-primitive forge, not the writer
+
+    declared = 1024
+    bomb = zlib.compress(b"\0" * (8 * 1024 * 1024))
+    fake_id = __import__("hashlib").sha256(b"\0" * declared).hexdigest()
+    objects = [{"type": "file", "path": "bomb.bin", "size": declared, "sha256": fake_id,
+                "chunks": [{"id": fake_id, "length": declared}], "metadata": {}}]
+    archive = tmp_path / "bomb.anla"
+    archive.write_bytes(forge([(fake_id, "deflate", bomb, declared)], objects))
+
+    from anla.errors import ResourceLimitExceeded
+    with pytest.raises(ResourceLimitExceeded):
+        open_archive(archive)
+
+    report = run_node(node, ["verify", str(archive)])
+    result = report["results"][0]
+    assert result["ok"] is False, result
+    assert result["code"] == "ANLA_RESOURCE_LIMIT_EXCEEDED", result
+
+
 def test_fixture_content_helpers_agree(node_pack):
     """Both drivers must build the same objects from fixtures.json, or every other
     comparison in this module is comparing different inputs.

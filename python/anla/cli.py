@@ -203,6 +203,34 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_strip(args: argparse.Namespace) -> int:
+    """Rewrite an archive with the intelligence plane emptied."""
+    archive = open_archive(args.archive, full=True, limits=_limits_from_args(args))
+    stripped = archive.rewrite_without_auxiliary()
+    # Verify the thing we are about to hand over, from its own bytes.
+    rewritten = open_archive(stripped, full=True, limits=_limits_from_args(args))
+    for obj in archive.files():
+        if rewritten.read(obj["path"]) != archive.read(obj["path"]):
+            from .errors import IntegrityFailure
+            raise IntegrityFailure("stripping changed extracted content", path=obj["path"])
+    Path(args.output).write_bytes(stripped)
+    removed = len(archive.manifest.get("auxiliary", {}).get("decision_log", []))
+    payload = {
+        "output": args.output,
+        "bytes_before": len(archive.data),
+        "bytes_after": len(stripped),
+        "decision_log_entries_removed": removed,
+        "verification": rewritten.verification,
+        "extraction_unchanged": True,
+    }
+    _emit(payload, args.json, [
+        f"wrote {args.output}  ({len(archive.data)} → {len(stripped)} bytes)",
+        f"  removed {removed} decision log entries",
+        "  re-verified, and every restored byte is unchanged",
+    ])
+    return 0
+
+
 def cmd_manifest(args: argparse.Namespace) -> int:
     archive = open_archive(args.archive, full=False, limits=_limits_from_args(args))
     manifest = archive.without_auxiliary() if args.strip_auxiliary else archive.manifest
@@ -297,6 +325,14 @@ def build_parser() -> argparse.ArgumentParser:
     add_limits(p_export)
     add_json(p_export)
     p_export.set_defaults(func=cmd_export)
+
+    p_strip = sub.add_parser(
+        "strip", help="rewrite an archive with the intelligence plane emptied")
+    p_strip.add_argument("archive")
+    p_strip.add_argument("-o", "--output", required=True)
+    add_limits(p_strip)
+    add_json(p_strip)
+    p_strip.set_defaults(func=cmd_strip)
 
     p_manifest = sub.add_parser("manifest", help="print the manifest")
     p_manifest.add_argument("archive")

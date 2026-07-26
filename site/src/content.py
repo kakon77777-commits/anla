@@ -59,7 +59,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "Reference implementations",
         "fact_impl_v": "2, cross-verified",
         "fact_tests": "Conformance tests",
-        "fact_tests_v": "165 passing",
+        "fact_tests_v": "168 + 67 in-browser",
         "strip_1_t": "Local-first",
         "strip_1_d": "The workbench runs entirely in your tab: your files are read "
                      "into memory and never sent anywhere. The page makes no requests "
@@ -157,6 +157,9 @@ STRINGS: dict[str, dict[str, str]] = {
 
         "get_kicker": "Get it",
         "get_h2": "Read it, run it, or check it yourself.",
+        "cta_demo_t": "Live test",
+        "cta_demo_d": "Run the conformance suite in your own browser and watch every "
+                      "assertion resolve. It starts on load.",
         "cta_workbench_t": "Live workbench",
         "cta_workbench_d": "Build and verify a real .anla in your browser. No backend.",
         "cta_standalone_t": "Standalone page",
@@ -374,7 +377,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "參考實作",
         "fact_impl_v": "2 套，互相驗證",
         "fact_tests": "一致性測試",
-        "fact_tests_v": "165 項通過",
+        "fact_tests_v": "168 項 + 瀏覽器 67 項",
         "strip_1_t": "本機優先",
         "strip_1_d": "工作台完全在你的分頁裡執行：檔案只讀進記憶體，不會被送到任何"
                      "地方。頁面本身不發出任何請求，其內容安全政策也禁止對外連線。",
@@ -458,6 +461,9 @@ STRINGS: dict[str, dict[str, str]] = {
 
         "get_kicker": "取用",
         "get_h2": "讀它、跑它，或者自己驗它。",
+        "cta_demo_t": "即時測試",
+        "cta_demo_d": "在你自己的瀏覽器裡執行一致性測試，看每一項斷言逐一定案。"
+                      "開頁即自動開始。",
         "cta_workbench_t": "線上工作台",
         "cta_workbench_d": "在瀏覽器裡建立並驗證一個真正的 .anla，不需要後端。",
         "cta_standalone_t": "獨立單檔頁面",
@@ -620,7 +626,7 @@ STRINGS: dict[str, dict[str, str]] = {
 }
 
 # Keys app.js reads at runtime; the build injects exactly these into the page.
-RUNTIME_KEYS = (
+WORKBENCH_KEYS = (
     "runtime_ready", "runtime_store_only", "cap_crypto", "cap_deflate", "native",
     "fallback", "available", "store_only", "waiting_for_selection", "ready_to_build",
     "more_files", "busy_build_title", "busy_build_detail", "busy_open_title",
@@ -630,3 +636,11 @@ RUNTIME_KEYS = (
     "dir_label", "m_files", "m_dirs", "m_logical", "m_archive", "m_chunks",
     "m_stored", "m_ratio", "m_verified", "m_format", "m_uuid", "m_needs_ai",
 )
+
+from demo_content import DEMO_STRINGS, demo_keys  # noqa: E402
+
+for _lang, _extra in DEMO_STRINGS.items():
+    STRINGS[_lang].update(_extra)
+
+# One i18n asset per language serves both the workbench and the live test page.
+RUNTIME_KEYS = WORKBENCH_KEYS + demo_keys(WORKBENCH_KEYS)

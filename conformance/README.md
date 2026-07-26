@@ -25,11 +25,18 @@ implementations.
 
 ## Running it
 
+In a browser, with nothing installed: **<https://anla.evemisslab.com/demo/>** runs
+67 of these assertions live, including the byte-for-byte comparison against the
+hashes committed here. It fetches nothing — the fixtures and vectors are compiled
+into the page — so a red row there is a real defect on your platform.
+
+Locally:
+
 ```bash
 python -m pytest python/tests -q
 ```
 
-165 tests. The cross-implementation tests skip themselves if `node` is not on
+168 tests. The cross-implementation tests skip themselves if `node` is not on
 `PATH`; everything else runs with nothing but a Python interpreter.
 
 Individual pieces, if you want them separately:
@@ -39,6 +46,12 @@ node conformance/run_node.mjs selftest
 python conformance/make_vectors.py --check
 node conformance/run_node.mjs verify conformance/vectors/basic-store.anla
 ```
+
+`T-AUX-1` is worth singling out, because it is easy to write as a test that cannot
+fail. Comparing a manifest with a copy of itself passes no matter what the code
+under test did. The assertion here rewrites the archive — `anla strip` does the
+same thing from the command line — and then compares the *rewritten* archive's
+extraction against the original's.
 
 ---
 
@@ -91,7 +104,8 @@ quietly worked around.
 | `T-BIG-1` | File larger than `chunk_size` splits and restores |
 | `T-UNI-1` | Non-ASCII paths round-trip byte-exact |
 | `T-EXT-1` | Paths the target filesystem folds together fail as a fidelity error, naming both |
-| `T-AUX-1` | Stripping the intelligence plane changes no extracted byte |
+| `T-AUX-1` | Rewriting an archive with the intelligence plane emptied changes no extracted byte |
+| `T-AUX-2` | Stripping twice gives the same bytes as stripping once |
 | `T-REP-1` | Same input and same `(uuid, created_ns)` gives byte-identical output |
 | `T-GLB-1` | `*` does not cross `/`, `**` does, a directory survives its excluded contents |
 | `T-XIM-1` | Python writer read by JavaScript |
@@ -100,7 +114,7 @@ quietly worked around.
 | `T-XIM-4` | Both reject the same corruption with the same error code |
 | `T-ORG-1` | The original v0.1 release archive still verifies, in both implementations |
 | `T-BMB-1` | A chunk declaring an absurd `raw_size` is refused before allocation |
-| `T-BMB-2` | A DEFLATE payload expanding past its declared size is stopped mid-decode |
+| `T-BMB-2` | A DEFLATE payload expanding past its declared size is stopped mid-decode, in both implementations |
 | `T-FRZ-1` | Every frozen vector still matches what the current writer produces |
 
 ---

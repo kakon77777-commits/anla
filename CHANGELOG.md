@@ -7,6 +7,47 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
+## 2026-07-26 (later) — a live test page, and one conformance gap closed
+
+### Added
+
+- **[`/demo/`](https://anla.evemisslab.com/demo/) — the conformance suite, running
+  in the reader's browser.** 67 assertions across four suites: cross-implementation
+  byte equality, frozen vectors, round trips with the preservation invariants, and
+  the rejections. Bilingual, starts on load, and fetches nothing — `fixtures.json`
+  and the frozen vectors are compiled into the page, because `connect-src` is
+  `'none'` and a page that fetched its own fixtures would need that promise
+  loosened to test itself.
+
+  The load-bearing suite is the first one: it compares what the browser packs
+  against the hashes in `conformance/vectors/SHA256SUMS`, which the *Python* writer
+  produced. A green row there means the reader's browser just reproduced, byte for
+  byte, an archive a different implementation in a different language wrote.
+
+- **`Archive.rewrite_without_auxiliary()` / `rewriteWithoutAuxiliary()`, and
+  `anla strip`.** Emptying the intelligence plane is now an operation, not only an
+  assertion: the manifest record and footer are re-emitted, every chunk record
+  keeps its bytes and its offset, and the result verifies and extracts identically.
+  A planner's decision log records what a model was told and what it chose, which
+  is not always something to hand over with the data. Specified in
+  [SPEC.md §8.5](SPEC.md#85-auxiliary--the-intelligence-plane).
+
+### Fixed
+
+- **The JavaScript decoder buffered a DEFLATE stream before checking its size.**
+  SPEC.md §11 requires the output cap to be enforced *while* decoding; the previous
+  code inflated fully and compared lengths afterwards, which passes the same
+  assertions while allocating the whole bomb first. It now reads the stream
+  incrementally and cancels once the declared size is exceeded. `T-BMB-2` now runs
+  against both implementations instead of only Python.
+
+- **`T-AUX-1` was close to vacuous.** It compared a manifest against a copy of
+  itself, which passes regardless of what the code under test does. It now compares
+  a *rewritten archive's* extraction against the original's, on both sides, and
+  `T-AUX-2` pins that stripping twice equals stripping once.
+
+---
+
 ## 2026-07-26 — `ANLA-MVP v0.1` frozen, twice implemented
 
 The first release where the format is specified rather than merely implemented.

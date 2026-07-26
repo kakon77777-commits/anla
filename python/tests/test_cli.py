@@ -110,6 +110,28 @@ def test_manifest_can_strip_the_intelligence_plane(capsys):
     assert json.loads(out)["auxiliary"] == {"decision_log": [], "disposable": True}
 
 
+def test_strip_removes_the_decision_log_and_nothing_else(capsys, workspace, tmp_path):
+    archive = tmp_path / "full.anla"
+    stripped = tmp_path / "stripped.anla"
+    code, _, _ = run(capsys, ["pack", str(workspace), "-o", str(archive), "--json",
+                              "--chunk-size", "1024"])
+    assert code == 0
+
+    code, out, _ = run(capsys, ["strip", str(archive), "-o", str(stripped), "--json"])
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["decision_log_entries_removed"] > 0
+    assert payload["bytes_after"] < payload["bytes_before"]
+    assert payload["verification"]["status"] == "ok"
+
+    from anla import open_archive
+    before, after = open_archive(archive), open_archive(stripped)
+    assert after.manifest["auxiliary"] == {"decision_log": [], "disposable": True}
+    assert after.manifest["objects"] == before.manifest["objects"]
+    assert {o["path"]: after.read(o["path"]) for o in after.files()} \
+        == {o["path"]: before.read(o["path"]) for o in before.files()}
+
+
 def test_export_zip(capsys, tmp_path):
     import zipfile
     target = tmp_path / "out.zip"

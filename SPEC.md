@@ -423,6 +423,14 @@ This member is the entire intelligence plane of the profile, and it is
 hash and the footer, but MUST NOT change what any decoder extracts. Conformance
 test `T-AUX-1` ([§12](#12-conformance)) asserts exactly this.
 
+An implementation MAY therefore rewrite an existing archive with the plane
+emptied, and this is a supported operation rather than a trick: keep the byte
+range up to `manifest_record_offset` unchanged, re-emit the `MANF` record with the
+stripped manifest, and write a new footer. Every chunk record keeps its bytes and
+its offset, so every chunk descriptor stays true and the result verifies without
+touching the payload. A decision log records what a planner was told and what it
+chose, which is not always something to hand over along with the data.
+
 ---
 
 ## 9. Paths

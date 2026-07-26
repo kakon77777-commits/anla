@@ -9,6 +9,7 @@ implementations that agree byte for byte, the conformance suite that proves it, 
 the site that hosts a working version you can run in a browser tab.
 
 - **Site and live workbench:** https://anla.evemisslab.com
+- **Live test:** https://anla.evemisslab.com/demo/ — runs the suite in your browser
 - **Specification:** [`SPEC.md`](SPEC.md) — normative for `ANLA-MVP v0.1`
 - **Papers:** [`papers/`](papers/) — Traditional Chinese originals, English translations
 - **Conformance:** [`conformance/`](conformance/) — fixtures, frozen vectors, drivers
@@ -77,6 +78,11 @@ compares a fixture against itself in front of you.
 There is also a [single-file build](https://anla.evemisslab.com/standalone.html):
 save it, open it offline, it still works.
 
+And a [live test page](https://anla.evemisslab.com/demo/) that runs 67 of the
+conformance assertions in your own browser — including the byte-for-byte
+comparison against hashes the Python writer produced. It fetches nothing: the
+fixtures and the frozen vectors are compiled into the page.
+
 ### From Python
 
 ```bash
@@ -86,6 +92,7 @@ anla verify project.anla
 anla list project.anla
 anla extract project.anla --to restored
 anla export project.anla -o project.zip
+anla strip project.anla -o shared.anla     # drop the planner's decision log
 ```
 
 Every subcommand takes `--json`, because the first-class caller of this tool is an
@@ -121,8 +128,9 @@ archive.read('docs/readme.txt');
 python -m pytest python/tests -q
 ```
 
-165 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
-without it. Everything runs on Linux, macOS and Windows in CI.
+168 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
+without it. Everything runs on Linux, macOS and Windows in CI. Another 67
+assertions run in a browser on the [live test page](https://anla.evemisslab.com/demo/).
 
 What they cover, beyond the round trips: every rejection a decoder owes you (bad
 magic, bad CRC, wrong hash, wrong length, unknown codec, unknown record type,
