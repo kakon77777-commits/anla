@@ -35,7 +35,8 @@ from anla1.cbor import encode  # noqa: E402
 UUID = bytes(range(16))
 
 
-def one_snapshot(*, snapshots: int = 1, hint: int | None = None) -> bytes:
+def one_snapshot(*, snapshots: int = 1, hint: int | None = None,
+                 hash_algorithm: str = C.CORE_HASH) -> bytes:
     """A container with *snapshots* appended snapshots and nothing else in it.
 
     No manifests, no chunks — the container is being tested, not the format built
@@ -48,8 +49,8 @@ def one_snapshot(*, snapshots: int = 1, hint: int | None = None) -> bytes:
         payload = encode({"pretend": "manifest", "snapshot": snapshot})
         manifest_offset = len(data)
         manifest = C.build_record(
-            "MANF", {"hash_algorithm": "sha256",
-                     "payload_hash": C.hash_bytes(payload, "sha256")},
+            "MANF", {"hash_algorithm": hash_algorithm,
+                     "payload_hash": C.hash_bytes(payload, hash_algorithm)},
             payload, sequence)
         data += manifest
         sequence += 1
@@ -58,7 +59,7 @@ def one_snapshot(*, snapshots: int = 1, hint: int | None = None) -> bytes:
             sequence=sequence, snapshot_sequence=snapshot,
             manifest_offset=manifest_offset, manifest_length=len(manifest),
             preservation_root=bytes([snapshot]) * 32,
-            previous_footer_offset=previous)
+            previous_footer_offset=previous, hash_algorithm=hash_algorithm)
         sequence += 1
         previous = footer_offset
     return C.with_footer_hint(data, hint if hint is not None else previous or 0)
@@ -322,8 +323,8 @@ def test_a_cycle_in_the_chain_is_refused():
             "previous_footer_offset": latest.offset}
     payload = encode(body)
     rebuilt = C.build_record(
-        "FOOT", {"hash_algorithm": "sha256",
-                 "payload_hash": C.hash_bytes(payload, "sha256")},
+        "FOOT", {"hash_algorithm": C.CORE_HASH,
+                 "payload_hash": C.hash_bytes(payload, C.CORE_HASH)},
         payload, latest.record.sequence)
     forged = bytes(data[:latest.offset]) + rebuilt
     with pytest.raises(ManifestInvalid, match="cycle"):
@@ -338,8 +339,8 @@ def test_a_chain_that_does_not_descend_is_refused():
             "previous_footer_offset": latest.offset + 8}
     payload = encode(body)
     rebuilt = C.build_record(
-        "FOOT", {"hash_algorithm": "sha256",
-                 "payload_hash": C.hash_bytes(payload, "sha256")},
+        "FOOT", {"hash_algorithm": C.CORE_HASH,
+                 "payload_hash": C.hash_bytes(payload, C.CORE_HASH)},
         payload, latest.record.sequence)
     with pytest.raises(ManifestInvalid, match="does not descend"):
         C.walk_footers(data[:latest.offset] + rebuilt)
@@ -353,20 +354,38 @@ def test_a_footer_payload_hash_mismatch_is_an_integrity_failure():
         C.parse_footer_record(bytes(data), footer.offset)
 
 
-def test_the_footer_names_its_own_hash_algorithm():
+@pytest.mark.parametrize("algorithm", ["blake3-256", "sha256"])
+def test_the_footer_names_whichever_hash_wrote_it(algorithm):
     """Hash agility has a consequence that only appears in the reader: a footer is
     read *before* the manifest that declares `hash_algorithms`, so it cannot
-    inherit the choice from it."""
-    footer = C.find_latest_footer(one_snapshot())
-    assert footer.hash_algorithm == "sha256"
-    assert "hash_algorithm" in footer.record.header
+    inherit the choice from it. It therefore has to say."""
+    footer = C.find_latest_footer(one_snapshot(hash_algorithm=algorithm))
+    assert footer.hash_algorithm == algorithm
+    assert footer.record.header["hash_algorithm"] == algorithm
+
+
+def test_the_default_hash_is_the_core_hash():
+    assert C.CORE_HASH == "blake3-256"
+    assert C.find_latest_footer(one_snapshot()).hash_algorithm == C.CORE_HASH
+
+
+def test_an_archive_written_with_sha256_still_reads_after_blake3_arrived():
+    """The payoff for putting agility in the container rather than in a revision:
+    adding BLAKE3 changed one table and moved no field, so archives written before
+    it existed are unaffected."""
+    data = one_snapshot(snapshots=2, hash_algorithm="sha256")
+    assert [f.snapshot_sequence for f in C.walk_footers(data)] == [2, 1]
+    assert all(f.hash_algorithm == "sha256" for f in C.walk_footers(data))
 
 
 def test_an_unknown_footer_hash_algorithm_is_refused_not_guessed():
+    """`blake3-256` used to be this test's example of an unknown algorithm. It is
+    known now, which is what shipping a hash looks like from a test's point of
+    view — so the example moved rather than the assertion."""
     payload = encode({"snapshot_sequence": 1, "manifest_offset": 64,
                       "manifest_length": 8, "preservation_root": bytes(32)})
-    record = C.build_record("FOOT", {"hash_algorithm": "blake3-256",
-                                     "payload_hash": bytes(32)}, payload, 1)
+    record = C.build_record("FOOT", {"hash_algorithm": "sha3-512",
+                                     "payload_hash": bytes(64)}, payload, 1)
     data = C.build_header(UUID) + record
     with pytest.raises(UnsupportedCapability, match="hash algorithm"):
         C.parse_footer_record(data, C.HEADER_SIZE)

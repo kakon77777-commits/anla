@@ -32,7 +32,7 @@ from __future__ import annotations
 import hashlib
 import struct
 from dataclasses import dataclass, field
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from anla.errors import (  # the error vocabulary is shared: same codes, same exit codes
     IntegrityFailure,
@@ -42,6 +42,7 @@ from anla.errors import (  # the error vocabulary is shared: same codes, same ex
     UnsupportedCapability,
 )
 
+from .blake3 import blake3_256
 from .cbor import CborError, decode, encode
 
 __all__ = [
@@ -49,7 +50,7 @@ __all__ = [
     "VERSION_MAJOR", "VERSION_MINOR", "MAX_RECORD_HEADER",
     "FLAG_REQUIRED_FOR_EXTRACTION", "FLAG_REQUIRED_FOR_VERIFICATION",
     "FLAG_ENCRYPTED", "FLAG_COMPRESSED_METADATA", "FLAG_AUXILIARY_DISPOSABLE",
-    "RECORD_TYPES", "KNOWN_CAPABILITIES", "HASHES",
+    "RECORD_TYPES", "KNOWN_CAPABILITIES", "HASHES", "CORE_HASH",
     "Header", "Record", "Footer",
     "build_header", "parse_header", "with_footer_hint",
     "build_record", "parse_record", "padding_for", "record_disposition",
@@ -87,6 +88,7 @@ KNOWN_CAPABILITIES = frozenset({
     "anla:core:objects:1",
     "anla:core:chunks:1",
     "anla:core:snapshots:1",
+    "anla:hash:blake3-256:1",
     "anla:hash:sha256:1",
     "anla:codec:store:1",
     "anla:chunking:anla-cdc-1",
@@ -96,19 +98,34 @@ KNOWN_CAPABILITIES = frozenset({
 #: manifest that would declare `hash_algorithms`, so it cannot inherit the
 #: choice from it. Found while implementing the footer, not while writing the
 #: draft — see SPEC-1.0-DRAFT.md section 6.
-HASHES: dict[str, Any] = {
-    "sha256": hashlib.sha256,
-    # "blake3-256" lands with the hash milestone; the container is agnostic and
-    # this table is the only place that has to change.
+#:
+#: This table being the only place that had to change when BLAKE3 arrived is the
+#: agility claim paying off: no container field moved, and archives written with
+#: SHA-256 before it existed still read.
+HASHES: dict[str, Callable[[bytes], bytes]] = {
+    "blake3-256": blake3_256,          # the core hash (SPEC-1.0-DRAFT.md section 7)
+    "sha256": lambda data: hashlib.sha256(data).digest(),
 }
+
+#: The core hash a conforming 1.0 reader must implement. Declared separately from
+#: the table so that "what we happen to support" and "what the format requires"
+#: cannot drift into each other.
+CORE_HASH = "blake3-256"
 
 
 def hash_bytes(data: bytes, algorithm: str) -> bytes:
-    factory = HASHES.get(algorithm)
-    if factory is None:
+    """Hash with the *named* algorithm.
+
+    There is deliberately no default. Every caller has read the name from the
+    archive — a footer's record header, or the manifest's `hash_algorithms` — and a
+    default here would be an invitation to skip that read, which is precisely the
+    mistake MVP made by inferring the hash from the profile version.
+    """
+    function = HASHES.get(algorithm)
+    if function is None:
         raise UnsupportedCapability("unsupported hash algorithm", algorithm=algorithm,
                                     supported=sorted(HASHES))
-    return factory(data).digest()
+    return function(data)
 
 
 def crc32(data: bytes) -> int:
@@ -342,7 +359,7 @@ def build_footer_record(*, sequence: int, snapshot_sequence: int,
                         auxiliary_root: bytes | None = None,
                         index_offset: int | None = None,
                         index_length: int | None = None,
-                        hash_algorithm: str = "sha256") -> bytes:
+                        hash_algorithm: str = CORE_HASH) -> bytes:
     """One `FOOT` record. Absent values are omitted, never encoded as null."""
     payload_map: dict[str, Any] = {
         "snapshot_sequence": snapshot_sequence,

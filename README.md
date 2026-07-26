@@ -63,9 +63,9 @@ the profile a preservation system can adopt. Different jobs; the reasoning is in
 The draft is held to the standard MVP was held to: **nothing is frozen until two
 independent implementations produce byte-identical archives and a differential fuzzer
 finds no divergence between them.** 1.0 now has canonical CBOR, the container (header, record frame with flags, footer
-chain, capabilities), the pinned Merkle construction, and the manifest with its five
-roots — enough that a complete archive can be written and read back, which nine
-end-to-end tests do. What it does not have is a second implementation, so nothing is
+chain, capabilities), the pinned Merkle construction, the manifest with its five
+roots, and BLAKE3-256 — enough that a complete archive can be written and read back
+under either hash, which fifteen end-to-end tests do. What it does not have is a second implementation, so nothing is
 frozen. `SPEC-1.0-DRAFT.md` opens with a table of exactly what exists. `SPEC-1.0-DRAFT.md` opens with a table of what
 exists, which is the first thing that changes when that changes.
 
@@ -148,7 +148,7 @@ archive.read('docs/readme.txt');
 python -m pytest python/tests -q
 ```
 
-484 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
+548 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
 without it. Everything runs on Linux, macOS and Windows in CI. Another 76
 assertions run in a browser on the [live test page](https://anla.evemisslab.com/demo/).
 
@@ -185,7 +185,7 @@ fuzzer, and a suggested order for implementing this format somewhere else.
 SPEC.md                     normative specification for ANLA-MVP v0.1
 papers/                     the concept paper and the whitepaper, zh-Hant + en
 python/anla/                ANLA-MVP v0.1 reference implementation and CLI
-python/anla1/               ANLA 1.0 (draft): CBOR, container, Merkle, manifest
+python/anla1/               ANLA 1.0 (draft): CBOR, container, Merkle, manifest, BLAKE3
 schemas/anla-1.0.cddl       shape of the 1.0 CBOR structures
 python/tests/               the conformance suite (drives both implementations)
 web/anla-core.js            JavaScript reference implementation

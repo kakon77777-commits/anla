@@ -41,7 +41,7 @@ editing `SPEC.md` and hoping.
 | A complete archive, written and read back | **implemented** — 9 end-to-end tests |
 | CDDL schemas | [`schemas/anla-1.0.cddl`](schemas/anla-1.0.cddl), shape only |
 | Object name model (whitepaper Q4) | one `path`, deliberately not settled |
-| BLAKE3-256 | decided (§7), not implemented |
+| BLAKE3-256 | **implemented** — [`python/anla1/blake3.py`](python/anla1/blake3.py), a dependency-free reference plus the Rust fast path, 55 tests |
 | Zstandard | decided (§8), not implemented |
 | Metadata namespaces, snapshots beyond one, signatures, encryption, parity | later milestones |
 
@@ -433,10 +433,34 @@ Hash outputs are CBOR byte strings, not hex text. MVP used hex because its manif
 was JSON and JSON has no byte string; CBOR does, and 32 bytes beats 64 characters in
 a structure that appears once per chunk.
 
-**Not implemented.** Until BLAKE3 lands, the reference implementation writes and
-reads `sha256` only, and says so in `hash_algorithms` — which is exactly the
-mechanism working as intended, and is why hash agility is in the container rather
-than in a later revision.
+### 7.1 What landing BLAKE3 demonstrated
+
+Adding it changed one table — the algorithm registry — and moved no container
+field. Archives written with `sha256` before it existed still read, and the reader
+picks its hash function by looking up the name it just read out of the record it is
+verifying. That is what hash agility was for, and it is now exercised rather than
+declared: the end-to-end suite builds and reads the same archive under both
+algorithms, and refuses an archive whose `MANF` record header and `hash_algorithms`
+disagree about which one was used.
+
+`hash_bytes` deliberately has **no default algorithm**. Every caller has just read a
+name from the archive, and a default would be an invitation to skip that read —
+which is precisely the mistake `ANLA-MVP` made by inferring the hash from the
+profile version.
+
+### 7.2 Two implementations of the hash itself
+
+`blake3` (the Rust extension) is used when installed, and
+[`python/anla1/blake3.py`](python/anla1/blake3.py) is a dependency-free reference
+that the suite asserts agrees with it byte for byte — at every chunk boundary
+(1024, 1025, 2048, 3072, 4096, 8192, 16385), at random lengths, incrementally, and
+for extended output.
+
+The reference exists because **a specification whose hash is only available as a
+compiled wheel has a hole in it**: someone checking this document cannot read what
+it says the hash is. Which implementation runs is then a performance question and
+never a correctness one — and if that ever stops being true, a test says so before
+an archive does.
 
 ---
 

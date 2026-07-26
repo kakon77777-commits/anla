@@ -13,7 +13,6 @@ implementation uses can pass while the format itself does not hold together.
 
 from __future__ import annotations
 
-import hashlib
 import sys
 from pathlib import Path
 
@@ -34,11 +33,21 @@ from anla1.manifest import (  # noqa: E402
 )
 
 ARCHIVE_ID = bytes(range(16))
-HASH = "sha256"
+HASH = C.CORE_HASH
 
 
-def H(data: bytes) -> bytes:
-    return hashlib.sha256(data).digest()
+def hasher_for(algorithm: str):
+    """A hasher chosen by *name*, the way a reader must choose one.
+
+    Nothing in this file is allowed to know the algorithm in advance; it reads the
+    name out of the archive and looks it up, which is the behaviour SPEC-1.0-DRAFT
+    section 7 requires and the behaviour MVP got wrong by inferring the hash from
+    the profile version.
+    """
+    return lambda data: C.hash_bytes(data, algorithm)
+
+
+H = hasher_for(HASH)
 
 
 FILES = {
@@ -50,8 +59,10 @@ FILES = {
 
 
 def build_archive(*, auxiliary: list[dict] | None = None,
-                  previous: bytes | None = None) -> bytes:
+                  previous: bytes | None = None,
+                  hash_algorithm: str = HASH) -> bytes:
     """Header, one CHNK per unique chunk, one MANF, one FOOT."""
+    H = hasher_for(hash_algorithm)
     data = C.build_header(ARCHIVE_ID)
     sequence = 1
     chunk_entries: list[ChunkEntry] = []
@@ -93,9 +104,11 @@ def build_archive(*, auxiliary: list[dict] | None = None,
     manifest = build_manifest(
         archive_id=ARCHIVE_ID, snapshot_sequence=1,
         created_unix_ns=1_785_000_000_000_000_000,
-        objects=objects, chunks=chunk_entries, hasher=H, hash_algorithm=HASH,
+        objects=objects, chunks=chunk_entries, hasher=H,
+        hash_algorithm=hash_algorithm,
         required_capabilities=["anla:core:objects:1", "anla:core:chunks:1",
-                               "anla:core:snapshots:1", "anla:hash:sha256:1",
+                               "anla:core:snapshots:1",
+                               f"anla:hash:{hash_algorithm}:1",
                                "anla:codec:store:1"],
         auxiliary=auxiliary or [],
         parent_snapshot=previous)
@@ -103,7 +116,8 @@ def build_archive(*, auxiliary: list[dict] | None = None,
     payload = encode(manifest)
     manifest_offset = len(data)
     manifest_record = C.build_record(
-        "MANF", {"hash_algorithm": HASH, "payload_hash": H(payload)}, payload, sequence)
+        "MANF", {"hash_algorithm": hash_algorithm, "payload_hash": H(payload)},
+        payload, sequence)
     data += manifest_record
     sequence += 1
 
@@ -112,7 +126,7 @@ def build_archive(*, auxiliary: list[dict] | None = None,
         sequence=sequence, snapshot_sequence=1,
         manifest_offset=manifest_offset, manifest_length=len(manifest_record),
         preservation_root=manifest["preservation_root"],
-        auxiliary_root=manifest["auxiliary_root"], hash_algorithm=HASH)
+        auxiliary_root=manifest["auxiliary_root"], hash_algorithm=hash_algorithm)
     return C.with_footer_hint(data, footer_offset)
 
 
@@ -124,6 +138,8 @@ def read_archive(data: bytes) -> tuple[dict, dict[str, bytes]]:
     footer = C.find_latest_footer(data)
     manifest_record = C.parse_record(data, footer.manifest_offset)
     assert manifest_record.type == "MANF"
+    # Read, never inferred: the algorithm comes out of the record we are verifying.
+    H = hasher_for(manifest_record.header["hash_algorithm"])
     payload = data[manifest_record.payload_offset:
                    manifest_record.payload_offset + manifest_record.payload_length]
     if C.hash_bytes(payload, manifest_record.header["hash_algorithm"]) \
@@ -131,6 +147,11 @@ def read_archive(data: bytes) -> tuple[dict, dict[str, bytes]]:
         raise IntegrityFailure("manifest payload hash mismatch")
 
     manifest = parse_manifest(payload)
+    if manifest["hash_algorithms"] != [manifest_record.header["hash_algorithm"]]:
+        raise IntegrityFailure(
+            "the manifest and its record disagree about the hash algorithm",
+            manifest=manifest["hash_algorithms"],
+            record=manifest_record.header["hash_algorithm"])
     verify_manifest(manifest, H)
     C.check_capabilities(manifest)
 
@@ -279,3 +300,78 @@ def test_every_record_in_the_archive_is_a_type_the_reader_knows():
     assert [C.record_disposition(r) for r in records] == ["known"] * len(records)
     assert [r.type for r in records][-2:] == ["MANF", "FOOT"]
     assert [r.sequence for r in records] == list(range(1, len(records) + 1))
+
+
+# ---------------------------------------------------------------------------
+# hash agility, exercised rather than declared
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("algorithm", ["blake3-256", "sha256"])
+def test_an_archive_round_trips_under_either_hash(algorithm):
+    """The reader never knows which hash it is about to meet. It reads the name out
+    of the record it is verifying and looks the function up — which is the rule
+    SPEC-1.0-DRAFT section 7 states and the one MVP broke by inferring the hash
+    from the profile version."""
+    manifest, restored = read_archive(build_archive(hash_algorithm=algorithm))
+    assert restored == FILES
+    assert manifest["hash_algorithms"] == [algorithm]
+
+
+def test_the_two_hashes_produce_genuinely_different_archives():
+    blake = build_archive(hash_algorithm="blake3-256")
+    sha = build_archive(hash_algorithm="sha256")
+    assert blake != sha
+    # Same content, same structure, different identities all the way down.
+    a, _ = read_archive(blake)
+    b, _ = read_archive(sha)
+    assert a["preservation_root"] != b["preservation_root"]
+    assert sorted(a["chunks"]) != sorted(b["chunks"])
+
+
+def test_the_default_is_the_core_hash():
+    manifest, _ = read_archive(build_archive())
+    assert manifest["hash_algorithms"] == ["blake3-256"] == [C.CORE_HASH]
+
+
+def test_a_manifest_that_disagrees_with_its_record_about_the_hash_is_refused():
+    """Two places name the algorithm — the MANF record header and the manifest's
+    own `hash_algorithms`. They must agree, or a reader could verify with one and
+    interpret with the other."""
+    data = build_archive()
+    footer = C.find_latest_footer(data)
+    record = C.parse_record(data, footer.manifest_offset)
+    payload = data[record.payload_offset:record.payload_offset + record.payload_length]
+    manifest = parse_manifest(payload)
+    manifest["hash_algorithms"] = ["sha256"]          # lie in the manifest only
+    new_payload = encode(manifest)
+    rebuilt = C.build_record(
+        "MANF", {"hash_algorithm": "blake3-256",
+                 "payload_hash": C.hash_bytes(new_payload, "blake3-256")},
+        new_payload, record.sequence)
+    forged = data[:footer.manifest_offset] + rebuilt
+    forged += C.build_footer_record(
+        sequence=record.sequence + 1, snapshot_sequence=1,
+        manifest_offset=footer.manifest_offset, manifest_length=len(rebuilt),
+        preservation_root=manifest["preservation_root"],
+        auxiliary_root=manifest["auxiliary_root"], hash_algorithm="blake3-256")
+    with pytest.raises(IntegrityFailure, match="disagree about the hash algorithm"):
+        read_archive(forged)
+
+
+def test_an_unsupported_hash_stops_the_read_rather_than_being_guessed():
+    from anla.errors import UnsupportedCapability
+    data = bytearray(build_archive())
+    footer = C.find_latest_footer(bytes(data))
+    record = C.parse_record(bytes(data), footer.manifest_offset)
+    payload = bytes(data[record.payload_offset:
+                         record.payload_offset + record.payload_length])
+    rebuilt = C.build_record("MANF", {"hash_algorithm": "sha3-512",
+                                      "payload_hash": bytes(64)},
+                             payload, record.sequence)
+    forged = bytes(data[:footer.manifest_offset]) + rebuilt
+    forged += C.build_footer_record(
+        sequence=record.sequence + 1, snapshot_sequence=1,
+        manifest_offset=footer.manifest_offset, manifest_length=len(rebuilt),
+        preservation_root=bytes(32), hash_algorithm="blake3-256")
+    with pytest.raises(UnsupportedCapability, match="hash algorithm"):
+        read_archive(forged)

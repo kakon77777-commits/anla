@@ -7,6 +7,49 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
+## 2026-07-27 — BLAKE3, and the first real exercise of hash agility
+
+### Added
+
+- **[`python/anla1/blake3.py`](python/anla1/blake3.py)** — BLAKE3-256, the core hash
+  of 1.0, as a dependency-free reference implementation, with the Rust `blake3`
+  extension used automatically when installed.
+
+  The reference exists because a specification whose hash is only available as a
+  compiled wheel has a hole in it: someone checking the document cannot read what it
+  says the hash is. Which implementation runs is a performance question and never a
+  correctness one — 55 tests assert the two agree byte for byte at every chunk
+  boundary (1024, 1025, 2048, 3072, 4096, 8192, 16385), at random lengths,
+  incrementally at ten different split sizes, and for extended output.
+
+- **Hash agility, exercised rather than declared.** The end-to-end suite now builds
+  and reads the same archive under both `blake3-256` and `sha256`, with the reader
+  choosing its hash function from the name it reads out of the record it is about to
+  verify. Adding BLAKE3 changed one table and moved no container field; archives
+  written with `sha256` before it existed still read.
+
+### Changed
+
+- `blake3-256` is the default for new footers and manifests, and `CORE_HASH` names
+  it separately from the algorithm table, so "what this implementation supports" and
+  "what the format requires" cannot drift into each other.
+- `hash_bytes` has **no default algorithm**. Every caller has just read a name out
+  of the archive, and a default would be an invitation to skip that read — which is
+  exactly the mistake MVP made by inferring the hash from the profile version.
+- A reader now checks that the `MANF` record header and the manifest's own
+  `hash_algorithms` name the *same* algorithm. Two places state it; if they were
+  allowed to disagree, a reader could verify with one and interpret with the other.
+
+### Noticed while doing it
+
+Two container tests failed on the change, and both were right to. One asserted a
+footer's algorithm was `sha256` — it is `blake3-256` now, so the test became
+parametric over both, which is the stronger statement anyway. The other used
+`blake3-256` as its example of an *unknown* algorithm, and that example had just
+become known. It moved to `sha3-512`. That is what shipping a hash looks like from a
+test's point of view, and it is worth recording that the suite noticed rather than
+the reader.
+
 ## 2026-07-28 — Milestone 0 closes: the manifest, its roots, and a whole archive
 
 The 1.0 container can now be written and read end to end, by one implementation.

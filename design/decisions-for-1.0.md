@@ -88,6 +88,21 @@ already declares `hash_algorithms`, so a future migration has somewhere to live.
 The one thing 1.0 must not do is what MVP does — assume the algorithm from the
 profile version. `hash_algorithms` must be read, not inferred.
 
+**Implemented 2026-07-27.** Adding BLAKE3 changed one table and moved no container
+field, which is the agility claim paying off rather than being asserted. Two things
+came out of doing it that were not obvious from deciding it:
+
+1. `hash_bytes` has **no default algorithm**, deliberately. Every caller has just
+   read a name out of the archive; a default is an invitation to skip that read.
+2. The algorithm is named in two places — the `MANF` record header and the
+   manifest's own `hash_algorithms` — and they **must be checked against each
+   other**, or a reader could verify with one and interpret with the other.
+
+Also: `python/anla1/blake3.py` is a dependency-free reference implementation, cross
+-checked against the Rust extension at every tree boundary. A specification whose
+hash is only obtainable as a compiled wheel cannot be checked by reading, and this
+project's whole argument is that its claims can be checked.
+
 ### Q2 — Which deterministic CBOR profile?
 
 **Decision: RFC 8949 §4.2.1 core deterministic encoding, plus three restrictions

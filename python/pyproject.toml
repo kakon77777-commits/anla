@@ -20,7 +20,11 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "blake3>=1.0"]
+# The Rust BLAKE3 is a fast path, never a requirement: anla1.blake3 carries a
+# readable pure-Python reference, and the suite asserts the two agree. A format
+# whose hash is only available as a compiled wheel cannot be checked by reading.
+speed = ["blake3>=1.0"]
 
 [project.scripts]
 anla = "anla.cli:main"
