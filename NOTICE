@@ -1,0 +1,21 @@
+ANLA — Agent-Native Lossless Archive
+Copyright 2026 EVEMISS Technology Co., Ltd.
+
+This repository contains a format specification, two reference implementations, a
+conformance suite, the research papers behind the format, and the generator for
+anla.evemisslab.com.
+
+ANLA-MVP v0.1 is a research profile. It is tested, but it is young: an archive in
+this format should not be the only copy of anything that cannot be lost. See
+SECURITY.md for what the format does and does not protect against, and SPEC.md
+section 13 for what it does not implement.
+
+The format builds on published standards and takes ideas from published work,
+none of which is affiliated with or endorses this project: SHA-256 (FIPS 180-4),
+DEFLATE and zlib (RFC 1951, RFC 1950), CRC-32 (ISO/IEC 13239), JSON (RFC 8259),
+ZIP (PKWARE APPNOTE), and — as prior art discussed in the papers — IPLD CAR, the
+OCI Image Specification, BagIt (RFC 8493), Zstandard (RFC 8878), BLAKE3 and
+FastCDC.
+
+The Apache-2.0 license does not grant rights to imply endorsement by EVEMISS
+Technology or EveMissLab.

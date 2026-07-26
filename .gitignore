@@ -1,0 +1,14 @@
+dist/
+node_modules/
+.wrangler/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+_extract/
+*.egg-info/
+
+# Origin packages handed over by the author; unpacked into the tree above.
+*.zip
+conformance/out-check/
+conformance/out/

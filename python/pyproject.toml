@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anla"
+version = "0.1.0"
+description = "Reference implementation of ANLA-MVP v0.1, the Agent-Native Lossless Archive profile"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "Neo.K" }]
+keywords = ["archive", "lossless", "deduplication", "content-addressed", "agent"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Topic :: System :: Archiving :: Compression",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+anla = "anla.cli:main"
+
+[project.urls]
+Homepage = "https://anla.evemisslab.com"
+Source = "https://github.com/kakon77777-commits/anla"
+Specification = "https://anla.evemisslab.com/spec/"
+
+[tool.setuptools.packages.find]
+include = ["anla*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

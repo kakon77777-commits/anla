@@ -1,0 +1,22 @@
+// anla.evemisslab.com — assets-only Worker on its own evemisslab.com subdomain.
+//
+// Same pattern as mlf/mmr/mmlc: a Worker custom domain provisions its own DNS
+// record, which a Pages custom domain does not.
+//
+//   python site/build.py
+//   npx wrangler deploy
+{
+  "name": "anla-site",
+  "compatibility_date": "2026-07-26",
+  "assets": {
+    "directory": "./site/dist",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    { "pattern": "anla.evemisslab.com", "custom_domain": true }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

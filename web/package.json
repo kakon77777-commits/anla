@@ -1,0 +1,21 @@
+{
+  "name": "@evemiss/anla-core",
+  "version": "0.1.0",
+  "description": "JavaScript reference implementation of ANLA-MVP v0.1 — runs in a browser tab and in Node",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "anla-core.js",
+  "exports": {
+    ".": "./anla-core.js"
+  },
+  "files": ["anla-core.js"],
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kakon77777-commits/anla.git"
+  },
+  "homepage": "https://anla.evemisslab.com"
+}
