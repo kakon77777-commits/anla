@@ -1,6 +1,6 @@
 {
-  "generated_at_unix_ns": 1786094546855937500,
-  "revision": "02faa02",
+  "generated_at_unix_ns": 1786095017416595800,
+  "revision": "c0ad581",
   "profile": "ANLA 1.0 (draft)",
   "codecs": [
     "store"
@@ -17,35 +17,35 @@
       "headline": "One snapshot of this repository's python/ directory",
       "note": "ANLA 1.0 stores; it does not compress. A single snapshot is therefore larger than the tree, and both compressors beat it. This row is the argument for Zstandard, stated as a measurement.",
       "inputs": {
-        "logical_bytes": 1506427,
+        "logical_bytes": 1514032,
         "files": 90
       },
       "sizes": {
-        "anla_1_0": 1556296,
-        "zip_deflate9": 522123,
-        "targz": 461569,
-        "anla_mvp_deflate": 605862
+        "anla_1_0": 1563896,
+        "zip_deflate9": 524394,
+        "targz": 463845,
+        "anla_mvp_deflate": 608191
       },
       "detail": {
         "snapshots": 1,
         "unique_chunks": 90,
-        "chunk_bytes": 1506427,
-        "logical_bytes": 1506427,
+        "chunk_bytes": 1514032,
+        "logical_bytes": 1514032,
         "composition": [
           {
             "snapshot": 1,
-            "new_chunk_bytes": 1520520,
+            "new_chunk_bytes": 1528120,
             "metadata_bytes": 35712
           }
         ]
       },
       "ratios": {
-        "anla_1_0_vs_input": 1.0331,
-        "anla_1_0_vs_zip_deflate9": 2.9807,
-        "anla_1_0_vs_targz": 3.3718,
-        "anla_1_0_vs_anla_mvp_deflate": 2.5687
+        "anla_1_0_vs_input": 1.0329,
+        "anla_1_0_vs_zip_deflate9": 2.9823,
+        "anla_1_0_vs_targz": 3.3716,
+        "anla_1_0_vs_anla_mvp_deflate": 2.5714
       },
-      "seconds": 0.44
+      "seconds": 0.41
     },
     {
       "scenario": "metadata-cost",
@@ -73,98 +73,98 @@
         "anla_1_0_vs_times_only": 1.2163,
         "anla_1_0_vs_times_and_mode": 1.1842
       },
-      "seconds": 0.48
+      "seconds": 0.46
     },
     {
       "scenario": "git-history",
       "headline": "8 successive commits of python/, one snapshot each",
       "note": "Every version is recoverable, byte for byte. The comparison is against keeping each version as its own ZIP, which is what people do without snapshots, and against one tar.gz of all of them — gzip's 32 KB window cannot see from one copy of the tree to the next, which is why deduplication is a different mechanism and not a worse compressor.",
       "inputs": {
-        "logical_bytes": 2196608,
+        "logical_bytes": 2461429,
         "versions": 8,
         "revisions": [
-          "3f2b447",
           "0e64f98",
           "77cb2d5",
           "f90ef92",
           "9898284",
           "04e28fc",
           "1b35a06",
-          "ef9d860"
+          "ef9d860",
+          "c0ad581"
         ]
       },
       "sizes": {
-        "anla_1_0": 595552,
-        "zip_deflate9_per_version": 723563,
-        "targz_all_versions": 588149
+        "anla_1_0": 775112,
+        "zip_deflate9_per_version": 807577,
+        "targz_all_versions": 659483
       },
       "detail": {
         "snapshots": 8,
-        "unique_chunks": 47,
-        "chunk_bytes": 492705,
-        "logical_bytes": 2196608,
+        "unique_chunks": 56,
+        "chunk_bytes": 663877,
+        "logical_bytes": 2461429,
         "composition": [
           {
             "snapshot": 1,
-            "new_chunk_bytes": 155768,
-            "metadata_bytes": 8296
+            "new_chunk_bytes": 177272,
+            "metadata_bytes": 9232
           },
           {
             "snapshot": 2,
-            "new_chunk_bytes": 22648,
-            "metadata_bytes": 9312
-          },
-          {
-            "snapshot": 3,
             "new_chunk_bytes": 41016,
             "metadata_bytes": 10040
           },
           {
-            "snapshot": 4,
+            "snapshot": 3,
             "new_chunk_bytes": 49280,
             "metadata_bytes": 11872
           },
           {
-            "snapshot": 5,
+            "snapshot": 4,
             "new_chunk_bytes": 77960,
             "metadata_bytes": 12592
           },
           {
-            "snapshot": 6,
+            "snapshot": 5,
             "new_chunk_bytes": 48376,
             "metadata_bytes": 13328
           },
           {
-            "snapshot": 7,
+            "snapshot": 6,
             "new_chunk_bytes": 92872,
             "metadata_bytes": 14984
           },
           {
-            "snapshot": 8,
+            "snapshot": 7,
             "new_chunk_bytes": 12160,
             "metadata_bytes": 14984
+          },
+          {
+            "snapshot": 8,
+            "new_chunk_bytes": 173728,
+            "metadata_bytes": 15352
           }
         ],
         "after_each_snapshot": [
-          164128,
-          196088,
-          247144,
-          308296,
-          398848,
-          460552,
-          568408,
-          595552
+          186568,
+          237624,
+          298776,
+          389328,
+          451032,
+          558888,
+          586032,
+          775112
         ],
-        "first_snapshot_bytes": 164128,
-        "later_snapshots_bytes": 431424,
-        "mean_later_snapshot_bytes": 61632
+        "first_snapshot_bytes": 186568,
+        "later_snapshots_bytes": 588544,
+        "mean_later_snapshot_bytes": 84078
       },
       "ratios": {
-        "anla_1_0_vs_input": 0.2711,
-        "anla_1_0_vs_zip_deflate9_per_version": 0.8231,
-        "anla_1_0_vs_targz_all_versions": 1.0126
+        "anla_1_0_vs_input": 0.3149,
+        "anla_1_0_vs_zip_deflate9_per_version": 0.9598,
+        "anla_1_0_vs_targz_all_versions": 1.1753
       },
-      "seconds": 2.76
+      "seconds": 2.95
     },
     {
       "scenario": "duplicate-tree",
@@ -223,7 +223,7 @@
         "anla_1_0_vs_input": 0.2264,
         "anla_1_0_vs_zip_deflate9_per_copy": 0.5402
       },
-      "seconds": 0.14
+      "seconds": 0.15
     },
     {
       "scenario": "incompressible",
@@ -266,7 +266,7 @@
         "anla_1_0_vs_zip_deflate9_per_copy": 0.5016,
         "anla_1_0_vs_targz_both": 0.5016
       },
-      "seconds": 1.57
+      "seconds": 1.54
     },
     {
       "scenario": "shifted-insert",
@@ -304,7 +304,7 @@
         "anla_1_0_vs_input": 0.5487,
         "anla_1_0_vs_anla_1_0_fixed_chunking": 0.5485
       },
-      "seconds": 2.05
+      "seconds": 1.99
     }
   ]
 }

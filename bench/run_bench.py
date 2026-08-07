@@ -154,7 +154,12 @@ def anla1_snapshots(roots: list[Path], *, chunking: str = "cdc") -> tuple[int, l
     chunker = cdc_chunker() if chunking == "cdc" else single_chunk
     data, sizes = b"", []
     for index, root in enumerate(roots):
-        scanned = scan_tree(root, exclude=EXCLUDE, preserve_mtime=False)
+        # No recorded metadata at all, so the table does not move when it is
+        # regenerated on a different machine: POSIX records a file mode and Windows
+        # has none to record, which is correct and would otherwise show up here as a
+        # change nobody made.
+        scanned = scan_tree(root, exclude=EXCLUDE, preserve_mtime=False,
+                            preserve_posix=False)
         data = append_snapshot(
             data, files=scanned.files, directories=scanned.directories,
             created_unix_ns=FIXED_TIME + index, chunker=chunker,

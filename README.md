@@ -166,7 +166,7 @@ archive.read('docs/readme.txt');
 python -m pytest python/tests -q
 ```
 
-627 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
+628 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
 without it. Everything runs on Linux, macOS and Windows in CI. Another 76
 assertions run in a browser on the [live test page](https://anla.evemisslab.com/demo/).
 

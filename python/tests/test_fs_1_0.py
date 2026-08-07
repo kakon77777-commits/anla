@@ -338,3 +338,29 @@ def test_nothing_is_written_when_the_archive_does_not_verify(tmp_path):
     with pytest.raises(IntegrityFailure):
         restore_tree(corrupted, latest_snapshot(corrupted), destination)
     assert not any(destination.rglob("*")) if destination.exists() else True
+
+
+def test_recording_no_metadata_is_what_two_platforms_can_be_compared_on(tmp_path):
+    """The same tree packs to different bytes on POSIX and on Windows, correctly.
+
+    `posix.mode` is recorded where it means something and nowhere else, so the two
+    archives describe genuinely different sets of facts. CI's cross-platform digest
+    check found this the first time it ran after Milestone 2 — four POSIX jobs
+    agreeing with each other and Windows differing — which is the check working.
+    `preserve_posix=False` is what makes content and names comparable everywhere.
+    """
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "a.txt").write_bytes(b"content\n")
+
+    bare = pack(source, preserve_mtime=False, preserve_posix=False)
+    entry = [e for e in latest_snapshot(bare).manifest["objects"]
+             if e["path"] == "a.txt"][0]
+    assert "metadata" not in entry or entry["metadata"] == {}
+
+    if os.name == "posix":
+        with_mode = pack(source, preserve_mtime=False)
+        assert with_mode != bare, "mode is recorded on POSIX, so it must change bytes"
+        recorded = [e for e in latest_snapshot(with_mode).manifest["objects"]
+                    if e["path"] == "a.txt"][0]
+        assert "mode" in recorded["metadata"]["posix"]

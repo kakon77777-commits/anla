@@ -6,15 +6,24 @@ This module is the only place that calls `os.walk`, `stat`, or `write_bytes`, wh
 is deliberate: the portable half of the format stays testable without a disk, and
 the half that cannot be portable is small enough to read in one sitting.
 
-Three things here are not conveniences.
+Four things here are not conveniences.
 
-**An unsupported entry is refused, not skipped.** A symbolic link, a device node or
-a socket is something 1.0 cannot yet represent, and an archive that silently omitted
-one would still be claiming `Extract(Pack(F, P)) = F`. Skipping is available, and it
-costs an explicit flag *and* a non-zero exit code (`FidelityDegraded`, 11), so that
-no script can treat a partial archive as a complete one by accident. The in-archive
-fidelity report that would make this a recorded fact rather than an operator's
-memory arrives with Milestone 2.
+**An unsupported entry is refused, not skipped.** A device node, a socket or a FIFO
+is something 1.0 cannot represent, and an archive that silently omitted one would
+still be claiming `Extract(Pack(F, P)) = F`. Skipping costs an explicit flag, a
+non-zero exit code (`FidelityDegraded`, 11), *and* an entry in the archive's own
+fidelity report — so the omission outlives the terminal it was announced in.
+
+**A symbolic link is stored, with its target exactly as the OS gave it.** Whether
+one may be *created* is a restore-time decision, taken where creating it is what
+makes it dangerous.
+
+**Metadata is namespaced, and only recorded where it is true.** `posix.mode` is
+written on POSIX and nowhere else: a synthetic mode on Windows would store a fact
+that never held, and a reader cannot tell an invented value from an observed one.
+That is also why the same tree packs to different bytes on different platforms, and
+why `preserve_posix=False` exists for the case where content and names are what you
+mean to compare.
 
 **A file that changes while it is being packed is an error.** Packing a tree that is
 being written produces an archive of a moment that never existed. Each file is
@@ -82,7 +91,8 @@ def _describe(entry: Path) -> str:
     return "special file"
 
 
-def _metadata(stat: os.stat_result, preserve_mtime: bool) -> dict[str, dict]:
+def _metadata(stat: os.stat_result, preserve_mtime: bool,
+              preserve_posix: bool = True) -> dict[str, dict]:
     """Namespaced metadata for one object.
 
     `common` holds what every platform agrees about. `posix` holds the permission
@@ -93,7 +103,7 @@ def _metadata(stat: os.stat_result, preserve_mtime: bool) -> dict[str, dict]:
     metadata: dict[str, dict] = {}
     if preserve_mtime:
         metadata["common"] = {"mtime_ns": stat.st_mtime_ns}
-    if os.name == "posix":
+    if preserve_posix and os.name == "posix":
         metadata["posix"] = {"mode": stat.st_mode & 0o7777}
     return metadata
 
@@ -140,7 +150,8 @@ def _opener(entry: Path, expected: os.stat_result):
 def scan_tree(root: str | os.PathLike[str], *,
               exclude: Iterable[str] = (),
               allow_unsupported: bool = False,
-              preserve_mtime: bool = True) -> SourceTree:
+              preserve_mtime: bool = True,
+              preserve_posix: bool = True) -> SourceTree:
     """A directory on disk, as input for `append_snapshot`.
 
     Symbolic links are never followed. Following one turns a link into a second copy
@@ -211,7 +222,7 @@ def scan_tree(root: str | os.PathLike[str], *,
             tree.files.append(SourceEntry(
                 path=archive_path, read=_opener(entry, stat),
                 mtime_ns=stat.st_mtime_ns,
-                metadata=_metadata(stat, preserve_mtime)))
+                metadata=_metadata(stat, preserve_mtime, preserve_posix)))
             tree.total_bytes += stat.st_size
 
     tree.files.sort(key=lambda e: e.path.encode("utf-8"))

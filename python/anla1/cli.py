@@ -127,7 +127,8 @@ def _skip_payload(tree) -> tuple[list[dict], int]:
 def cmd_pack(args: argparse.Namespace) -> int:
     tree = scan_tree(args.source, exclude=args.exclude or (),
                      allow_unsupported=args.skip_unsupported,
-                     preserve_mtime=not args.no_mtime)
+                     preserve_mtime=not (args.no_mtime or args.no_metadata),
+                     preserve_posix=not args.no_metadata)
     data = append_snapshot(
         b"", files=tree.files, directories=tree.directories,
         objects=tree.objects, fidelity=tree.skipped,
@@ -158,7 +159,8 @@ def cmd_append(args: argparse.Namespace) -> int:
     before = len(existing)
     tree = scan_tree(args.source, exclude=args.exclude or (),
                      allow_unsupported=args.skip_unsupported,
-                     preserve_mtime=not args.no_mtime)
+                     preserve_mtime=not (args.no_mtime or args.no_metadata),
+                     preserve_posix=not args.no_metadata)
     data = append_snapshot(
         existing, files=tree.files, directories=tree.directories,
         objects=tree.objects, fidelity=tree.skipped,
@@ -320,6 +322,10 @@ def build_parser() -> argparse.ArgumentParser:
                             "exit code stays 11 for as long as it is there")
         p.add_argument("--no-mtime", action="store_true",
                        help="do not record modification times")
+        p.add_argument("--no-metadata", action="store_true",
+                       help="record no metadata at all: no times, no permissions. "
+                            "What content and names alone produce, which is what "
+                            "two writers on different platforms can be compared on")
         p.add_argument("--chunking", choices=("none", "cdc"), default="cdc",
                        help="cdc = anla-cdc-1 content-defined chunking (default)")
         p.add_argument("--created-ns", type=int,
