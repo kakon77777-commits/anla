@@ -143,6 +143,32 @@ def test_a_second_snapshot_of_a_changed_tree_stores_only_the_change(tmp_path):
     assert len(two) - len(one) < 4096
 
 
+def test_recorded_metadata_is_part_of_what_reproducible_means(tmp_path):
+    """Two trees with the same names and content but different mtimes are two
+    different archives, and that is correct.
+
+    Recorded metadata is something the archive preserves, so it belongs in the hash.
+    The consequence is that "reproducible given the same input" has to include the
+    metadata: same names, same content, same recorded metadata, fixed `(uuid,
+    created_ns)`. CI learned this the hard way — a cross-platform digest check
+    compared six archives of six different inputs, because a checkout stamps mtimes
+    with the moment it ran, and reported six different digests from one writer.
+    """
+    def build(root: Path, when: int, **kwargs) -> bytes:
+        root.mkdir()
+        (root / "a.txt").write_bytes(b"same content\n")
+        os.utime(root / "a.txt", ns=(when, when))
+        return pack(root, **kwargs)
+
+    early = build(tmp_path / "early", 1_600_000_000_000_000_000)
+    late = build(tmp_path / "late", 1_700_000_000_000_000_000)
+    assert early != late, "mtime is recorded, so it must change the archive"
+
+    without_early = build(tmp_path / "e2", 1_600_000_000_000_000_000, preserve_mtime=False)
+    without_late = build(tmp_path / "l2", 1_700_000_000_000_000_000, preserve_mtime=False)
+    assert without_early == without_late, "with no metadata recorded, only content counts"
+
+
 # ---------------------------------------------------------------------------
 # names
 # ---------------------------------------------------------------------------

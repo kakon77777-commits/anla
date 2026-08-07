@@ -125,12 +125,20 @@ jobs:
         # The property the freeze rule is stated in terms of. Asserted on every
         # platform, because a byte difference that only appears on Windows is
         # exactly the kind a second implementation would inherit.
+        #
+        # `--no-mtime` is not a way of making the check pass. Recorded metadata is
+        # part of what an archive preserves, so it belongs in the hash — and a
+        # checkout sets mtimes to the moment it ran, which is different in every
+        # job. Without this the step would be comparing archives of six different
+        # inputs. "Same input" for this format means same names, same content, same
+        # recorded metadata, and a fixed (uuid, timestamp): the first run of this
+        # check is what made that sentence precise.
         run: |
           # The frozen vectors, not a source directory: importing anla1 can write
           # __pycache__ between the two runs, which would make this fail for a
           # reason that has nothing to do with the writer.
           for n in a b; do
-            anla1 pack conformance/vectors -o /tmp/repro-$n.anla \
+            anla1 pack conformance/vectors -o /tmp/repro-$n.anla --no-mtime \
               --uuid 00112233445566778899aabbccddeeff \
               --created-ns 1785000000000000000 --json > /dev/null
           done

@@ -130,7 +130,12 @@ Every subcommand takes `--json`, because the first-class caller of this tool is 
 agent rather than a person. Exit codes follow the whitepaper's table: `5` is an
 integrity failure, `9` an unsafe path, `8` a resource limit, and so on.
 
-Reproducible output, when you want to compare two writers:
+Reproducible output, when you want to compare two writers. **"Same input" means
+same names, same content, *same recorded metadata*, and a fixed `(uuid, created_ns)`
+— modification times are preserved, so they are part of the hash.** Two checkouts of
+one repository do not have the same mtimes, which is enough to make two archives of
+"the same tree" differ; pass `--no-mtime` when content and names are what you mean
+to compare:
 
 ```bash
 anla pack ./my-project -o a.anla --uuid 00112233445566778899aabbccddeeff --created-ns 1752732000000000000
