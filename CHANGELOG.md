@@ -7,6 +7,66 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
+## 2026-08-07 — Milestone 2: an archive that records what it does not contain
+
+### Added
+
+- **Metadata namespaces.** Object metadata is now `{"common": {"mtime_ns": …},
+  "posix": {"mode": …}}` rather than flat keys. `mode` means something different on
+  every platform, and a bare key left a reader nowhere to record that it could not
+  use one.
+
+- **The fidelity report**, in the archive and in the preservation plane. Before
+  this, the only record that a pack had left something out was the exit code of the
+  pack that made it — an operator told once, on the day. `anla1 verify` now exits
+  **11** for as long as the report is there, and `list` shows the absent entries
+  alongside the present ones.
+
+  Not in `auxiliary`: `auxiliary` is disposable by definition and `strip` empties
+  it, so a record of what the archive does *not* hold would be droppable — turning
+  a declared-incomplete archive into an apparently complete one, which is worse
+  than either. A test asserts `strip` cannot launder it away.
+
+- **Symbolic links.** `anla1 pack` refused any tree containing one, which meant it
+  could not pack most real projects. A link's target is stored **verbatim, as
+  bytes** — not normalized, not resolved, not validated — because a target is not a
+  name in the archive's namespace but an opaque string the target filesystem
+  interprets. Rewriting it would store a different link.
+
+  Creating one is a separate decision: a target that is absolute or leaves the
+  destination is refused on restore unless `--allow-external-links` says otherwise.
+  The archive stays an accurate record either way.
+
+- **A `metadata-cost` benchmark scenario**, because a milestone with no measurement
+  is not finished. Per object: **36 bytes** for times, **15** more for POSIX mode,
+  **105** for a symbolic link. It moves no compression number at all — that is the
+  honest result, and it is published rather than omitted.
+
+### Changed
+
+- **An open question in the specification is closed, and the premise was wrong.**
+  §5.3 had guessed `metadata_root` should be split per namespace so that metadata a
+  reader cannot apply would be "a subtree it reports on rather than a verification
+  failure". Verification is hashing, not interpretation: object metadata is inside
+  `object_id`, so a reader that has never heard of `posix` computes the same id over
+  the same canonical CBOR and verifies perfectly. It just cannot apply what it
+  verified. An unknown namespace could never have caused a verification failure, so
+  a root per namespace buys nothing.
+
+  What *can* wrongly refuse such an archive is a capability. So metadata namespaces
+  are **`optional_capabilities`, never required**, and `check_capabilities` reports
+  them as ignored — which it has always returned and nothing had used.
+
+- **Three states, not two.** "Stored and applied", "stored but not applied", and
+  "not stored" are different facts, and only the last means data is gone. `extract`
+  reports what this machine could not apply separately from what the archive says it
+  never held.
+
+- `--skip-unsupported` now covers only devices, sockets and FIFOs, and what it skips
+  is written into the archive rather than only into the exit code.
+
+---
+
 ## 2026-08-07 — The `anla1` command, and what a real path turned out to cost
 
 ### Added

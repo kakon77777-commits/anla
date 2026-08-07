@@ -1,6 +1,6 @@
 {
-  "generated_at_unix_ns": 1786093117351861200,
-  "revision": "5ac535f",
+  "generated_at_unix_ns": 1786094546855937500,
+  "revision": "02faa02",
   "profile": "ANLA 1.0 (draft)",
   "codecs": [
     "store"
@@ -17,33 +17,61 @@
       "headline": "One snapshot of this repository's python/ directory",
       "note": "ANLA 1.0 stores; it does not compress. A single snapshot is therefore larger than the tree, and both compressors beat it. This row is the argument for Zstandard, stated as a measurement.",
       "inputs": {
-        "logical_bytes": 1411880,
-        "files": 88
+        "logical_bytes": 1506427,
+        "files": 90
       },
       "sizes": {
-        "anla_1_0": 1460640,
-        "zip_deflate9": 489638,
-        "targz": 431020,
-        "anla_mvp_deflate": 571332
+        "anla_1_0": 1556296,
+        "zip_deflate9": 522123,
+        "targz": 461569,
+        "anla_mvp_deflate": 605862
       },
       "detail": {
         "snapshots": 1,
-        "unique_chunks": 88,
-        "chunk_bytes": 1411880,
-        "logical_bytes": 1411880,
+        "unique_chunks": 90,
+        "chunk_bytes": 1506427,
+        "logical_bytes": 1506427,
         "composition": [
           {
             "snapshot": 1,
-            "new_chunk_bytes": 1425648,
-            "metadata_bytes": 34928
+            "new_chunk_bytes": 1520520,
+            "metadata_bytes": 35712
           }
         ]
       },
       "ratios": {
-        "anla_1_0_vs_input": 1.0345,
-        "anla_1_0_vs_zip_deflate9": 2.9831,
-        "anla_1_0_vs_targz": 3.3888,
-        "anla_1_0_vs_anla_mvp_deflate": 2.5566
+        "anla_1_0_vs_input": 1.0331,
+        "anla_1_0_vs_zip_deflate9": 2.9807,
+        "anla_1_0_vs_targz": 3.3718,
+        "anla_1_0_vs_anla_mvp_deflate": 2.5687
+      },
+      "seconds": 0.44
+    },
+    {
+      "scenario": "metadata-cost",
+      "headline": "500 files: what namespaced metadata and 500 symlinks add",
+      "note": "Milestone 2 moves no compression number, because it is not about compression — it is what lets the tool pack trees it used to refuse outright. This is its actual bill, per object, in the manifest. A symbolic link costs a manifest entry and no chunk at all: it has no content, only a target.",
+      "inputs": {
+        "logical_bytes": 7890,
+        "files": 500,
+        "links": 500
+      },
+      "sizes": {
+        "anla_1_0": 337656,
+        "no_metadata": 259592,
+        "times_only": 277616,
+        "times_and_mode": 285136
+      },
+      "detail": {
+        "bytes_per_object_for_times": 36.0,
+        "bytes_per_object_for_mode": 15.0,
+        "bytes_per_symlink": 105.0
+      },
+      "ratios": {
+        "anla_1_0_vs_input": 42.7954,
+        "anla_1_0_vs_no_metadata": 1.3007,
+        "anla_1_0_vs_times_only": 1.2163,
+        "anla_1_0_vs_times_and_mode": 1.1842
       },
       "seconds": 0.48
     },
@@ -136,7 +164,7 @@
         "anla_1_0_vs_zip_deflate9_per_version": 0.8231,
         "anla_1_0_vs_targz_all_versions": 1.0126
       },
-      "seconds": 3.49
+      "seconds": 2.76
     },
     {
       "scenario": "duplicate-tree",
@@ -195,7 +223,7 @@
         "anla_1_0_vs_input": 0.2264,
         "anla_1_0_vs_zip_deflate9_per_copy": 0.5402
       },
-      "seconds": 0.17
+      "seconds": 0.14
     },
     {
       "scenario": "incompressible",
@@ -238,7 +266,7 @@
         "anla_1_0_vs_zip_deflate9_per_copy": 0.5016,
         "anla_1_0_vs_targz_both": 0.5016
       },
-      "seconds": 2.11
+      "seconds": 1.57
     },
     {
       "scenario": "shifted-insert",
@@ -276,7 +304,7 @@
         "anla_1_0_vs_input": 0.5487,
         "anla_1_0_vs_anla_1_0_fixed_chunking": 0.5485
       },
-      "seconds": 2.89
+      "seconds": 2.05
     }
   ]
 }

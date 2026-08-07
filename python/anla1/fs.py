@@ -42,7 +42,7 @@ from typing import Iterable
 from anla.errors import FidelityDegraded, InvalidInput, UnsafeObject
 from anla.globs import matches_any
 
-from .manifest import check_object_path
+from .manifest import ObjectEntry, check_object_path
 from .snapshot import Snapshot, SourceEntry, extract_snapshot
 
 __all__ = ["SourceTree", "RestoreReport", "scan_tree", "restore_tree"]
@@ -53,7 +53,11 @@ class SourceTree:
     root: str
     files: list[SourceEntry] = field(default_factory=list)
     directories: list[str] = field(default_factory=list)
-    #: `{"path": ..., "kind": ..., "reason": ...}` for everything left out.
+    #: Symbolic links and any other object that carries no chunks.
+    objects: list[ObjectEntry] = field(default_factory=list)
+    #: The fidelity report: `{"path": ..., "reason": ..., "kind": ...}` for every
+    #: entry the writer could not keep. Goes *into the archive*, not just into a
+    #: terminal — an operator told once, on the day, is not a record.
     skipped: list[dict] = field(default_factory=list)
     total_bytes: int = 0
 
@@ -76,6 +80,42 @@ def _describe(entry: Path) -> str:
     if entry.is_file():
         return "regular file"
     return "special file"
+
+
+def _metadata(stat: os.stat_result, preserve_mtime: bool) -> dict[str, dict]:
+    """Namespaced metadata for one object.
+
+    `common` holds what every platform agrees about. `posix` holds the permission
+    bits and is only recorded where they mean something — writing a synthetic `mode`
+    on Windows would store a fact that was never true, and a reader has no way to
+    tell an invented value from an observed one.
+    """
+    metadata: dict[str, dict] = {}
+    if preserve_mtime:
+        metadata["common"] = {"mtime_ns": stat.st_mtime_ns}
+    if os.name == "posix":
+        metadata["posix"] = {"mode": stat.st_mode & 0o7777}
+    return metadata
+
+
+def _link_entry(entry: Path, archive_path: str, preserve_mtime: bool) -> ObjectEntry:
+    """A symbolic link, stored with its target exactly as the OS gave it.
+
+    Bytes, not a path: a link target is not a name in the archive's namespace, it is
+    an opaque string the *target* filesystem interprets. It may be absolute, may
+    escape the tree, may point at nothing. Normalizing it would store a different
+    link — the same mistake as rewriting `a\\b` into `a/b`, with worse consequences,
+    because this one is followed.
+
+    Nothing is resolved and nothing is validated here. Whether such a link may be
+    *created* is a question for restore, where creating it is what makes it matter.
+    """
+    raw = os.readlink(entry)
+    target = raw.encode("utf-8", "surrogateescape") if isinstance(raw, str) else raw
+    stat = entry.lstat()
+    return ObjectEntry(kind="symbolic-link", path=archive_path, target=target,
+                       metadata={"common": {"mtime_ns": stat.st_mtime_ns}}
+                       if preserve_mtime else {})
 
 
 def _opener(entry: Path, expected: os.stat_result):
@@ -129,8 +169,11 @@ def scan_tree(root: str | os.PathLike[str], *,
                 "make the archive claim more than it contains",
                 path=archive_path, kind=kind,
                 hint="pass --skip-unsupported to leave it out deliberately")
+        # `reason` comes from a closed set so the report can be summarised; `kind`
+        # carries the detail. Free text in both would make a hundred entries
+        # unreadable, which for a record of absence means unread.
         tree.skipped.append({"path": archive_path, "kind": kind,
-                             "reason": "not representable in ANLA 1.0"})
+                             "reason": "kind-not-representable"})
 
     for dirpath, dirnames, filenames in os.walk(root_path, followlinks=False):
         dirnames.sort()
@@ -143,7 +186,10 @@ def scan_tree(root: str | os.PathLike[str], *,
                 dirnames.remove(name)
                 continue
             if entry.is_symlink():
-                refuse_or_skip(entry, archive_path)
+                # A link to a directory is a link, not a directory. Walking into it
+                # would put the target's contents in the archive under this name.
+                claim(archive_path, entry)
+                tree.objects.append(_link_entry(entry, archive_path, preserve_mtime))
                 dirnames.remove(name)
                 continue
             claim(archive_path, entry)
@@ -153,7 +199,11 @@ def scan_tree(root: str | os.PathLike[str], *,
             archive_path = _archive_path(entry, root_path)
             if matches_any(archive_path, patterns):
                 continue
-            if entry.is_symlink() or not entry.is_file():
+            if entry.is_symlink():
+                claim(archive_path, entry)
+                tree.objects.append(_link_entry(entry, archive_path, preserve_mtime))
+                continue
+            if not entry.is_file():
                 refuse_or_skip(entry, archive_path)
                 continue
             claim(archive_path, entry)
@@ -161,11 +211,12 @@ def scan_tree(root: str | os.PathLike[str], *,
             tree.files.append(SourceEntry(
                 path=archive_path, read=_opener(entry, stat),
                 mtime_ns=stat.st_mtime_ns,
-                metadata={"mtime_ns": stat.st_mtime_ns} if preserve_mtime else {}))
+                metadata=_metadata(stat, preserve_mtime)))
             tree.total_bytes += stat.st_size
 
     tree.files.sort(key=lambda e: e.path.encode("utf-8"))
     tree.directories.sort(key=lambda p: p.encode("utf-8"))
+    tree.objects.sort(key=lambda e: e.path.encode("utf-8"))
     tree.skipped.sort(key=lambda s: s["path"])
     return tree
 
@@ -179,13 +230,71 @@ class RestoreReport:
     destination: str
     files: int = 0
     directories: int = 0
+    links: int = 0
     bytes_written: int = 0
+    #: Namespaces present in the archive that this run could not apply — a
+    #: *different* fact from the archive's own fidelity report, and one only the
+    #: reader can know. "Not stored" is a loss; "stored, not applied" is a limit of
+    #: this machine, and conflating them throws away whether the data still exists.
+    metadata_not_applied: dict[str, int] = field(default_factory=dict)
+
+
+def _note_unapplied(entry: dict, report: RestoreReport, *, applied: set[str]) -> None:
+    """Count namespaces this run carried but could not use.
+
+    Not an error and not a warning: the data is in the archive, intact and verified,
+    and some other machine can apply it. Recorded so the caller can tell that from
+    the case where the writer never stored it at all.
+    """
+    for namespace in entry.get("metadata", {}):
+        if namespace not in applied:
+            report.metadata_not_applied[namespace] = \
+                report.metadata_not_applied.get(namespace, 0) + 1
+
+
+def _restore_link(entry: dict, target: Path, root: Path, *,
+                  overwrite: bool, allow_external: bool) -> None:
+    """Create one symbolic link, or refuse to.
+
+    The archive stores what the link said. Creating it is a separate decision, and
+    the dangerous one: a target that is absolute or climbs out of the destination
+    turns an extracted archive into a way to reach the rest of the filesystem. So it
+    is refused here rather than sanitised at pack time — sanitising would have made
+    the archive an inaccurate record of the tree, and the record is the point.
+    """
+    raw = entry["target"]
+    text = raw.decode("utf-8", "surrogateescape")
+    landing = (target.parent / text)
+    escapes = PurePosixPath(text).is_absolute() or (len(text) > 1 and text[1] == ":")
+    if not escapes:
+        try:
+            escapes = root != landing.resolve() and root not in landing.resolve().parents
+        except OSError:                       # a target that cannot even be resolved
+            escapes = True
+    if escapes and not allow_external:
+        raise UnsafeObject(
+            "the link points outside the destination", path=entry["path"],
+            target=text,
+            hint="pass --allow-external-links if that is what you meant to restore")
+    if target.is_symlink() or target.exists():
+        if not overwrite:
+            raise UnsafeObject("destination already exists", path=entry["path"])
+        target.unlink()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target.symlink_to(text)
+    except (OSError, NotImplementedError) as exc:
+        raise FidelityDegraded(
+            "this system will not create symbolic links, so the link was not "
+            "restored — it is still in the archive",
+            path=entry["path"], target=text, detail=str(exc)) from exc
 
 
 def restore_tree(data: bytes, snapshot: Snapshot,
                  destination: str | os.PathLike[str], *,
                  overwrite: bool = False,
-                 restore_mtime: bool = True) -> RestoreReport:
+                 restore_mtime: bool = True,
+                 allow_external_links: bool = False) -> RestoreReport:
     """Write one snapshot to disk, after it has verified in full.
 
     `extract_snapshot` verifies every chunk and every file hash before this function
@@ -215,6 +324,13 @@ def restore_tree(data: bytes, snapshot: Snapshot,
         report.directories += 1
 
     for entry in sorted(snapshot.manifest["objects"], key=lambda e: e["path"]):
+        if entry["kind"] == "symbolic-link":
+            _restore_link(entry, target_for(entry["path"]), root,
+                          overwrite=overwrite,
+                          allow_external=allow_external_links)
+            report.links += 1
+            _note_unapplied(entry, report, applied={"common"})
+            continue
         if entry["kind"] != "regular-file":
             continue
         path = entry["path"]
@@ -234,9 +350,19 @@ def restore_tree(data: bytes, snapshot: Snapshot,
         target.write_bytes(content)
         stat = target.stat()
         written[(stat.st_dev, stat.st_ino)] = path
-        if restore_mtime and "mtime_ns" in entry.get("metadata", {}):
-            mtime = entry["metadata"]["mtime_ns"]
-            os.utime(target, ns=(mtime, mtime))
+        applied = set()
+        metadata = entry.get("metadata", {})
+        posix = metadata.get("posix", {})
+        if os.name == "posix" and "mode" in posix:
+            os.chmod(target, posix["mode"])
+            applied.add("posix")
+        common = metadata.get("common", {})
+        if restore_mtime and "mtime_ns" in common:
+            os.utime(target, ns=(common["mtime_ns"], common["mtime_ns"]))
+            applied.add("common")
+        elif not restore_mtime:
+            applied.add("common")          # declined, not unable
+        _note_unapplied(entry, report, applied=applied)
         report.files += 1
         report.bytes_written += len(content)
     return report

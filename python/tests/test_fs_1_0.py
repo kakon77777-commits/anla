@@ -53,8 +53,15 @@ def make_tree(root: Path) -> dict[str, bytes]:
 
 
 def pack(root: Path, **kwargs) -> bytes:
+    """Everything the scan found, including the parts that are not files.
+
+    `objects` and `fidelity` are passed on purpose: a helper that quietly dropped
+    them would make every symlink test below pass against an archive with no
+    symlink in it.
+    """
     tree = scan_tree(root, **kwargs)
     return append_snapshot(b"", files=tree.files, directories=tree.directories,
+                           objects=tree.objects, fidelity=tree.skipped,
                            created_unix_ns=CREATED, archive_id=ARCHIVE_ID)
 
 
@@ -209,38 +216,73 @@ def test_an_unsafe_path_cannot_be_written_into_an_archive():
 # what the scanner refuses
 # ---------------------------------------------------------------------------
 
-def test_a_symlink_is_refused_rather_than_skipped(tmp_path):
+def test_a_symlink_is_stored_with_its_target(tmp_path):
+    """Milestone 2 made these representable. Before it, this test asserted the
+    opposite — that the pack was refused — which was correct then and is a bug now."""
     source = tmp_path / "src"
     source.mkdir()
     (source / "real.txt").write_bytes(b"real\n")
-    symlink_or_skip(source / "link.txt", source / "real.txt")
-    with pytest.raises(UnsafeObject, match="cannot represent"):
-        scan_tree(source)
+    symlink_or_skip(source / "link.txt", Path("real.txt"))
+
+    tree = scan_tree(source)
+    assert not tree.skipped
+    link = [e for e in tree.objects if e.path == "link.txt"][0]
+    assert link.kind == "symbolic-link" and link.target == b"real.txt"
 
 
-def test_a_symlink_can_be_left_out_deliberately(tmp_path):
-    source = tmp_path / "src"
+def test_a_symlink_round_trips_to_disk(tmp_path):
+    source, destination = tmp_path / "src", tmp_path / "out"
     source.mkdir()
     (source / "real.txt").write_bytes(b"real\n")
-    symlink_or_skip(source / "link.txt", source / "real.txt")
+    symlink_or_skip(source / "link.txt", Path("real.txt"))
 
-    tree = scan_tree(source, allow_unsupported=True)
-    assert [s["path"] for s in tree.skipped] == ["link.txt"]
-    assert [e.path for e in tree.files] == ["real.txt"]
+    data = pack(source)
+    restore_tree(data, latest_snapshot(data), destination)
+    restored = destination / "link.txt"
+    assert restored.is_symlink()
+    assert os.readlink(restored) == "real.txt"
+    assert restored.read_bytes() == b"real\n"
+
+
+def test_a_link_out_of_the_tree_is_stored_and_refused_on_restore(tmp_path):
+    """Storing it and creating it are different decisions.
+
+    The archive is a record of what was there, so the link is kept verbatim.
+    Creating it is what turns an extracted archive into a route to the rest of the
+    filesystem, so that is where the refusal belongs — and where an operator can
+    say they meant it.
+    """
+    source, destination = tmp_path / "src", tmp_path / "out"
+    source.mkdir()
+    (source / "real.txt").write_bytes(b"real\n")
+    symlink_or_skip(source / "escape", Path("..") / ".." / "etc")
+
+    data = pack(source)
+    stored = [e for e in latest_snapshot(data).manifest["objects"]
+              if e["kind"] == "symbolic-link"][0]
+    assert stored["target"] == str(Path("..") / ".." / "etc").encode()
+
+    with pytest.raises(UnsafeObject, match="points outside the destination"):
+        restore_tree(data, latest_snapshot(data), destination)
+    assert not (destination / "escape").exists()
+
+    restore_tree(data, latest_snapshot(data), destination,
+                 allow_external_links=True)
+    assert (destination / "escape").is_symlink()
 
 
 def test_a_symlink_is_never_followed(tmp_path):
-    """Following one turns a link into a copy of its target, which changes what the
-    archive means without saying so."""
+    """Following one would put the target's contents in the archive under the
+    link's name, which changes what the archive means without saying so."""
     source, outside = tmp_path / "src", tmp_path / "outside"
     source.mkdir()
     outside.mkdir()
     (outside / "secret.txt").write_bytes(b"not part of the tree\n")
     symlink_or_skip(source / "elsewhere", outside)
 
-    tree = scan_tree(source, allow_unsupported=True)
-    assert not tree.files
-    assert [s["path"] for s in tree.skipped] == ["elsewhere"]
+    tree = scan_tree(source)
+    assert not tree.files, "the link's target was walked into"
+    assert [e.kind for e in tree.objects] == ["symbolic-link"]
 
 
 def test_a_file_that_changes_while_being_packed_is_refused(tmp_path):

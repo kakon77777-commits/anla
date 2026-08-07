@@ -99,7 +99,7 @@ def build_archive(*, auxiliary: list[dict] | None = None,
             kind="regular-file", path=path, size=len(payload),
             content_hash=H(payload),
             chunks=(H(payload),) if payload else (),
-            metadata={"mtime_ns": 1_700_000_000_000_000_000}))
+            metadata={"common": {"mtime_ns": 1_700_000_000_000_000_000}}))
 
     manifest = build_manifest(
         archive_id=ARCHIVE_ID, snapshot_sequence=1,

@@ -92,6 +92,16 @@ KNOWN_CAPABILITIES = frozenset({
     "anla:hash:sha256:1",
     "anla:codec:store:1",
     "anla:chunking:anla-cdc-1",
+    # A reader that does not know this kind refuses the manifest outright, so it is
+    # required rather than optional — unlike a metadata namespace, which an
+    # ignorant reader can verify and extract around.
+    "anla:object:symlink:1",
+    # Metadata namespaces are *optional* capabilities on purpose. Metadata lives
+    # inside `object_id`, so a reader that has never heard of one verifies exactly
+    # the same bytes and only loses the ability to apply it. Requiring them would
+    # refuse an archive this reader could restore the contents of perfectly.
+    "anla:metadata:common:1",
+    "anla:metadata:posix:1",
 })
 
 #: Hash agility, and the footer names its own: a footer is read *before* the

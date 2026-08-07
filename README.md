@@ -15,6 +15,7 @@ the site that hosts a working version you can run in a browser tab.
 - **Papers:** [`papers/`](papers/) — Traditional Chinese originals, English translations
 - **Conformance:** [`conformance/`](conformance/) — fixtures, frozen vectors, drivers
 - **Design record:** [`design/decisions-for-1.0.md`](design/decisions-for-1.0.md) — the whitepaper's fifteen open questions, answered or scoped
+- **Measured, including where it loses:** https://anla.evemisslab.com/bench/ — six scenarios against ZIP, tar.gz and MVP
 
 ```text
 Extract(Pack(F, P)) = F
@@ -65,7 +66,8 @@ independent implementations produce byte-identical archives and a differential f
 finds no divergence between them.** 1.0 now has canonical CBOR, the container (header,
 record frame with flags, footer chain, capabilities), the pinned Merkle construction,
 the manifest with its five roots, BLAKE3-256, append-only snapshots with
-cross-snapshot deduplication, and an `anla1` command that packs a real directory —
+cross-snapshot deduplication, metadata namespaces with an in-archive fidelity
+report, symbolic links, and an `anla1` command that packs a real directory —
 a second snapshot of an unchanged tree writes no chunk records at all, and with
 `anla-cdc-1` prepending ten bytes to a 300 KB file shares 65 of its 66 chunks with
 the snapshot before it. What it does not have is a second implementation, so nothing
@@ -164,7 +166,7 @@ archive.read('docs/readme.txt');
 python -m pytest python/tests -q
 ```
 
-603 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
+627 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
 without it. Everything runs on Linux, macOS and Windows in CI. Another 76
 assertions run in a browser on the [live test page](https://anla.evemisslab.com/demo/).
 

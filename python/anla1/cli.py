@@ -30,6 +30,7 @@ from anla.errors import AnlaError, InvalidInput
 from . import __draft__, __profile__
 from .container import CORE_HASH, HASHES
 from .fs import restore_tree, scan_tree
+from .manifest import fidelity_of
 from .snapshot import (
     append_snapshot,
     cdc_chunker,
@@ -129,6 +130,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
                      preserve_mtime=not args.no_mtime)
     data = append_snapshot(
         b"", files=tree.files, directories=tree.directories,
+        objects=tree.objects, fidelity=tree.skipped,
         created_unix_ns=_created_ns(args.created_ns),
         chunker=_chunker(args.chunking),
         hash_algorithm=args.hash,
@@ -140,6 +142,8 @@ def cmd_pack(args: argparse.Namespace) -> int:
                 if e["kind"] == "regular-file")
     _emit({"archive": args.output, "bytes": len(data), "snapshot": 1,
            "files": files,
+           "links": sum(1 for e in report.snapshots[-1].manifest["objects"]
+                        if e["kind"] == "symbolic-link"),
            "chunks": report.unique_chunks, "hash": args.hash,
            "chunking": args.chunking, "skipped": skipped},
           args.json,
@@ -157,6 +161,7 @@ def cmd_append(args: argparse.Namespace) -> int:
                      preserve_mtime=not args.no_mtime)
     data = append_snapshot(
         existing, files=tree.files, directories=tree.directories,
+        objects=tree.objects, fidelity=tree.skipped,
         created_unix_ns=_created_ns(args.created_ns),
         chunker=_chunker(args.chunking))
     report = verify_archive(data)
@@ -198,42 +203,73 @@ def cmd_snapshots(args: argparse.Namespace) -> int:
 
 def cmd_list(args: argparse.Namespace) -> int:
     snapshot, _ = _pick(_read(args.archive), args.snapshot)
-    rows = [{"path": e["path"], "kind": e["kind"], "size": e.get("size", 0)}
+    rows = [{"path": e["path"], "kind": e["kind"], "size": e.get("size", 0),
+             "target": (e["target"].decode("utf-8", "surrogateescape")
+                        if e["kind"] == "symbolic-link" else None)}
             for e in sorted(snapshot.manifest["objects"], key=lambda e: e["path"])]
-    _emit({"archive": args.archive, "snapshot": snapshot.sequence, "objects": rows},
-          args.json,
-          [f"{r['size']:>10}  {r['path']}" if r["kind"] == "regular-file"
-           else f"{'dir':>10}  {r['path']}/" for r in rows])
+    missing = fidelity_of(snapshot.manifest)
+
+    def line(row: dict) -> str:
+        if row["kind"] == "regular-file":
+            return f"{row['size']:>10}  {row['path']}"
+        if row["kind"] == "symbolic-link":
+            return f"{'link':>10}  {row['path']} -> {row['target']}"
+        return f"{'dir':>10}  {row['path']}/"
+
+    _emit({"archive": args.archive, "snapshot": snapshot.sequence, "objects": rows,
+           "fidelity": missing}, args.json,
+          [line(row) for row in rows]
+          + [f"{'absent':>10}  {e['path']} ({e['reason']})" for e in missing])
     return 0
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
     data = _read(args.archive)
     report = verify_archive(data)
+    # Surfaced without being asked for, and it changes the exit code. An archive can
+    # be perfectly valid *and* declare that it is missing things; a verify that
+    # returned 0 for both would make the fidelity report a footnote, and the reason
+    # it sits in the preservation plane is that it must not be one.
+    missing = fidelity_of(report.snapshots[-1].manifest)
+    lines = [f"{args.archive}: " + ("ok" if not missing else "ok, but incomplete"),
+             f"  {len(report.snapshots)} snapshots, {report.unique_chunks} unique chunks",
+             f"  {report.chunk_bytes} stored for {report.logical_bytes} logical bytes"]
+    if missing:
+        lines.append(f"  the archive records {len(missing)} entries it does not hold:")
+        lines += [f"    {e['path']} ({e['reason']}: {e.get('kind', '?')})"
+                  for e in missing]
     _emit({"archive": args.archive, "ok": True,
            "snapshots": len(report.snapshots),
            "unique_chunks": report.unique_chunks,
            "chunk_bytes": report.chunk_bytes,
            "logical_bytes": report.logical_bytes,
-           "archive_bytes": report.archive_bytes}, args.json,
-          [f"{args.archive}: ok",
-           f"  {len(report.snapshots)} snapshots, {report.unique_chunks} unique chunks",
-           f"  {report.chunk_bytes} stored for {report.logical_bytes} logical bytes"])
-    return 0
+           "archive_bytes": report.archive_bytes,
+           "complete": not missing,
+           "fidelity": missing}, args.json, lines)
+    return 11 if missing else 0
 
 
 def cmd_extract(args: argparse.Namespace) -> int:
     data = _read(args.archive)
     snapshot, _ = _pick(data, args.snapshot)
     result = restore_tree(data, snapshot, args.to, overwrite=args.overwrite,
-                          restore_mtime=not args.no_mtime)
+                          restore_mtime=not args.no_mtime,
+                          allow_external_links=args.allow_external_links)
+    # `metadata_not_applied` is this machine's limit, not the archive's. Reported
+    # separately from `fidelity` because "the archive never held it" and "this run
+    # could not use it" are different facts, and only one of them means data is gone.
     _emit({"archive": args.archive, "snapshot": snapshot.sequence,
            "destination": result.destination, "files": result.files,
-           "directories": result.directories, "bytes": result.bytes_written},
+           "directories": result.directories, "links": result.links,
+           "bytes": result.bytes_written,
+           "metadata_not_applied": result.metadata_not_applied},
           args.json,
           [f"restored snapshot {snapshot.sequence} to {result.destination}",
            f"  {result.files} files, {result.directories} directories, "
-           f"{result.bytes_written} bytes"])
+           f"{result.links} links, {result.bytes_written} bytes"]
+          + [f"  metadata this system could not apply: {ns} ({n} objects)"
+             f" - it is still in the archive"
+             for ns, n in sorted(result.metadata_not_applied.items())])
     return 0
 
 
@@ -278,9 +314,10 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--exclude", action="append", metavar="GLOB",
                        help="skip paths matching this glob (repeatable)")
         p.add_argument("--skip-unsupported", action="store_true",
-                       help="leave out entries 1.0 cannot represent instead of "
-                            "refusing; exits 11 because the archive is then "
-                            "deliberately incomplete")
+                       help="leave out entries 1.0 cannot represent (devices, "
+                            "sockets, FIFOs) instead of refusing. The omission is "
+                            "recorded in the archive's fidelity report, and the "
+                            "exit code stays 11 for as long as it is there")
         p.add_argument("--no-mtime", action="store_true",
                        help="do not record modification times")
         p.add_argument("--chunking", choices=("none", "cdc"), default="cdc",
@@ -327,6 +364,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_extract.add_argument("--to", required=True)
     p_extract.add_argument("-s", "--snapshot", type=int)
     p_extract.add_argument("--overwrite", action="store_true")
+    p_extract.add_argument("--allow-external-links", action="store_true",
+                           help="create symbolic links whose target is absolute or "
+                                "points outside the destination")
     p_extract.add_argument("--no-mtime", action="store_true",
                            help="do not restore modification times")
     common(p_extract)

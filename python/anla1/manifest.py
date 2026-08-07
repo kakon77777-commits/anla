@@ -37,15 +37,30 @@ from .merkle import merkle_root
 
 __all__ = [
     "OBJECT_ID_PREFIX", "PRESERVATION_PREFIX", "OBJECT_KINDS",
+    "METADATA_NAMESPACES", "FIDELITY_REASONS",
     "ObjectEntry", "ChunkEntry", "Roots",
     "object_id_for", "object_leaf", "chunk_leaf", "check_object_path",
+    "check_metadata", "check_fidelity", "fidelity_of",
     "compute_roots", "build_manifest", "verify_manifest", "without_auxiliary",
 ]
 
-#: What 1.0 can represent. Anything else — links, devices, sockets — is refused
-#: rather than approximated, because an archive that stored a symlink as a copy of
-#: its target would have changed what the tree means without saying so.
-OBJECT_KINDS = ("regular-file", "directory")
+#: What 1.0 can represent. Anything else — devices, sockets, FIFOs — is refused
+#: rather than approximated, because an archive that stored one as an empty file
+#: would have changed what the tree means without saying so.
+OBJECT_KINDS = ("regular-file", "directory", "symbolic-link")
+
+#: Metadata namespaces this implementation understands. A namespace it does not
+#: know is *not* an error: metadata lives inside `object_id`, so an unknown
+#: namespace verifies exactly the same, it simply cannot be applied. That is why
+#: namespaces belong in `optional_capabilities` and never in `required` — see
+#: `design/milestone-2-plan.md` decision 3, which retires the draft's guess that
+#: `metadata_root` should be split per namespace.
+METADATA_NAMESPACES = ("common", "posix", "fidelity")
+
+#: Reasons an object can be missing from an archive that was otherwise packed.
+#: Free text would make the report unsummarisable, which is most of what a report
+#: is for.
+FIDELITY_REASONS = ("kind-not-representable", "read-failed", "excluded-by-policy")
 
 
 def check_object_path(path: object) -> str:
@@ -82,6 +97,60 @@ MANIFEST_VERSION = [1, 0]
 # entries
 # ---------------------------------------------------------------------------
 
+def check_metadata(metadata: object, *, path: str) -> None:
+    """Namespaced, and shaped the same on the way in as on the way out.
+
+    An unknown namespace is deliberately **allowed**: metadata is inside
+    `object_id`, so a reader that has never heard of it verifies identically and
+    only loses the ability to apply it. What is refused is metadata that is not
+    namespaced at all, because a bare `mode` key means something different on every
+    platform and gives a reader nowhere to record that it could not use it.
+    """
+    if not isinstance(metadata, dict):
+        raise ManifestInvalid("object metadata must be a map", path=path)
+    for namespace, entries in metadata.items():
+        if not isinstance(namespace, str) or not namespace:
+            raise ManifestInvalid("metadata namespace must be a non-empty string",
+                                  path=path, namespace=repr(namespace)[:40])
+        if not isinstance(entries, dict):
+            raise ManifestInvalid("a metadata namespace must hold a map",
+                                  path=path, namespace=namespace)
+        for key in entries:
+            if not isinstance(key, str):
+                raise ManifestInvalid("metadata keys must be strings",
+                                      path=path, namespace=namespace)
+
+
+def check_fidelity(entries: object) -> list[dict]:
+    """The record of what the writer could not keep.
+
+    Every entry needs a path and a reason from a closed set. Free text would make
+    the report unsummarisable, and a report nobody can summarise is one nobody
+    reads — which for a record of *absence* means it may as well not exist.
+    """
+    if not isinstance(entries, list):
+        raise ManifestInvalid("the fidelity report must be a list")
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ManifestInvalid("a fidelity entry must be a map")
+        for required in ("path", "reason"):
+            if not isinstance(entry.get(required), str) or not entry[required]:
+                raise ManifestInvalid(f"a fidelity entry needs a {required}",
+                                      entry=repr(entry)[:80])
+        if entry["reason"] not in FIDELITY_REASONS:
+            raise ManifestInvalid("unknown fidelity reason", reason=entry["reason"],
+                                  known=list(FIDELITY_REASONS))
+    return entries
+
+
+def fidelity_of(manifest: dict) -> list[dict]:
+    """The report, or an empty list. Never `None` — absence is completeness."""
+    for block in manifest.get("metadata", []):
+        if isinstance(block, dict) and block.get("namespace") == "fidelity":
+            return list(block.get("entries", []))
+    return []
+
+
 @dataclass(frozen=True)
 class ObjectEntry:
     """One filesystem object.
@@ -97,7 +166,13 @@ class ObjectEntry:
     size: int = 0
     content_hash: bytes = b""
     chunks: tuple[bytes, ...] = ()
-    metadata: dict[str, Any] = field(default_factory=dict)
+    #: Namespaced: `{"common": {"mtime_ns": …}, "posix": {"mode": …}}`. Flat keys
+    #: are refused, because "mode" means something different on every platform and
+    #: a bare key gives a reader nowhere to put that fact.
+    metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: For `symbolic-link` only: the target exactly as the operating system gave it.
+    #: Bytes, not a path — see the class docstring.
+    target: bytes | None = None
 
     def identity(self) -> dict:
         """The fields an object id is computed over — everything but the id."""
@@ -106,8 +181,18 @@ class ObjectEntry:
             body["size"] = self.size
             body["content_hash"] = self.content_hash
             body["chunks"] = list(self.chunks)
+        if self.kind == "symbolic-link":
+            if self.target is None:
+                raise InvalidInput("a symbolic link needs a target", path=self.path)
+            body["target"] = bytes(self.target)
         if self.metadata:
-            body["metadata"] = dict(self.metadata)
+            # Checked here rather than trusted, because the flat `{"mtime_ns": …}`
+            # shape this replaced is exactly what a caller written against the
+            # previous draft still passes — and it would otherwise reach the encoder
+            # as a plausible-looking map and be stored.
+            check_metadata(self.metadata, path=self.path)
+            body["metadata"] = {ns: dict(entries)
+                                for ns, entries in sorted(self.metadata.items())}
         return body
 
     def as_manifest_entry(self, hasher: Hasher) -> dict:
@@ -216,6 +301,8 @@ def build_manifest(*, archive_id: bytes, snapshot_sequence: int, created_unix_ns
         if entry["kind"] not in OBJECT_KINDS:
             raise InvalidInput("unsupported object kind", kind=entry["kind"],
                                path=entry["path"], supported=list(OBJECT_KINDS))
+        if "metadata" in entry:
+            check_metadata(entry["metadata"], path=entry["path"])
         if entry["path"] in seen_paths:
             raise InvalidInput("duplicate object path", path=entry["path"])
         seen_paths.add(entry["path"])
@@ -228,6 +315,9 @@ def build_manifest(*, archive_id: bytes, snapshot_sequence: int, created_unix_ns
         chunk_map[chunk.chunk_id] = chunk.as_manifest_entry()
 
     metadata_list = list(metadata)
+    for block in metadata_list:
+        if block.get("namespace") == "fidelity":
+            check_fidelity(block.get("entries"))
     auxiliary_list = list(auxiliary)
     roots = compute_roots(object_entries, chunk_map, metadata_list, auxiliary_list,
                           hasher)
@@ -302,10 +392,26 @@ def verify_manifest(manifest: dict, hasher: Hasher) -> Roots:
         if path in seen_paths:
             raise UnsafeObject("duplicate object path", path=path)
         seen_paths.add(path)
+        if entry["kind"] == "symbolic-link" and not isinstance(entry.get("target"), bytes):
+            raise ManifestInvalid("a symbolic link needs a byte-string target",
+                                  path=path)
+        if "metadata" in entry:
+            check_metadata(entry["metadata"], path=path)
         identity = {k: v for k, v in entry.items() if k != "object_id"}
         if hasher(OBJECT_ID_PREFIX + encode(identity)) != entry["object_id"]:
             raise IntegrityFailure("object_id does not match the object it identifies",
                                    path=entry.get("path"))
+
+    seen_namespaces: set[str] = set()
+    for block in manifest["metadata"]:
+        if not isinstance(block, dict) or not isinstance(block.get("namespace"), str):
+            raise ManifestInvalid("an archive metadata block needs a namespace")
+        if block["namespace"] in seen_namespaces:
+            raise ManifestInvalid("a metadata namespace appears twice",
+                                  namespace=block["namespace"])
+        seen_namespaces.add(block["namespace"])
+        if block["namespace"] == "fidelity":
+            check_fidelity(block.get("entries"))
 
     recomputed = compute_roots(manifest["objects"], manifest["chunks"],
                                manifest["metadata"], manifest["auxiliary"], hasher)

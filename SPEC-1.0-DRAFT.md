@@ -47,7 +47,9 @@ editing `SPEC.md` and hoping.
 | Object name model (whitepaper Q4) | one `path`, deliberately not settled |
 | BLAKE3-256 | **implemented** — [`python/anla1/blake3.py`](python/anla1/blake3.py), a dependency-free reference plus the Rust fast path, 55 tests |
 | Zstandard | decided (§8), not implemented |
-| Metadata namespaces, signatures, encryption, parity | later milestones |
+| Metadata namespaces and the fidelity report (§5.2.2) | **implemented** — 27 tests |
+| Symbolic links | **implemented** — stored verbatim, restored under policy |
+| Signatures, encryption, parity | later milestones |
 
 Anything not in the "implemented" rows is a claim about intent, not about code. This
 table is the first thing to update when that changes, and it is deliberately at the
@@ -344,9 +346,65 @@ name model carries native and legacy forms alongside the portable one, a name th
 cannot survive the round trip is refused, because refusing is the only answer that
 does not quietly change what the archive contains.
 
-`kind` MUST be `regular-file` or `directory`. Symbolic links, devices, sockets and
-FIFOs are not representable in 1.0 and MUST NOT be approximated by something that
-is — a symlink stored as a copy of its target is a different tree.
+`kind` MUST be `regular-file`, `directory` or `symbolic-link`. Devices, sockets and
+FIFOs are not representable in 1.0 and MUST NOT be approximated by something that is
+— a socket stored as an empty file is a different tree.
+
+A `symbolic-link` carries `target`, a **byte string, stored exactly as the operating
+system returned it**. It is not a path in this archive's namespace: it is an opaque
+string the *target* filesystem interprets, and it may be absolute, may leave the
+tree, may point at nothing. A writer MUST NOT normalize, resolve or validate it —
+doing so stores a different link, which is the rule above with worse consequences,
+because this one gets followed.
+
+Whether such a link may be **created** is a separate question, and belongs to the
+restorer. A target that is absolute or escapes the destination MUST be refused on
+restore unless the operator asks for it, because creating it is what turns an
+extracted archive into a route to the rest of the filesystem.
+
+### 5.2.2 Metadata namespaces, and the fidelity report
+
+Object metadata is a map of namespace to entries: `{"common": {"mtime_ns": …},
+"posix": {"mode": …}}`. Flat keys are refused — `mode` means something different
+on every platform, and a bare key leaves a reader nowhere to record that it could
+not use it.
+
+**Metadata namespaces are `optional_capabilities`, never `required`.** An earlier
+draft of §5.3 left open whether `metadata_root` should be split per namespace, so
+that "metadata a reader cannot apply is a subtree it reports on rather than a
+verification failure". That premise does not hold and the question is now closed:
+verification is hashing, not interpretation. Object metadata is inside `object_id`,
+so a reader that has never heard of `posix` computes the same id over the same
+canonical CBOR, verifies, and extracts every byte — it simply cannot apply what it
+verified. An unknown namespace could never have caused a verification failure, so a
+root per namespace buys nothing. What can wrongly refuse such an archive is a
+*capability*, and that is where the granularity belongs.
+
+The archive-level `metadata` array carries namespaced blocks that are not per
+object. The first is `fidelity`:
+
+```text
+{"namespace": "fidelity",
+ "entries": [{"path": "dev/log", "reason": "kind-not-representable",
+              "kind": "socket"}]}
+```
+
+Every entry MUST carry a `path` and a `reason` from a closed set
+(`kind-not-representable`, `read-failed`, `excluded-by-policy`). Free text would
+make the report unsummarisable, and a record of *absence* that nobody reads is one
+that may as well not be there.
+
+**The report is in the preservation plane, and MUST NOT be placed in `auxiliary`.**
+`auxiliary` is disposable by definition; a record of what the archive does not hold
+must not be droppable, because dropping it turns a declared-incomplete archive into
+an apparently complete one — worse than either. It is therefore covered by
+`metadata_root`, and removing it changes the snapshot's identity.
+
+A reader MUST surface the report without being asked. Three states exist and a tool
+that conflates them is not reporting: **stored and applied**, **stored but not
+applied** (this reader or filesystem cannot use it — recoverable elsewhere), and
+**not stored** (gone). Only the last belongs in the archive, because only the writer
+can know it.
 
 ### 5.3 Several roots, on purpose
 

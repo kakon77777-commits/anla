@@ -338,8 +338,60 @@ def scenario_shifted_insert(work: Path) -> Result:
                 "fixed_second_snapshot_bytes": fixed_size - fixed_growth[0]})
 
 
+def scenario_metadata_cost(work: Path) -> Result:
+    """What Milestone 2 costs: namespaced metadata and symbolic links.
+
+    Built from objects rather than from a directory, deliberately. The filesystem
+    version cannot run on a Windows host without developer mode, and a scenario that
+    quietly measured something different depending on the machine would make the
+    published table depend on who generated it. This measures the format, which is
+    the same everywhere.
+    """
+    from anla1.manifest import ObjectEntry
+    from anla1.snapshot import SourceEntry
+
+    count = 500
+    files = [SourceEntry.of(f"src/file{i:03d}.txt", f"contents of {i}\n".encode())
+             for i in range(count)]
+    timed = [SourceEntry(path=f.path, read=f.read,
+                         metadata={"common": {"mtime_ns": 1_700_000_000_000_000_000 + i}})
+             for i, f in enumerate(files)]
+    full = [SourceEntry(path=f.path, read=f.read, metadata={
+        "common": {"mtime_ns": 1_700_000_000_000_000_000 + i},
+        "posix": {"mode": 0o644}}) for i, f in enumerate(files)]
+    links = [ObjectEntry(kind="symbolic-link", path=f"link/l{i:03d}",
+                         target=f"../src/file{i:03d}.txt".encode())
+             for i in range(count)]
+
+    def size(entries, objects=()) -> int:
+        return len(append_snapshot(
+            b"", files=entries, directories=["src", "link"], objects=list(objects),
+            created_unix_ns=FIXED_TIME, archive_id=FIXED_UUID))
+
+    bare, with_times, with_posix = size(files), size(timed), size(full)
+    with_links = size(full, links)
+    logical = sum(len(f.read()) for f in files)
+    return Result(
+        scenario="metadata-cost",
+        headline=f"{count} files: what namespaced metadata and {count} symlinks add",
+        note="Milestone 2 moves no compression number, because it is not about "
+             "compression — it is what lets the tool pack trees it used to refuse "
+             "outright. This is its actual bill, per object, in the manifest. A "
+             "symbolic link costs a manifest entry and no chunk at all: it has no "
+             "content, only a target.",
+        inputs={"logical_bytes": logical, "files": count, "links": count},
+        sizes={"anla_1_0": with_links,
+               "no_metadata": bare,
+               "times_only": with_times,
+               "times_and_mode": with_posix},
+        detail={"bytes_per_object_for_times": round((with_times - bare) / count, 1),
+                "bytes_per_object_for_mode": round((with_posix - with_times) / count, 1),
+                "bytes_per_symlink": round((with_links - with_posix) / count, 1)})
+
+
 SCENARIOS = {
     "source-tree": scenario_source_tree,
+    "metadata-cost": scenario_metadata_cost,
     "git-history": scenario_git_history,
     "duplicate-tree": scenario_duplicate_tree,
     "incompressible": scenario_incompressible,

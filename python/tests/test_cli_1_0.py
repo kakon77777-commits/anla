@@ -165,41 +165,33 @@ def test_excluding_paths(capsys, tmp_path, tree):
 # the exit codes that carry meaning
 # ---------------------------------------------------------------------------
 
-def test_an_unrepresentable_entry_refuses_and_writes_nothing(capsys, tmp_path, tree):
-    archive = tmp_path / "a.anla"
-    try:
-        (tree / "link.txt").symlink_to(tree / "readme.txt")
-    except (OSError, NotImplementedError):
-        if sys.platform != "win32":
-            raise
-        pytest.skip("Windows without developer mode cannot create a symbolic link")
+def test_a_symlink_packs_and_restores(capsys, tmp_path, tree):
+    """Milestone 2 made this the ordinary case.
 
-    assert main(["pack", str(tree), "-o", str(archive), "--json"]) == 9
-    assert not archive.exists(), "a refused pack must not leave an archive behind"
-
-
-def test_skipping_deliberately_still_reports_degraded_fidelity(capsys, tmp_path, tree):
-    """It produced an archive, and it still does not exit 0.
-
-    An operator asked for an incomplete pack and got one; a script that treats
-    non-zero as failure therefore cannot mistake it for a complete archive. The
-    in-archive fidelity report that would make this a recorded fact rather than a
-    remembered one is Milestone 2.
+    Both of the tests that stood here used a symbolic link as their example of
+    something the format could not hold, which was true when they were written and
+    became a bug the moment links were implemented. They skipped on Windows, so the
+    machine they were written on could not have told anyone.
     """
     archive = tmp_path / "a.anla"
     try:
-        (tree / "link.txt").symlink_to(tree / "readme.txt")
+        (tree / "link.txt").symlink_to(Path("readme.txt"))
     except (OSError, NotImplementedError):
         if sys.platform != "win32":
             raise
         pytest.skip("Windows without developer mode cannot create a symbolic link")
 
-    code, packed = run(capsys, "pack", str(tree), "-o", str(archive),
-                       "--skip-unsupported")
-    assert code == 11
-    assert [s["path"] for s in packed["skipped"]] == ["link.txt"]
-    assert archive.exists()
-    assert run(capsys, "verify", str(archive))[0] == 0
+    code, packed = run(capsys, "pack", str(tree), "-o", str(archive))
+    assert code == 0 and packed["links"] == 1
+
+    _, listed = run(capsys, "list", str(archive))
+    link = [o for o in listed["objects"] if o["kind"] == "symbolic-link"][0]
+    assert link["target"] == "readme.txt"
+
+    out = tmp_path / "out"
+    code, extracted = run(capsys, "extract", str(archive), "--to", str(out))
+    assert code == 0 and extracted["links"] == 1
+    assert (out / "link.txt").is_symlink()
 
 
 def test_a_corrupted_chunk_fails_verification_with_the_integrity_code(
@@ -239,3 +231,43 @@ def test_mtime_is_optional_in_both_directions(capsys, tmp_path, tree):
     out = tmp_path / "out"
     run(capsys, "extract", str(archive), "--to", str(out))
     assert (out / "readme.txt").stat().st_mtime_ns != when
+
+
+def test_an_incomplete_archive_keeps_reporting_itself(capsys, tmp_path, tree):
+    """The fidelity report is in the archive, so `verify` finds it later.
+
+    Before Milestone 2 the only record of a skipped entry was the exit code of the
+    pack that made it — an operator told once, on the day. `verify` now exits 11 for
+    as long as the report is there, which is what makes the record a record.
+    """
+    import os
+
+    archive = tmp_path / "a.anla"
+    fifo = tree / "pipe"
+    try:
+        os.mkfifo(fifo)
+    except (AttributeError, OSError):
+        pytest.skip("this platform has no FIFOs to leave out")
+
+    assert main(["pack", str(tree), "-o", str(archive), "--json"]) == 9
+
+    code, packed = run(capsys, "pack", str(tree), "-o", str(archive),
+                       "--skip-unsupported")
+    assert code == 11
+    assert [s["path"] for s in packed["skipped"]] == ["pipe"]
+
+    # And again, from the archive alone, with nobody having mentioned it.
+    code, verified = run(capsys, "verify", str(archive))
+    assert code == 11
+    assert verified["ok"] is True and verified["complete"] is False
+    assert verified["fidelity"][0]["reason"] == "kind-not-representable"
+
+    code, listed = run(capsys, "list", str(archive))
+    assert [e["path"] for e in listed["fidelity"]] == ["pipe"]
+
+
+def test_a_complete_archive_says_so(capsys, tmp_path, tree):
+    archive = tmp_path / "a.anla"
+    run(capsys, "pack", str(tree), "-o", str(archive))
+    code, verified = run(capsys, "verify", str(archive))
+    assert code == 0 and verified["complete"] is True and verified["fidelity"] == []

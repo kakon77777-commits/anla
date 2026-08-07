@@ -36,6 +36,7 @@ from .manifest import (
     ChunkEntry,
     ObjectEntry,
     build_manifest,
+    check_fidelity,
     parse_manifest,
     verify_manifest,
 )
@@ -319,6 +320,8 @@ def append_snapshot(data: bytes, *,
                     directories: Iterable[str] = (),
                     created_unix_ns: int,
                     metadata: Mapping[str, dict] | None = None,
+                    objects: Iterable[ObjectEntry] = (),
+                    fidelity: Iterable[dict] = (),
                     auxiliary: Iterable[dict] = (),
                     chunker: Chunker = single_chunk,
                     hash_algorithm: str | None = None,
@@ -389,8 +392,9 @@ def append_snapshot(data: bytes, *,
     # ever has a reason to reclaim them.
     out = bytearray(data[:resume_at] if started else data)
     chunk_entries: dict[bytes, ChunkEntry] = {}
-    objects = [ObjectEntry(kind="directory", path=path)
-               for path in sorted(directories, key=lambda p: p.encode("utf-8"))]
+    tree_objects = [ObjectEntry(kind="directory", path=path)
+                    for path in sorted(directories, key=lambda p: p.encode("utf-8"))]
+    tree_objects += list(objects)
     # A complete manifest: descriptors for chunks written now *and* for chunks
     # written by an earlier snapshot, so that reading this snapshot needs no other.
     referenced: list[ChunkEntry] = []
@@ -418,7 +422,7 @@ def append_snapshot(data: bytes, *,
                 payload_length=len(piece), raw_size=len(piece),
                 codec_id=STORE_CODEC, payload_hash=chunk_id)
             sequence += 1
-        objects.append(ObjectEntry(
+        tree_objects.append(ObjectEntry(
             kind="regular-file", path=source.path, size=len(payload),
             content_hash=hasher(payload), chunks=tuple(ids),
             metadata=dict(source.metadata)))
@@ -433,11 +437,39 @@ def append_snapshot(data: bytes, *,
 
     capabilities = ["anla:core:objects:1", "anla:core:chunks:1", SNAPSHOT_CAPABILITY,
                     f"anla:hash:{hash_algorithm}:1", "anla:codec:store:1"]
+    if any(entry.kind == "symbolic-link" for entry in tree_objects):
+        # Required, because a reader that does not know the kind refuses the whole
+        # manifest anyway. Saying so is the difference between a clear refusal and
+        # an obscure one.
+        capabilities.append("anla:object:symlink:1")
+
+    # Metadata namespaces are *optional* capabilities. An object's metadata is
+    # inside its `object_id`, so a reader that has never heard of `posix` computes
+    # the same id over the same bytes, verifies, and extracts every byte — it just
+    # cannot apply what it verified. Requiring them would refuse an archive that
+    # reader could restore perfectly. See design/milestone-2-plan.md decision 3.
+    namespaces = {ns for entry in tree_objects for ns in entry.metadata}
+    optional = [f"anla:metadata:{ns}:1" for ns in sorted(namespaces)]
+
+    metadata_blocks: list[dict] = []
+    report = list(fidelity)
+    if report:
+        # In the preservation plane, never in `auxiliary`: `auxiliary` is defined as
+        # disposable and `strip` empties it, so a record of what the archive does
+        # *not* hold would be droppable — turning a declared-incomplete archive into
+        # an apparently complete one, which is worse than either.
+        # Checked before it is sorted, or a malformed entry raises a KeyError from
+        # the sort key instead of the refusal the caller is owed.
+        check_fidelity(report)
+        metadata_blocks.append({"namespace": "fidelity",
+                                "entries": sorted(report, key=lambda e: e["path"])})
+
     manifest = build_manifest(
         archive_id=archive_id, snapshot_sequence=snapshot_sequence,
-        created_unix_ns=created_unix_ns, objects=objects, chunks=referenced,
+        created_unix_ns=created_unix_ns, objects=tree_objects, chunks=referenced,
         hasher=hasher, hash_algorithm=hash_algorithm,
-        required_capabilities=capabilities, auxiliary=auxiliary,
+        required_capabilities=capabilities, optional_capabilities=optional,
+        metadata=metadata_blocks, auxiliary=auxiliary,
         parent_snapshot=parent_id)
 
     payload = encode(manifest)

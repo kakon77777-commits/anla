@@ -104,7 +104,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "Reference implementations",
         "fact_impl_v": "2, cross-verified",
         "fact_tests": "Conformance tests",
-        "fact_tests_v": "603 + fuzzing",
+        "fact_tests_v": "627 + fuzzing",
         "strip_1_t": "Local-first",
         "strip_1_d": "The workbench runs entirely in your tab: your files are read "
                      "into memory and never sent anywhere. The page makes no requests "
@@ -458,7 +458,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "參考實作",
         "fact_impl_v": "2 套，互相驗證",
         "fact_tests": "一致性測試",
-        "fact_tests_v": "603 項 + 模糊測試",
+        "fact_tests_v": "627 項 + 模糊測試",
         "strip_1_t": "本機優先",
         "strip_1_d": "工作台完全在你的分頁裡執行：檔案只讀進記憶體，不會被送到任何"
                      "地方。頁面本身不發出任何請求，其內容安全政策也禁止對外連線。",
@@ -738,6 +738,12 @@ RUNTIME_KEYS = WORKBENCH_KEYS + demo_keys(WORKBENCH_KEYS)
 #: cover is a build error, not an English fallback — a page that silently switches
 #: language is a page nobody notices is incomplete.
 BENCH_ZH: dict[str, dict[str, str]] = {
+    "metadata-cost": {
+        "headline": "500 個檔案：命名空間化的 metadata 跟 500 個 symlink 多花了多少",
+        "note": "Milestone 2 不會移動任何一個壓縮數字，因為它本來就不是在談壓縮"
+                "——它是「讓工具能打包以前直接拒絕的樹」。"
+                "這就是它在 manifest 裡、每個物件的帳單。",
+    },
     "source-tree": {
         "headline": "這個儲存庫的 python/ 目錄，單一 snapshot",
         "note": "ANLA 1.0 只儲存，不壓縮。所以單一 snapshot 會比原樹更大，兩種壓縮器都贏它。"

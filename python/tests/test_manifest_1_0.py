@@ -44,7 +44,7 @@ def sample_objects() -> list[ObjectEntry]:
         ObjectEntry(kind="directory", path="docs"),
         ObjectEntry(kind="regular-file", path="docs/readme.txt", size=12,
                     content_hash=H(b"hello world\n"), chunks=(H(b"hello world\n"),),
-                    metadata={"mtime_ns": 1_700_000_000_000_000_000}),
+                    metadata={"common": {"mtime_ns": 1_700_000_000_000_000_000}}),
         ObjectEntry(kind="regular-file", path="data.bin", size=4,
                     content_hash=H(b"\x01\x02\x03\x04"), chunks=(H(b"\x01\x02\x03\x04"),)),
     ]
@@ -142,7 +142,7 @@ def test_object_id_is_stable_for_the_same_object():
 def test_metadata_participates_in_object_identity():
     without = ObjectEntry(kind="regular-file", path="a.txt", size=1, content_hash=H(b"a"))
     with_meta = ObjectEntry(kind="regular-file", path="a.txt", size=1,
-                            content_hash=H(b"a"), metadata={"mtime_ns": 1})
+                            content_hash=H(b"a"), metadata={"common": {"mtime_ns": 1}})
     assert object_id_for(without, H) != object_id_for(with_meta, H)
 
 
