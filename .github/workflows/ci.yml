@@ -136,6 +136,16 @@ jobs:
           done
           cmp /tmp/repro-a.anla /tmp/repro-b.anla
           echo "two runs of the 1.0 writer produced identical bytes"
+          python -c "import hashlib,pathlib,sys; \
+            print(hashlib.sha256(pathlib.Path('/tmp/repro-a.anla').read_bytes()).hexdigest())" \
+            > /tmp/repro-digest.txt
+          cat /tmp/repro-digest.txt
+
+      - name: Keep this platform's reproducible digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: repro-${{ matrix.os }}-py${{ matrix.python }}
+          path: /tmp/repro-digest.txt
 
   encoding:
     name: text I/O declares an encoding
@@ -172,6 +182,37 @@ jobs:
           name: site
           path: site/dist
           retention-days: 7
+
+  reproducible-everywhere:
+    name: one archive, six platforms, one digest
+    needs: conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: repro-*
+          path: digests
+      - name: Every platform wrote the same bytes
+        # Each job already proves it repeats itself. This proves they agree with
+        # each other, which is the property the freeze rule is actually about —
+        # "two independent implementations produce byte-identical archives" is
+        # meaningless if one implementation cannot manage it across three operating
+        # systems first. A line ending, a path separator or a directory order that
+        # leaked into the output would show up here and nowhere else.
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+          seen = {}
+          for f in sorted(pathlib.Path("digests").rglob("repro-digest.txt")):
+              seen.setdefault(f.read_text(encoding="utf-8").strip(), []).append(f.parent.name)
+          for digest, where in sorted(seen.items()):
+              print(f"{digest[:16]}  {', '.join(sorted(where))}")
+          if len(seen) != 1:
+              sys.exit("the 1.0 writer produced different bytes on different platforms")
+          if sum(len(w) for w in seen.values()) < 6:
+              sys.exit(f"expected six platforms, got {sum(len(w) for w in seen.values())}")
+          print("all six platforms agree, byte for byte")
+          PY
 
   fuzz-findings:
     name: fuzz findings, if any
