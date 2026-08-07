@@ -136,16 +136,22 @@ jobs:
           done
           cmp /tmp/repro-a.anla /tmp/repro-b.anla
           echo "two runs of the 1.0 writer produced identical bytes"
+          # The path goes through argv, not inside the Python source, and the digest
+          # lands in the workspace rather than /tmp. Both are Windows: Git Bash
+          # rewrites a POSIX path that appears as an *argument* to a native program,
+          # and leaves one embedded in a quoted string alone — so Python read
+          # `\tmp\repro-a.anla` and found nothing. upload-artifact has the same
+          # problem with a /tmp path, being a Node action rather than a shell one.
           python -c "import hashlib,pathlib,sys; \
-            print(hashlib.sha256(pathlib.Path('/tmp/repro-a.anla').read_bytes()).hexdigest())" \
-            > /tmp/repro-digest.txt
-          cat /tmp/repro-digest.txt
+            print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())" \
+            /tmp/repro-a.anla > repro-digest.txt
+          cat repro-digest.txt
 
       - name: Keep this platform's reproducible digest
         uses: actions/upload-artifact@v4
         with:
           name: repro-${{ matrix.os }}-py${{ matrix.python }}
-          path: /tmp/repro-digest.txt
+          path: repro-digest.txt
 
   encoding:
     name: text I/O declares an encoding
