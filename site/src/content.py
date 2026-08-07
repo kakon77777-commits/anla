@@ -30,7 +30,52 @@ STRINGS: dict[str, dict[str, str]] = {
         "nav_spec": "Specification",
         "nav_papers": "Papers",
         "nav_conformance": "Conformance",
+        "nav_bench": "Numbers",
         "nav_repo": "Source",
+        "bench_kicker": "Measured, not claimed",
+        "bench_h1": "What ANLA does to real bytes",
+        "bench_desc": "Five scenarios, run against this repository's own git history "
+                      "and against the alternatives a person would actually reach for. "
+                      "Every figure is produced by bench/run_bench.py and written to a "
+                      "JSON file this page is generated from, so the page cannot say "
+                      "anything the harness did not measure — including the rows where "
+                      "ANLA loses.",
+        "bench_warning_h": "ANLA 1.0 does not compress",
+        "bench_warning": "Its only codec is store. Every ratio below is deduplication. "
+                         "One snapshot of unique files is therefore larger than the "
+                         "tree it holds, and a general-purpose compressor beats it "
+                         "comfortably. That case is the first row rather than an "
+                         "omitted one, because a benchmark you cannot lose is not a "
+                         "benchmark.",
+        "bench_measured": "Measured at",
+        "bench_stack": "Profile",
+        "bench_input": "Input",
+        "bench_smaller": "smaller is better",
+        "bench_of_input": "of the input",
+        "bench_composition_h": "Where the bytes went, per snapshot",
+        "bench_composition": "New content against the cost of describing it. A "
+                             "manifest describes its whole snapshot rather than a "
+                             "delta, and this is what that costs.",
+        "bench_col_snapshot": "Snapshot",
+        "bench_col_content": "New content",
+        "bench_col_metadata": "Metadata",
+        "bench_reading_h": "What the table says to build next",
+        "bench_read_codec": "One snapshot of a source tree costs {ratio}× a tar.gz "
+                            "of the same tree. That gap is a missing codec, not a "
+                            "missing design, and it is the entire case for Zstandard.",
+        "bench_read_history": "Eight versions of that tree cost {ratio}× a single "
+                              "tar.gz of all eight — with no compression at all. "
+                              "Unlike the tar.gz, any one version extracts on its own "
+                              "and a ninth appends without rewriting a byte.",
+        "bench_read_metadata": "Describing a snapshot cost {first} on the first and "
+                               "{last} on the eighth, and {share} of everything the "
+                               "later snapshots added. A manifest describes its whole "
+                               "snapshot rather than a delta; FLAG_COMPRESSED_METADATA "
+                               "is what stops that share from growing without bound.",
+        "bench_read_cdc": "Inserting 64 bytes at the front of a 3 MB file costs {cdc} "
+                          "with content-defined boundaries and {fixed} with fixed ones "
+                          "— {factor}× more. That is what anla-cdc-1 is for.",
+        "bench_rerun": "Reproduce this",
         "lang_switch": "中文",
         "en_only": "EN",
         "footer_left": "ANLA · Agent-Native Lossless Archive · EVEMISS Technology × EveMissLab",
@@ -59,7 +104,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "Reference implementations",
         "fact_impl_v": "2, cross-verified",
         "fact_tests": "Conformance tests",
-        "fact_tests_v": "201 + fuzzing",
+        "fact_tests_v": "603 + fuzzing",
         "strip_1_t": "Local-first",
         "strip_1_d": "The workbench runs entirely in your tab: your files are read "
                      "into memory and never sent anywhere. The page makes no requests "
@@ -351,7 +396,43 @@ STRINGS: dict[str, dict[str, str]] = {
         "nav_spec": "規格",
         "nav_papers": "論文",
         "nav_conformance": "一致性",
+        "nav_bench": "實測數據",
         "nav_repo": "原始碼",
+        "bench_kicker": "量出來的，不是宣稱的",
+        "bench_h1": "ANLA 對真實位元組做了什麼",
+        "bench_desc": "五個情境，跑在這個儲存庫自己的 git 歷史上，並且跟一般人真的會拿來用的"
+                      "替代方案對比。每一個數字都由 bench/run_bench.py 產生並寫進一份 JSON，"
+                      "這個頁面是從那份 JSON 生成的——所以頁面說不出任何量測程式沒有量到的東西，"
+                      "包含 ANLA 輸掉的那幾列。",
+        "bench_warning_h": "ANLA 1.0 不做壓縮",
+        "bench_warning": "它唯一的 codec 是 store。以下每一個比值都是「去重」。因此單一 snapshot "
+                         "若檔案彼此不重複，封裝會比原樹更大，而一般用途的壓縮器會贏得很輕鬆。"
+                         "那個情境放在第一列而不是被省略掉——一個你不可能輸的基準，不是基準。",
+        "bench_measured": "量測於",
+        "bench_stack": "組態",
+        "bench_input": "輸入",
+        "bench_smaller": "越小越好",
+        "bench_of_input": "為輸入的",
+        "bench_composition_h": "每個 snapshot 的位元組去了哪裡",
+        "bench_composition": "新內容，對比「描述它」的代價。manifest 描述的是它整個 snapshot "
+                             "而不是差異，這一欄就是那個決定的價格。",
+        "bench_col_snapshot": "第幾個",
+        "bench_col_content": "新內容",
+        "bench_col_metadata": "描述資料",
+        "bench_reading_h": "這張表指出接下來該做什麼",
+        "bench_read_codec": "一棵原始碼樹的單一 snapshot，是同一棵樹 tar.gz 的 {ratio} 倍。"
+                            "這個差距是「少了一個 codec」，不是「設計不對」——"
+                            "而這就是該做 Zstandard 的全部理由。",
+        "bench_read_history": "同一棵樹的八個版本，是「八個版本包成一個 tar.gz」的 "
+                              "{ratio} 倍——而且完全沒有壓縮。跟 tar.gz 不同的是，"
+                              "任何一個版本都能單獨取出，而且第九個可以附加上去而不重寫任何一個位元組。",
+        "bench_read_metadata": "描述一個 snapshot 的成本，第一個是 {first}、第八個是 {last}，"
+                               "並且佔了後續 snapshot 所新增內容的 {share}。manifest 描述的是"
+                               "它整個 snapshot 而不是差異；FLAG_COMPRESSED_METADATA 就是用來阻止"
+                               "那個比例無限地成長下去。",
+        "bench_read_cdc": "在一個 3 MB 檔案最前面插入 64 個位元組，內容定義邊界的成本是 {cdc}，"
+                          "固定切塊是 {fixed}——多了 {factor} 倍。這就是 anla-cdc-1 存在的理由。",
+        "bench_rerun": "自己重跑一次",
         "lang_switch": "English",
         "en_only": "英文",
         "footer_left": "ANLA · 代理原生無損封裝格式 · 一言諾科技 × EveMissLab",
@@ -377,7 +458,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "參考實作",
         "fact_impl_v": "2 套，互相驗證",
         "fact_tests": "一致性測試",
-        "fact_tests_v": "201 項 + 模糊測試",
+        "fact_tests_v": "603 項 + 模糊測試",
         "strip_1_t": "本機優先",
         "strip_1_d": "工作台完全在你的分頁裡執行：檔案只讀進記憶體，不會被送到任何"
                      "地方。頁面本身不發出任何請求，其內容安全政策也禁止對外連線。",
@@ -644,3 +725,44 @@ for _lang, _extra in DEMO_STRINGS.items():
 
 # One i18n asset per language serves both the workbench and the live test page.
 RUNTIME_KEYS = WORKBENCH_KEYS + demo_keys(WORKBENCH_KEYS)
+
+
+# ---------------------------------------------------------------------------
+# benchmark scenarios
+# ---------------------------------------------------------------------------
+
+#: Traditional Chinese copy for each benchmark scenario, keyed by the id the
+#: harness emits. The English lives in `bench/results.json`, written by
+#: `bench/run_bench.py`, so each language has exactly one home and neither can
+#: drift from the other. A scenario the harness produces and this table does not
+#: cover is a build error, not an English fallback — a page that silently switches
+#: language is a page nobody notices is incomplete.
+BENCH_ZH: dict[str, dict[str, str]] = {
+    "source-tree": {
+        "headline": "這個儲存庫的 python/ 目錄，單一 snapshot",
+        "note": "ANLA 1.0 只儲存，不壓縮。所以單一 snapshot 會比原樹更大，兩種壓縮器都贏它。"
+                "這一列就是「該做 Zstandard」這個主張，寫成一次量測。",
+    },
+    "git-history": {
+        "headline": "python/ 連續 8 個 commit，每個一個 snapshot",
+        "note": "每一個版本都逐位元可還原。對照組是「每個版本各存一個 ZIP」——沒有 snapshot 的人"
+                "就是這樣做的——以及「全部版本一個 tar.gz」。gzip 的視窗只有 32 KB，看不到"
+                "從這一份原始碼樹到下一份，這正是為什麼去重是另一套機制，而不是比較差的壓縮。",
+    },
+    "duplicate-tree": {
+        "headline": "同一個目錄連續 snapshot 五次，內容完全沒變",
+        "note": "去重的上限。第 2 到第 5 個 snapshot 只多了一份 manifest 跟一個 footer，"
+                "所以它們的成本就是 snapshot 設計裡第一個決定的價格：manifest 描述的是"
+                "它整個 snapshot，而不是差異。",
+    },
+    "incompressible": {
+        "headline": "2 MB 隨機位元組，然後同一個檔案再來一次",
+        "note": "這種資料沒有東西壓得動，也不該壓得動。第一個 snapshot 比原檔略大；"
+                "第二個幾乎不用錢——去重不在乎位元組壓不壓得動。",
+    },
+    "shifted-insert": {
+        "headline": "3 MB 檔案，然後在最前面插入 64 個位元組",
+        "note": "固定切塊撐不過的情境：每一個邊界都位移了，所以沒有任何一個 chunk 對得上，"
+                "整個檔案被存第二次。內容定義的邊界跟著內容走，所以只有真正改變的 chunk 是新的。",
+    },
+}

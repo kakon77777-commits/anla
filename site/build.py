@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -73,6 +74,7 @@ NAV = (
     ("nav_home", "", True),
     ("nav_workbench", "workbench/", True),
     ("nav_demo", "demo/", True),
+    ("nav_bench", "bench/", True),
     ("nav_spec", "/spec/", False),
     ("nav_papers", "papers/", True),
     ("nav_conformance", "/conformance/", False),
@@ -449,6 +451,205 @@ def page_demo(lang: str) -> str:
                   alternate=f"{base(other(lang))}demo/")
 
 
+BENCH_RESULTS = REPO / "bench" / "results.json"
+
+#: Sizes worth a bar. Anything else in a scenario's `sizes` map is still rendered;
+#: this only fixes the order so the ANLA row is never quietly moved to wherever it
+#: happens to look best.
+BENCH_ORDER = ("anla_1_0", "anla_1_0_fixed_chunking", "anla_mvp_deflate",
+               "zip_deflate9", "zip_deflate9_per_version", "zip_deflate9_per_copy",
+               "targz", "targz_all_versions", "targz_both")
+
+BENCH_LABELS = {
+    "anla_1_0": "ANLA 1.0 (store, anla-cdc-1)",
+    "anla_1_0_fixed_chunking": "ANLA 1.0, fixed chunking",
+    "anla_mvp_deflate": "ANLA-MVP (deflate)",
+    "zip_deflate9": "ZIP, deflate -9",
+    "zip_deflate9_per_version": "ZIP per version, deflate -9",
+    "zip_deflate9_per_copy": "ZIP per copy, deflate -9",
+    "targz": "tar.gz -9",
+    "targz_all_versions": "tar.gz, all versions at once",
+    "targz_both": "tar.gz, both copies",
+}
+
+
+def _bench_document() -> dict:
+    """The measured results, or a build failure.
+
+    Deliberately not tolerant of a missing file. A benchmark page that renders
+    without numbers is a page claiming a benchmark exists, and this project has
+    already learned once what a generator that quietly produces nothing looks like
+    from the outside: exactly like one that worked.
+    """
+    if not BENCH_RESULTS.exists():
+        raise SystemExit(
+            f"{BENCH_RESULTS} is missing — run `python bench/run_bench.py` before "
+            f"building the site. The numbers page is generated from measurements, "
+            f"and there is nothing to generate it from.")
+    document = json.loads(BENCH_RESULTS.read_text(encoding="utf-8"))
+    # How far behind the numbers are, printed on every build. Not an error: a
+    # documentation commit does not invalidate a measurement. But the drift has to
+    # be somewhere a person sees it, or "regenerate the numbers each milestone"
+    # becomes a thing that is true until the first time it is not.
+    try:
+        behind = subprocess.run(
+            ["git", "rev-list", "--count", f"{document['revision']}..HEAD"],
+            cwd=REPO, capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        behind = "?"
+    note = "current" if behind == "0" else f"{behind} commits behind HEAD"
+    print(f"  benchmark: {len(document['results'])} scenarios measured at "
+          f"{document['revision']} ({note})")
+    return document
+
+
+def _kb(value: int) -> str:
+    return f"{value / 1024:,.1f} KiB" if value < 1 << 20 else f"{value / (1 << 20):,.2f} MiB"
+
+
+def bench_reading(s: dict, document: dict) -> str:
+    """The conclusions, with every number pulled out of the measurements.
+
+    Written this way rather than as prose because a hand-typed "roughly 3×" survives
+    the run that stops making it true. If a scenario is missing the figure a sentence
+    needs, the sentence is dropped rather than published with a stale one.
+    """
+    by_scenario = {r["scenario"]: r for r in document["results"]}
+    items: list[str] = []
+
+    def add(key: str, **values) -> None:
+        items.append(f"<li>{esc(s[key].format(**values))}</li>")
+
+    source = by_scenario.get("source-tree")
+    if source and source["ratios"].get("anla_1_0_vs_targz"):
+        add("bench_read_codec", ratio=f'{source["ratios"]["anla_1_0_vs_targz"]:.1f}')
+
+    history = by_scenario.get("git-history")
+    if history and history["ratios"].get("anla_1_0_vs_targz_all_versions"):
+        add("bench_read_history",
+            ratio=f'{history["ratios"]["anla_1_0_vs_targz_all_versions"]:.2f}')
+
+    if history and len(history["detail"].get("composition", [])) > 1:
+        rows = history["detail"]["composition"]
+        later = rows[1:]
+        added = sum(r["new_chunk_bytes"] + r["metadata_bytes"] for r in later)
+        overhead = sum(r["metadata_bytes"] for r in later)
+        add("bench_read_metadata",
+            first=_kb(rows[0]["metadata_bytes"]), last=_kb(rows[-1]["metadata_bytes"]),
+            share=f"{overhead / added:.0%}" if added else "—")
+
+    shifted = by_scenario.get("shifted-insert")
+    if shifted:
+        cdc = shifted["detail"].get("cdc_second_snapshot_bytes")
+        fixed = shifted["detail"].get("fixed_second_snapshot_bytes")
+        if cdc and fixed:
+            add("bench_read_cdc", cdc=_kb(cdc), fixed=_kb(fixed),
+                factor=f"{fixed / cdc:.1f}")
+
+    return "".join(items)
+
+
+def page_bench(lang: str) -> str:
+    s = strings(lang)
+    document = _bench_document()
+    cards = []
+
+    for result in document["results"]:
+        scenario = result["scenario"]
+        if lang == "zh":
+            copy = C.BENCH_ZH.get(scenario)
+            if copy is None:
+                # A scenario with no translation must stop the build. Falling back to
+                # English would make an incomplete page indistinguishable from a
+                # finished one, which is the failure this whole page is about.
+                raise SystemExit(
+                    f"benchmark scenario {scenario!r} has no entry in content.BENCH_ZH")
+            headline, note = copy["headline"], copy["note"]
+        else:
+            headline, note = result["headline"], result["note"]
+
+        sizes = {k: v for k, v in result["sizes"].items() if v}
+        widest = max(sizes.values())
+        order = [k for k in BENCH_ORDER if k in sizes]
+        order += [k for k in sizes if k not in order]
+
+        bars = []
+        for key in order:
+            value = sizes[key]
+            share = round(100 * value / widest, 1)
+            mine = " mine" if key.startswith("anla_1_0") and "fixed" not in key else ""
+            bars.append(
+                f'<div class="bench-row{mine}">'
+                f'<span class="bench-name">{esc(BENCH_LABELS.get(key, key))}</span>'
+                f'<span class="bench-track"><span class="bench-fill" '
+                f'style="width:{share}%"></span></span>'
+                f'<span class="bench-value">{esc(_kb(value))}</span></div>')
+
+        logical = result["inputs"].get("logical_bytes")
+        ratio = result["ratios"].get("anla_1_0_vs_input")
+        summary = ""
+        if logical and ratio:
+            summary = (f'<p class="bench-summary"><b>{ratio:.0%}</b> '
+                       f'{esc(s["bench_of_input"])} {esc(_kb(logical))}</p>')
+
+        composition = result["detail"].get("composition") or []
+        table = ""
+        if len(composition) > 1:
+            rows = "".join(
+                f'<tr><td>{row["snapshot"]}</td>'
+                f'<td>{esc(_kb(row["new_chunk_bytes"]))}</td>'
+                f'<td>{esc(_kb(row["metadata_bytes"]))}</td></tr>'
+                for row in composition)
+            table = (f'<details class="bench-detail"><summary>'
+                     f'{esc(s["bench_composition_h"])}</summary>'
+                     f'<p class="bench-note">{esc(s["bench_composition"])}</p>'
+                     f'<table class="bench-table"><thead><tr>'
+                     f'<th>{esc(s["bench_col_snapshot"])}</th>'
+                     f'<th>{esc(s["bench_col_content"])}</th>'
+                     f'<th>{esc(s["bench_col_metadata"])}</th>'
+                     f'</tr></thead><tbody>{rows}</tbody></table></details>')
+
+        cards.append(
+            f'<article class="bench-card"><h2>{esc(headline)}</h2>'
+            f'<p class="bench-note">{esc(note)}</p>'
+            f'<div class="bench-bars" role="img" '
+            f'aria-label="{esc(s["bench_smaller"])}">{"".join(bars)}</div>'
+            f'{summary}{table}</article>')
+
+    stamp = time.strftime("%Y-%m-%d %H:%M UTC",
+                          time.gmtime(document["generated_at_unix_ns"] / 1e9))
+    meta = (f'<span class="badge">{esc(s["bench_measured"])} '
+            f'{esc(stamp)} · {esc(document["revision"])}</span>'
+            f'<span class="badge">{esc(s["bench_stack"])}: '
+            f'{esc(document["profile"])} · codec {esc(", ".join(document["codecs"]))} '
+            f'· {esc(document["chunking"])} · {esc(document["hash"])}</span>'
+            f'<span class="badge">Python {esc(document["platform"]["python"])}</span>')
+
+    body = f"""<main><div class="wrap"><section class="section">
+  <div class="section-head"><span class="kicker">{esc(s['bench_kicker'])}</span>
+    <h1>{esc(s['bench_h1'])}</h1>
+    <p class="section-desc">{esc(s['bench_desc'])}</p></div>
+
+  <div class="callout"><strong>▸ {esc(s['bench_warning_h'])}.</strong>
+    {esc(s['bench_warning'])}</div>
+
+  <div class="runbar">{meta}</div>
+
+  <div class="bench-cards">{''.join(cards)}</div>
+
+  <div class="section-head" style="margin-top:40px">
+    <h2>{esc(s['bench_reading_h'])}</h2></div>
+  <ul class="bench-reading">{bench_reading(s, document)}</ul>
+
+  <p class="section-desc" style="margin-top:26px">{esc(s['bench_rerun'])}:
+    <code>python bench/run_bench.py</code> —
+    <a href="{C.REPO}/blob/main/bench/run_bench.py" rel="noreferrer">bench/run_bench.py ↗</a></p>
+</section></div></main>"""
+    return layout(lang, slug="bench/", title=f"{s['bench_h1']} — ANLA",
+                  description=s["bench_desc"][:180], body=body,
+                  alternate=f"{base(other(lang))}bench/")
+
+
 def build_standalone(lang: str) -> tuple[str, str]:
     """One file, no requests: the css, the core and the app inlined.
 
@@ -710,6 +911,7 @@ def main() -> int:
         emit(f"{prefix}index.html", page_home(lang))
         emit(f"{prefix}workbench/index.html", page_workbench(lang))
         emit(f"{prefix}demo/index.html", page_demo(lang))
+        emit(f"{prefix}bench/index.html", page_bench(lang))
         emit(f"{prefix}papers/index.html", page_papers(lang))
         for slug, spec in PAPERS.items():
             s = strings(lang)

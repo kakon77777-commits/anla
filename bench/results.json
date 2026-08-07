@@ -1,0 +1,282 @@
+{
+  "generated_at_unix_ns": 1786093117351861200,
+  "revision": "5ac535f",
+  "profile": "ANLA 1.0 (draft)",
+  "codecs": [
+    "store"
+  ],
+  "chunking": "anla-cdc-1",
+  "hash": "blake3-256",
+  "platform": {
+    "system": "nt",
+    "python": "3.14.5"
+  },
+  "results": [
+    {
+      "scenario": "source-tree",
+      "headline": "One snapshot of this repository's python/ directory",
+      "note": "ANLA 1.0 stores; it does not compress. A single snapshot is therefore larger than the tree, and both compressors beat it. This row is the argument for Zstandard, stated as a measurement.",
+      "inputs": {
+        "logical_bytes": 1411880,
+        "files": 88
+      },
+      "sizes": {
+        "anla_1_0": 1460640,
+        "zip_deflate9": 489638,
+        "targz": 431020,
+        "anla_mvp_deflate": 571332
+      },
+      "detail": {
+        "snapshots": 1,
+        "unique_chunks": 88,
+        "chunk_bytes": 1411880,
+        "logical_bytes": 1411880,
+        "composition": [
+          {
+            "snapshot": 1,
+            "new_chunk_bytes": 1425648,
+            "metadata_bytes": 34928
+          }
+        ]
+      },
+      "ratios": {
+        "anla_1_0_vs_input": 1.0345,
+        "anla_1_0_vs_zip_deflate9": 2.9831,
+        "anla_1_0_vs_targz": 3.3888,
+        "anla_1_0_vs_anla_mvp_deflate": 2.5566
+      },
+      "seconds": 0.48
+    },
+    {
+      "scenario": "git-history",
+      "headline": "8 successive commits of python/, one snapshot each",
+      "note": "Every version is recoverable, byte for byte. The comparison is against keeping each version as its own ZIP, which is what people do without snapshots, and against one tar.gz of all of them — gzip's 32 KB window cannot see from one copy of the tree to the next, which is why deduplication is a different mechanism and not a worse compressor.",
+      "inputs": {
+        "logical_bytes": 2196608,
+        "versions": 8,
+        "revisions": [
+          "3f2b447",
+          "0e64f98",
+          "77cb2d5",
+          "f90ef92",
+          "9898284",
+          "04e28fc",
+          "1b35a06",
+          "ef9d860"
+        ]
+      },
+      "sizes": {
+        "anla_1_0": 595552,
+        "zip_deflate9_per_version": 723563,
+        "targz_all_versions": 588149
+      },
+      "detail": {
+        "snapshots": 8,
+        "unique_chunks": 47,
+        "chunk_bytes": 492705,
+        "logical_bytes": 2196608,
+        "composition": [
+          {
+            "snapshot": 1,
+            "new_chunk_bytes": 155768,
+            "metadata_bytes": 8296
+          },
+          {
+            "snapshot": 2,
+            "new_chunk_bytes": 22648,
+            "metadata_bytes": 9312
+          },
+          {
+            "snapshot": 3,
+            "new_chunk_bytes": 41016,
+            "metadata_bytes": 10040
+          },
+          {
+            "snapshot": 4,
+            "new_chunk_bytes": 49280,
+            "metadata_bytes": 11872
+          },
+          {
+            "snapshot": 5,
+            "new_chunk_bytes": 77960,
+            "metadata_bytes": 12592
+          },
+          {
+            "snapshot": 6,
+            "new_chunk_bytes": 48376,
+            "metadata_bytes": 13328
+          },
+          {
+            "snapshot": 7,
+            "new_chunk_bytes": 92872,
+            "metadata_bytes": 14984
+          },
+          {
+            "snapshot": 8,
+            "new_chunk_bytes": 12160,
+            "metadata_bytes": 14984
+          }
+        ],
+        "after_each_snapshot": [
+          164128,
+          196088,
+          247144,
+          308296,
+          398848,
+          460552,
+          568408,
+          595552
+        ],
+        "first_snapshot_bytes": 164128,
+        "later_snapshots_bytes": 431424,
+        "mean_later_snapshot_bytes": 61632
+      },
+      "ratios": {
+        "anla_1_0_vs_input": 0.2711,
+        "anla_1_0_vs_zip_deflate9_per_version": 0.8231,
+        "anla_1_0_vs_targz_all_versions": 1.0126
+      },
+      "seconds": 3.49
+    },
+    {
+      "scenario": "duplicate-tree",
+      "headline": "The same directory snapshotted 5 times, unchanged",
+      "note": "The ceiling. Snapshots 2 to 5 add a manifest and a footer and nothing else, so their cost is the price of decision 1 in the snapshot design: a manifest describes its whole snapshot rather than a delta.",
+      "inputs": {
+        "logical_bytes": 570735,
+        "copies": 5
+      },
+      "sizes": {
+        "anla_1_0": 129240,
+        "zip_deflate9_per_copy": 239235
+      },
+      "detail": {
+        "snapshots": 5,
+        "unique_chunks": 5,
+        "chunk_bytes": 114147,
+        "logical_bytes": 570735,
+        "composition": [
+          {
+            "snapshot": 1,
+            "new_chunk_bytes": 114936,
+            "metadata_bytes": 2784
+          },
+          {
+            "snapshot": 2,
+            "new_chunk_bytes": 0,
+            "metadata_bytes": 2864
+          },
+          {
+            "snapshot": 3,
+            "new_chunk_bytes": 0,
+            "metadata_bytes": 2864
+          },
+          {
+            "snapshot": 4,
+            "new_chunk_bytes": 0,
+            "metadata_bytes": 2864
+          },
+          {
+            "snapshot": 5,
+            "new_chunk_bytes": 0,
+            "metadata_bytes": 2864
+          }
+        ],
+        "after_each_snapshot": [
+          117784,
+          120648,
+          123512,
+          126376,
+          129240
+        ],
+        "cost_per_repeat_snapshot": 2864
+      },
+      "ratios": {
+        "anla_1_0_vs_input": 0.2264,
+        "anla_1_0_vs_zip_deflate9_per_copy": 0.5402
+      },
+      "seconds": 0.17
+    },
+    {
+      "scenario": "incompressible",
+      "headline": "2 MB of random bytes, then the identical file again",
+      "note": "Nothing compresses this, and nothing should. The first snapshot costs slightly more than the file; the second costs almost nothing, because deduplication does not care whether the bytes are compressible.",
+      "inputs": {
+        "logical_bytes": 4000000,
+        "files": 2
+      },
+      "sizes": {
+        "anla_1_0": 2007048,
+        "zip_deflate9_per_copy": 4001448,
+        "targz_both": 4001532
+      },
+      "detail": {
+        "snapshots": 2,
+        "unique_chunks": 8,
+        "chunk_bytes": 2000000,
+        "logical_bytes": 4000000,
+        "composition": [
+          {
+            "snapshot": 1,
+            "new_chunk_bytes": 2001264,
+            "metadata_bytes": 2824
+          },
+          {
+            "snapshot": 2,
+            "new_chunk_bytes": 0,
+            "metadata_bytes": 2896
+          }
+        ],
+        "after_each_snapshot": [
+          2004152,
+          2007048
+        ],
+        "second_snapshot_bytes": 2896
+      },
+      "ratios": {
+        "anla_1_0_vs_input": 0.5018,
+        "anla_1_0_vs_zip_deflate9_per_copy": 0.5016,
+        "anla_1_0_vs_targz_both": 0.5016
+      },
+      "seconds": 2.11
+    },
+    {
+      "scenario": "shifted-insert",
+      "headline": "3 MB file, then the same file with 64 bytes inserted at the front",
+      "note": "The case fixed-size chunking cannot survive: every boundary moves, so not one chunk matches and the whole file is stored twice. Content-defined boundaries follow the content, so only the chunks that actually changed are new.",
+      "inputs": {
+        "logical_bytes": 6000064,
+        "files": 2
+      },
+      "sizes": {
+        "anla_1_0": 3292504,
+        "anla_1_0_fixed_chunking": 6003120
+      },
+      "detail": {
+        "snapshots": 2,
+        "unique_chunks": 12,
+        "chunk_bytes": 3283507,
+        "logical_bytes": 6000064,
+        "composition": [
+          {
+            "snapshot": 1,
+            "new_chunk_bytes": 3001736,
+            "metadata_bytes": 3480
+          },
+          {
+            "snapshot": 2,
+            "new_chunk_bytes": 283664,
+            "metadata_bytes": 3560
+          }
+        ],
+        "cdc_second_snapshot_bytes": 287224,
+        "fixed_second_snapshot_bytes": 3001600
+      },
+      "ratios": {
+        "anla_1_0_vs_input": 0.5487,
+        "anla_1_0_vs_anla_1_0_fixed_chunking": 0.5485
+      },
+      "seconds": 2.89
+    }
+  ]
+}

@@ -379,3 +379,47 @@ h3 { font: 600 17px/1.35 var(--sans); margin: 0 0 6px; }
   .topbar, .toc, .footer, .busy, .toast { display: none; }
   body { background: #fff; color: #000; }
 }
+
+/* ---- benchmark page -------------------------------------------------- */
+/* One card per scenario. The bar is scaled against the largest number in that
+   scenario, not against ANLA's, so a row where ANLA loses looks like losing. */
+.bench-cards { display: grid; gap: 18px; }
+.bench-card {
+  border: 1px solid var(--rule); border-radius: 14px; padding: 20px 22px;
+  background: var(--paper-2);
+}
+.bench-card h2 { font-size: 1.05rem; margin: 0 0 6px; letter-spacing: -0.01em; }
+.bench-note { color: var(--ink-3); font-size: 0.9rem; line-height: 1.6; margin: 0 0 16px; }
+.bench-bars { display: grid; gap: 7px; }
+.bench-row {
+  display: grid; grid-template-columns: minmax(9rem, 15rem) 1fr auto;
+  align-items: center; gap: 12px; font-size: 0.85rem;
+}
+.bench-name { color: var(--ink-3); }
+.bench-row.mine .bench-name { color: var(--ink); font-weight: 600; }
+.bench-track {
+  height: 12px; border-radius: 6px; background: var(--rule); overflow: hidden;
+}
+.bench-fill { display: block; height: 100%; background: var(--ink-3); border-radius: 6px; }
+.bench-row.mine .bench-fill { background: var(--accent); }
+.bench-value { font-variant-numeric: tabular-nums; color: var(--ink-3); }
+.bench-row.mine .bench-value { color: var(--ink); font-weight: 600; }
+.bench-summary { margin: 14px 0 0; font-size: 0.9rem; color: var(--ink-3); }
+.bench-summary b { color: var(--ink); font-size: 1.15rem; }
+.bench-detail { margin-top: 16px; }
+.bench-detail > summary {
+  cursor: pointer; font-size: 0.85rem; color: var(--ink-3); padding: 4px 0;
+}
+.bench-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.bench-table th, .bench-table td {
+  text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--rule);
+  font-variant-numeric: tabular-nums;
+}
+.bench-table th:first-child, .bench-table td:first-child { text-align: left; }
+.bench-table th { color: var(--ink-3); font-weight: 500; }
+@media (max-width: 620px) {
+  .bench-row { grid-template-columns: 1fr auto; }
+  .bench-track { grid-column: 1 / -1; }
+}
+.bench-reading { margin: 0; padding-left: 1.1rem; display: grid; gap: 12px; }
+.bench-reading li { color: var(--ink-2); font-size: 0.95rem; line-height: 1.65; }
