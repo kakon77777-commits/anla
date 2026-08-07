@@ -40,6 +40,9 @@ editing `SPEC.md` and hoping.
 | Manifest: objects, chunk map, roots, verification (§5) | **implemented** — [`python/anla1/manifest.py`](python/anla1/manifest.py), 32 tests |
 | A complete archive, written and read back | **implemented** — 15 end-to-end tests |
 | Append-only snapshots and cross-snapshot deduplication (§6) | **implemented** — [`python/anla1/snapshot.py`](python/anla1/snapshot.py), 28 tests |
+| Filesystem layer: scan a directory, restore a snapshot (§5.2.1) | **implemented** — [`python/anla1/fs.py`](python/anla1/fs.py), 14 tests |
+| The `anla1` command line, with `--json` and the whitepaper's exit codes | **implemented** — [`python/anla1/cli.py`](python/anla1/cli.py), 12 tests |
+| A streaming writer | **not done** — a file is read one at a time, but the archive is still assembled in memory |
 | CDDL schemas | [`schemas/anla-1.0.cddl`](schemas/anla-1.0.cddl), shape only |
 | Object name model (whitepaper Q4) | one `path`, deliberately not settled |
 | BLAKE3-256 | **implemented** — [`python/anla1/blake3.py`](python/anla1/blake3.py), a dependency-free reference plus the Rust fast path, 55 tests |
@@ -320,6 +323,30 @@ preservation_root     hash over the three above
 auxiliary_root        hash, outside preservation_root
 packing_plan_digest   hash
 ```
+
+### 5.2.1 Object paths and kinds
+
+An object's `path` MUST be relative, MUST NOT be empty, MUST NOT contain a NUL, a
+drive letter, or a `.` or `..` component, and MUST use `/` as its only separator.
+The rule is MVP's ([SPEC.md §9](SPEC.md#9-path-safety)), reused unchanged.
+
+**A path that would have to be rewritten to satisfy that rule is refused, not
+rewritten.** The distinction is the whole content of this subsection. MVP's
+`safe_path` *returns* a normalized path, and normalization is not identity: it turns
+a backslash into a separator, so a POSIX file genuinely named `a\b` would be stored
+as `a/b` and restored as a file `b` inside a directory `a`. The tree that came out
+would differ from the tree that went in with every hash verifying. A conforming
+reader MUST refuse such a path, and a writer MUST refuse such a name rather than
+storing the rewritten form.
+
+This is where whitepaper question 4 bites, and it is not answered here. Until the
+name model carries native and legacy forms alongside the portable one, a name that
+cannot survive the round trip is refused, because refusing is the only answer that
+does not quietly change what the archive contains.
+
+`kind` MUST be `regular-file` or `directory`. Symbolic links, devices, sockets and
+FIFOs are not representable in 1.0 and MUST NOT be approximated by something that
+is — a symlink stored as a copy of its target is a different tree.
 
 ### 5.3 Several roots, on purpose
 

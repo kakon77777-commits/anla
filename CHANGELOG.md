@@ -7,6 +7,61 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
+## 2026-08-07 — The `anla1` command, and what a real path turned out to cost
+
+### Added
+
+- **[`python/anla1/fs.py`](python/anla1/fs.py)** — the filesystem boundary: scan a
+  directory into a snapshot, restore a snapshot onto a disk. 14 tests. Everything
+  that calls `os.walk`, `stat` or `write_bytes` lives here and nowhere else, so the
+  portable half of the format stays testable without a disk.
+
+- **[`python/anla1/cli.py`](python/anla1/cli.py)** — the `anla1` command: `pack`,
+  `append`, `snapshots`, `list`, `verify`, `extract`, `diff`. 12 tests. Every
+  subcommand takes `--json`; exit codes are the whitepaper's, shared with `anla`.
+
+  A separate binary rather than a flag on `anla`, for the same reason 1.0 has its
+  own magic number: one command switching profiles on a flag invites an archive
+  written under one profile and read under the other.
+
+- **`--uuid` and `--created-ns` on `pack`**, and a CI step that packs the same tree
+  twice and compares. Reproducibility is not a debugging convenience here — it is
+  the only way the freeze rule can ever be checked, since it is stated as *two
+  implementations producing byte-identical archives*.
+
+- **The writer reads one file at a time** (`SourceEntry`), so a tree no longer has
+  to fit in memory before packing starts. The archive itself is still assembled in
+  memory, which the specification's table now says out loud.
+
+### Fixed
+
+- **1.0 had no rule for what a legal object path is.** Not a decision that went the
+  wrong way — an omission: until this release nothing had put a filesystem path into
+  a 1.0 archive, so nothing had needed one. `check_object_path` is now called by the
+  writer and by `verify_manifest`, from one definition.
+
+- **A path that would have to be rewritten is refused rather than rewritten**
+  (`SPEC-1.0-DRAFT.md` §5.2.1). MVP's `safe_path` *returns* a normalized path, and
+  normalization is not identity: it turns a backslash into a separator. A POSIX file
+  genuinely named `a\b` would have been stored as `a/b` and restored as a file
+  inside a directory — a different tree, with every hash verifying. Found by reading
+  what the function returns rather than what its name suggests.
+
+### Changed
+
+- **An entry 1.0 cannot represent is refused, not skipped.** A symbolic link, device
+  or socket stops the pack. `--skip-unsupported` leaves it out deliberately and
+  exits **11** (fidelity degraded) even though it produced an archive, so a script
+  cannot mistake a partial archive for a complete one. The in-archive fidelity
+  report that would make this a recorded fact rather than a remembered one is
+  Milestone 2.
+
+- **A file that changes while it is being packed is an error.** Packing a tree that
+  is being written produces an archive of a moment that never existed; each file is
+  re-`stat`ed after it is read.
+
+---
+
 ## 2026-07-27 — Milestone 3: append-only snapshots, and an invisible footer
 
 ### Added

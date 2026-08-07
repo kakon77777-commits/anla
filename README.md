@@ -64,12 +64,21 @@ The draft is held to the standard MVP was held to: **nothing is frozen until two
 independent implementations produce byte-identical archives and a differential fuzzer
 finds no divergence between them.** 1.0 now has canonical CBOR, the container (header,
 record frame with flags, footer chain, capabilities), the pinned Merkle construction,
-the manifest with its five roots, BLAKE3-256, and append-only snapshots with
-cross-snapshot deduplication — a second snapshot of an unchanged tree writes no chunk
-records at all, and with `anla-cdc-1` prepending ten bytes to a 300 KB file shares 65
-of its 66 chunks with the snapshot before it. What it does not have is a second
-implementation, so nothing is frozen. `SPEC-1.0-DRAFT.md` opens with a table of what
-exists, which is the first thing that changes when that changes.
+the manifest with its five roots, BLAKE3-256, append-only snapshots with
+cross-snapshot deduplication, and an `anla1` command that packs a real directory —
+a second snapshot of an unchanged tree writes no chunk records at all, and with
+`anla-cdc-1` prepending ten bytes to a 300 KB file shares 65 of its 66 chunks with
+the snapshot before it. What it does not have is a second implementation, so nothing
+is frozen. `SPEC-1.0-DRAFT.md` opens with a table of what exists, which is the first
+thing that changes when that changes.
+
+```bash
+anla1 pack ./my-project -o project.anla --exclude .git --exclude '.git/**'
+anla1 append project.anla ./my-project      # a snapshot, storing only what changed
+anla1 snapshots project.anla
+anla1 diff project.anla --from 1 --to 2
+anla1 extract project.anla --to restored -s 1
+```
 
 ## Two implementations, on purpose
 
@@ -150,7 +159,7 @@ archive.read('docs/readme.txt');
 python -m pytest python/tests -q
 ```
 
-576 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
+602 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
 without it. Everything runs on Linux, macOS and Windows in CI. Another 76
 assertions run in a browser on the [live test page](https://anla.evemisslab.com/demo/).
 
@@ -188,7 +197,7 @@ SPEC.md                     normative specification for ANLA-MVP v0.1
 papers/                     the concept paper and the whitepaper, zh-Hant + en
 python/anla/                ANLA-MVP v0.1 reference implementation and CLI
 python/anla1/               ANLA 1.0 (draft): CBOR, container, Merkle, manifest,
-                            BLAKE3, append-only snapshots
+                            BLAKE3, snapshots, filesystem layer, `anla1` CLI
 schemas/anla-1.0.cddl       shape of the 1.0 CBOR structures
 python/tests/               the conformance suite (drives both implementations)
 web/anla-core.js            JavaScript reference implementation

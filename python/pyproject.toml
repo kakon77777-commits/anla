@@ -28,6 +28,10 @@ speed = ["blake3>=1.0"]
 
 [project.scripts]
 anla = "anla.cli:main"
+# A separate command, not a flag on `anla`, for the same reason 1.0 has its own
+# magic number: one command switching profiles on a flag invites an archive written
+# under one and read under the other.
+anla1 = "anla1.cli:main"
 
 [project.urls]
 Homepage = "https://anla.evemisslab.com"

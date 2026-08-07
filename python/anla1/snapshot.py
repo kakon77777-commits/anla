@@ -41,7 +41,7 @@ from .manifest import (
 )
 
 __all__ = [
-    "Snapshot", "Diff", "ArchiveReport",
+    "Snapshot", "Diff", "ArchiveReport", "SourceEntry",
     "single_chunk", "cdc_chunker",
     "create_archive", "append_snapshot",
     "snapshot_id_of", "read_snapshot", "list_snapshots", "latest_snapshot",
@@ -56,6 +56,31 @@ Chunker = Callable[[bytes], list[bytes]]
 SNAPSHOT_CAPABILITY = "anla:core:snapshots:1"
 
 STORE_CODEC = 0
+
+
+@dataclass(frozen=True)
+class SourceEntry:
+    """One file offered to the writer, read on demand.
+
+    The writer takes these rather than a path-to-bytes mapping so that a tree does
+    not have to fit in memory before packing can start: `read()` is called once, at
+    the moment that file is chunked, and the bytes are dropped before the next.
+
+    The bound is therefore the largest single file, not the tree. It is not zero —
+    the archive itself is still assembled in memory, which `SPEC-1.0-DRAFT.md`'s
+    table records as not yet done — and a mapping is still accepted for the cases
+    where holding everything is obviously fine, such as the tests.
+    """
+
+    path: str
+    read: Callable[[], bytes]
+    mtime_ns: int | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def of(cls, path: str, data: bytes, metadata: Mapping[str, Any] | None = None,
+           ) -> "SourceEntry":
+        return cls(path=path, read=lambda: data, metadata=dict(metadata or {}))
 
 
 def single_chunk(data: bytes) -> list[bytes]:
@@ -269,8 +294,28 @@ def create_archive(archive_id: bytes) -> bytes:
     return C.build_header(archive_id)
 
 
+def _as_entries(files: Mapping[str, bytes] | Iterable[SourceEntry],
+                metadata: Mapping[str, dict] | None,
+                ) -> list[SourceEntry]:
+    """Accept either input form and produce one, sorted by UTF-8 path bytes.
+
+    Ordering is fixed here rather than left to the caller: it decides the offsets
+    every chunk record lands at, so two writers that disagree about it produce
+    different archives from the same tree.
+    """
+    if isinstance(files, Mapping):
+        entries = [SourceEntry.of(path, files[path], (metadata or {}).get(path))
+                   for path in files]
+    else:
+        entries = list(files)
+        if metadata:
+            raise InvalidInput("metadata belongs on the entries when entries are given")
+    entries.sort(key=lambda entry: entry.path.encode("utf-8"))
+    return entries
+
+
 def append_snapshot(data: bytes, *,
-                    files: Mapping[str, bytes],
+                    files: Mapping[str, bytes] | Iterable[SourceEntry],
                     directories: Iterable[str] = (),
                     created_unix_ns: int,
                     metadata: Mapping[str, dict] | None = None,
@@ -344,12 +389,17 @@ def append_snapshot(data: bytes, *,
     # ever has a reason to reclaim them.
     out = bytearray(data[:resume_at] if started else data)
     chunk_entries: dict[bytes, ChunkEntry] = {}
-    file_chunks: dict[str, list[bytes]] = {}
-    appended = 0
+    objects = [ObjectEntry(kind="directory", path=path)
+               for path in sorted(directories, key=lambda p: p.encode("utf-8"))]
+    # A complete manifest: descriptors for chunks written now *and* for chunks
+    # written by an earlier snapshot, so that reading this snapshot needs no other.
+    referenced: list[ChunkEntry] = []
+    listed: set[bytes] = set()
 
-    for path in sorted(files):
+    for source in _as_entries(files, metadata):
+        payload = source.read()        # read once — see SourceEntry on the bound
         ids: list[bytes] = []
-        for piece in chunker(files[path]):
+        for piece in chunker(payload):
             chunk_id = hasher(piece)
             ids.append(chunk_id)
             if chunk_id in known or chunk_id in chunk_entries:
@@ -367,15 +417,11 @@ def append_snapshot(data: bytes, *,
                 payload_offset=offset + parsed.payload_offset,
                 payload_length=len(piece), raw_size=len(piece),
                 codec_id=STORE_CODEC, payload_hash=chunk_id)
-            appended += len(record)
             sequence += 1
-        file_chunks[path] = ids
-
-    # A complete manifest: descriptors for chunks written now *and* for chunks
-    # written by an earlier snapshot, so that reading this snapshot needs no other.
-    referenced: list[ChunkEntry] = []
-    listed: set[bytes] = set()
-    for ids in file_chunks.values():
+        objects.append(ObjectEntry(
+            kind="regular-file", path=source.path, size=len(payload),
+            content_hash=hasher(payload), chunks=tuple(ids),
+            metadata=dict(source.metadata)))
         for chunk_id in ids:
             if chunk_id in listed:
                 continue
@@ -383,14 +429,7 @@ def append_snapshot(data: bytes, *,
             entry = chunk_entries.get(chunk_id)
             referenced.append(entry if entry is not None
                               else _entry_from_descriptor(chunk_id, known[chunk_id]))
-
-    objects = [ObjectEntry(kind="directory", path=path) for path in sorted(directories)]
-    for path in sorted(files):
-        payload = files[path]
-        objects.append(ObjectEntry(
-            kind="regular-file", path=path, size=len(payload),
-            content_hash=hasher(payload), chunks=tuple(file_chunks[path]),
-            metadata=dict((metadata or {}).get(path, {}))))
+        del payload
 
     capabilities = ["anla:core:objects:1", "anla:core:chunks:1", SNAPSHOT_CAPABILITY,
                     f"anla:hash:{hash_algorithm}:1", "anla:codec:store:1"]

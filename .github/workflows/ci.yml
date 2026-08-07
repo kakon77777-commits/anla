@@ -93,6 +93,50 @@ jobs:
           anla extract /tmp/conf.anla --to /tmp/restored --json > /dev/null
           anla export /tmp/conf.anla -o /tmp/conf.zip --json
 
+      - name: 1.0 CLI smoke test
+        shell: bash
+        # Snapshot 2 of an unchanged tree must add no chunk records, and every
+        # snapshot must still restore its own tree. Run against a real directory
+        # rather than a fixture, because the filesystem layer is the part the
+        # in-memory tests cannot reach.
+        run: |
+          anla1 --version
+          anla1 pack conformance -o /tmp/one.anla --exclude 'out*/**' --json
+          before=$(stat -c%s /tmp/one.anla 2>/dev/null || stat -f%z /tmp/one.anla)
+          anla1 append /tmp/one.anla conformance --exclude 'out*/**' --json
+          after=$(stat -c%s /tmp/one.anla 2>/dev/null || stat -f%z /tmp/one.anla)
+          anla1 snapshots /tmp/one.anla
+          anla1 verify /tmp/one.anla --json
+          anla1 diff /tmp/one.anla
+          anla1 extract /tmp/one.anla --to /tmp/snap1 -s 1 --json > /dev/null
+          anla1 extract /tmp/one.anla --to /tmp/snap2 --json > /dev/null
+          diff -r /tmp/snap1 /tmp/snap2
+          python - "$before" "$after" <<'PY'
+          import sys
+          before, after = int(sys.argv[1]), int(sys.argv[2])
+          grew = after - before
+          # A manifest and a footer, not a second copy of the tree.
+          assert 0 < grew < before // 4, f"an unchanged tree cost {grew} of {before}"
+          print(f"second snapshot of an unchanged tree cost {grew} bytes on {before}")
+          PY
+
+      - name: Reproducible across two runs of the 1.0 writer
+        shell: bash
+        # The property the freeze rule is stated in terms of. Asserted on every
+        # platform, because a byte difference that only appears on Windows is
+        # exactly the kind a second implementation would inherit.
+        run: |
+          # The frozen vectors, not a source directory: importing anla1 can write
+          # __pycache__ between the two runs, which would make this fail for a
+          # reason that has nothing to do with the writer.
+          for n in a b; do
+            anla1 pack conformance/vectors -o /tmp/repro-$n.anla \
+              --uuid 00112233445566778899aabbccddeeff \
+              --created-ns 1785000000000000000 --json > /dev/null
+          done
+          cmp /tmp/repro-a.anla /tmp/repro-b.anla
+          echo "two runs of the 1.0 writer produced identical bytes"
+
   encoding:
     name: text I/O declares an encoding
     runs-on: ubuntu-latest

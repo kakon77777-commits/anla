@@ -29,17 +29,44 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
-from anla.errors import IntegrityFailure, InvalidInput, ManifestInvalid
+from anla.errors import IntegrityFailure, InvalidInput, ManifestInvalid, UnsafeObject
+from anla.format import safe_path
 
 from .cbor import decode, encode
 from .merkle import merkle_root
 
 __all__ = [
-    "OBJECT_ID_PREFIX", "PRESERVATION_PREFIX",
+    "OBJECT_ID_PREFIX", "PRESERVATION_PREFIX", "OBJECT_KINDS",
     "ObjectEntry", "ChunkEntry", "Roots",
-    "object_id_for", "object_leaf", "chunk_leaf",
+    "object_id_for", "object_leaf", "chunk_leaf", "check_object_path",
     "compute_roots", "build_manifest", "verify_manifest", "without_auxiliary",
 ]
+
+#: What 1.0 can represent. Anything else — links, devices, sockets — is refused
+#: rather than approximated, because an archive that stored a symlink as a copy of
+#: its target would have changed what the tree means without saying so.
+OBJECT_KINDS = ("regular-file", "directory")
+
+
+def check_object_path(path: object) -> str:
+    """One definition of a legal object path, used on the way in and on the way out.
+
+    `safe_path` is MVP's rule (SPEC.md §9), reused rather than restated. It *returns
+    a normalized path*, and the check here is equality with what it returned — a
+    path it had to change is refused rather than quietly accepted in its rewritten
+    form. That distinction matters more than it looks: `safe_path` turns backslashes
+    into separators, so a POSIX file genuinely named `a\\b` would otherwise be
+    stored as `a/b` and restored as a file `b` inside a directory `a`. Refusing is
+    the honest answer until whitepaper question 4 settles the name model.
+
+    The read-side call is the security boundary. The write-side call is a courtesy
+    that turns bad input into an error instead of an artifact.
+    """
+    normalized = safe_path(path)
+    if normalized != path:
+        raise UnsafeObject("object path is not stored in normalized form",
+                           path=path, normalized=normalized)
+    return normalized
 
 #: Domain separation again, for the same reason as in the Merkle tree: an object id
 #: and a Merkle leaf must not be computable from one another.
@@ -185,6 +212,10 @@ def build_manifest(*, archive_id: bytes, snapshot_sequence: int, created_unix_ns
     object_entries = [entry.as_manifest_entry(hasher) for entry in objects]
     seen_paths = set()
     for entry in object_entries:
+        check_object_path(entry["path"])
+        if entry["kind"] not in OBJECT_KINDS:
+            raise InvalidInput("unsupported object kind", kind=entry["kind"],
+                               path=entry["path"], supported=list(OBJECT_KINDS))
         if entry["path"] in seen_paths:
             raise InvalidInput("duplicate object path", path=entry["path"])
         seen_paths.add(entry["path"])
@@ -257,9 +288,20 @@ def verify_manifest(manifest: dict, hasher: Hasher) -> Roots:
     if not isinstance(manifest["objects"], list) or not isinstance(manifest["chunks"], dict):
         raise ManifestInvalid("objects must be an array and chunks a map")
 
+    seen_paths: set[str] = set()
     for entry in manifest["objects"]:
         if not isinstance(entry, dict) or "object_id" not in entry:
             raise ManifestInvalid("object entry has no object_id")
+        # The security boundary. Until Milestone 1 nothing put a real filesystem
+        # path into a 1.0 archive, so nothing had yet needed to say what a legal one
+        # is — an omission, not a decision.
+        path = check_object_path(entry.get("path"))
+        if entry.get("kind") not in OBJECT_KINDS:
+            raise ManifestInvalid("unsupported object kind", kind=entry.get("kind"),
+                                  path=path, supported=list(OBJECT_KINDS))
+        if path in seen_paths:
+            raise UnsafeObject("duplicate object path", path=path)
+        seen_paths.add(path)
         identity = {k: v for k, v in entry.items() if k != "object_id"}
         if hasher(OBJECT_ID_PREFIX + encode(identity)) != entry["object_id"]:
             raise IntegrityFailure("object_id does not match the object it identifies",
