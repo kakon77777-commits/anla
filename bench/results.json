@@ -1,6 +1,6 @@
 {
-  "generated_at_unix_ns": 1786112955182753400,
-  "revision": "cd2fd1d",
+  "generated_at_unix_ns": 1786113789667692400,
+  "revision": "f793a85",
   "profile": "ANLA 1.0 (draft)",
   "codecs": [
     "store"
@@ -17,36 +17,36 @@
       "headline": "One snapshot of this repository's python/ directory",
       "note": "ANLA 1.0 stores; it does not compress. A single snapshot is therefore larger than the tree, and both compressors beat it. This row is the argument for Zstandard, stated as a measurement.",
       "inputs": {
-        "logical_bytes": 1514032,
-        "files": 90
+        "logical_bytes": 1541992,
+        "files": 92
       },
       "sizes": {
-        "anla_1_0": 1563896,
-        "zip_deflate9": 524394,
-        "targz": 463845,
-        "anla_mvp_deflate": 608191
+        "anla_1_0": 1593232,
+        "zip_deflate9": 535216,
+        "targz": 473216,
+        "anla_mvp_deflate": 620745
       },
       "detail": {
         "snapshots": 1,
-        "unique_chunks": 90,
-        "chunk_bytes": 1514032,
-        "logical_bytes": 1514032,
-        "files_round_tripped": 90,
+        "unique_chunks": 92,
+        "chunk_bytes": 1541992,
+        "logical_bytes": 1541992,
+        "files_round_tripped": 92,
         "composition": [
           {
             "snapshot": 1,
-            "new_chunk_bytes": 1528120,
-            "metadata_bytes": 35712
+            "new_chunk_bytes": 1556384,
+            "metadata_bytes": 36784
           }
         ]
       },
       "ratios": {
-        "anla_1_0_vs_input": 1.0329,
-        "anla_1_0_vs_zip_deflate9": 2.9823,
-        "anla_1_0_vs_targz": 3.3716,
-        "anla_1_0_vs_anla_mvp_deflate": 2.5714
+        "anla_1_0_vs_input": 1.0332,
+        "anla_1_0_vs_zip_deflate9": 2.9768,
+        "anla_1_0_vs_targz": 3.3668,
+        "anla_1_0_vs_anla_mvp_deflate": 2.5666
       },
-      "seconds": 0.46
+      "seconds": 0.48
     },
     {
       "scenario": "metadata-cost",
@@ -75,7 +75,7 @@
         "anla_1_0_vs_times_only": 1.2163,
         "anla_1_0_vs_times_and_mode": 1.1842
       },
-      "seconds": 0.83
+      "seconds": 0.77
     },
     {
       "scenario": "git-history",
@@ -96,7 +96,7 @@
         ]
       },
       "sizes": {
-        "anla_1_0": 831552,
+        "anla_1_0": 833936,
         "zip_deflate9_per_version": 884703,
         "targz_all_versions": 725033
       },
@@ -110,64 +110,64 @@
           {
             "snapshot": 1,
             "new_chunk_bytes": 218288,
-            "metadata_bytes": 9968
+            "metadata_bytes": 10272
           },
           {
             "snapshot": 2,
             "new_chunk_bytes": 49280,
-            "metadata_bytes": 11872
+            "metadata_bytes": 12168
           },
           {
             "snapshot": 3,
             "new_chunk_bytes": 77960,
-            "metadata_bytes": 12592
+            "metadata_bytes": 12896
           },
           {
             "snapshot": 4,
             "new_chunk_bytes": 48376,
-            "metadata_bytes": 13328
+            "metadata_bytes": 13624
           },
           {
             "snapshot": 5,
             "new_chunk_bytes": 92872,
-            "metadata_bytes": 14984
+            "metadata_bytes": 15280
           },
           {
             "snapshot": 6,
             "new_chunk_bytes": 12160,
-            "metadata_bytes": 14984
+            "metadata_bytes": 15280
           },
           {
             "snapshot": 7,
             "new_chunk_bytes": 173728,
-            "metadata_bytes": 15352
+            "metadata_bytes": 15648
           },
           {
             "snapshot": 8,
             "new_chunk_bytes": 50392,
-            "metadata_bytes": 15352
+            "metadata_bytes": 15648
           }
         ],
         "after_each_snapshot": [
-          228320,
-          289472,
-          380024,
-          441728,
-          549584,
-          576728,
-          765808,
-          831552
+          228624,
+          290072,
+          380928,
+          442928,
+          551080,
+          578520,
+          767896,
+          833936
         ],
-        "first_snapshot_bytes": 228320,
-        "later_snapshots_bytes": 603232,
-        "mean_later_snapshot_bytes": 86176
+        "first_snapshot_bytes": 228624,
+        "later_snapshots_bytes": 605312,
+        "mean_later_snapshot_bytes": 86473
       },
       "ratios": {
-        "anla_1_0_vs_input": 0.3071,
-        "anla_1_0_vs_zip_deflate9_per_version": 0.9399,
-        "anla_1_0_vs_targz_all_versions": 1.1469
+        "anla_1_0_vs_input": 0.308,
+        "anla_1_0_vs_zip_deflate9_per_version": 0.9426,
+        "anla_1_0_vs_targz_all_versions": 1.1502
       },
-      "seconds": 3.62
+      "seconds": 3.38
     },
     {
       "scenario": "duplicate-tree",
@@ -178,7 +178,7 @@
         "copies": 5
       },
       "sizes": {
-        "anla_1_0": 129240,
+        "anla_1_0": 130728,
         "zip_deflate9_per_copy": 239235
       },
       "detail": {
@@ -191,43 +191,43 @@
           {
             "snapshot": 1,
             "new_chunk_bytes": 114936,
-            "metadata_bytes": 2784
+            "metadata_bytes": 3088
           },
           {
             "snapshot": 2,
             "new_chunk_bytes": 0,
-            "metadata_bytes": 2864
+            "metadata_bytes": 3160
           },
           {
             "snapshot": 3,
             "new_chunk_bytes": 0,
-            "metadata_bytes": 2864
+            "metadata_bytes": 3160
           },
           {
             "snapshot": 4,
             "new_chunk_bytes": 0,
-            "metadata_bytes": 2864
+            "metadata_bytes": 3160
           },
           {
             "snapshot": 5,
             "new_chunk_bytes": 0,
-            "metadata_bytes": 2864
+            "metadata_bytes": 3160
           }
         ],
         "after_each_snapshot": [
-          117784,
-          120648,
-          123512,
-          126376,
-          129240
+          118088,
+          121248,
+          124408,
+          127568,
+          130728
         ],
-        "cost_per_repeat_snapshot": 2864
+        "cost_per_repeat_snapshot": 3160
       },
       "ratios": {
-        "anla_1_0_vs_input": 0.2264,
-        "anla_1_0_vs_zip_deflate9_per_copy": 0.5402
+        "anla_1_0_vs_input": 0.2291,
+        "anla_1_0_vs_zip_deflate9_per_copy": 0.5464
       },
-      "seconds": 0.17
+      "seconds": 0.15
     },
     {
       "scenario": "incompressible",
@@ -238,7 +238,7 @@
         "files": 2
       },
       "sizes": {
-        "anla_1_0": 2007048,
+        "anla_1_0": 2007648,
         "zip_deflate9_per_copy": 4001448,
         "targz_both": 4001532
       },
@@ -252,26 +252,26 @@
           {
             "snapshot": 1,
             "new_chunk_bytes": 2001264,
-            "metadata_bytes": 2824
+            "metadata_bytes": 3120
           },
           {
             "snapshot": 2,
             "new_chunk_bytes": 0,
-            "metadata_bytes": 2896
+            "metadata_bytes": 3200
           }
         ],
         "after_each_snapshot": [
-          2004152,
-          2007048
+          2004448,
+          2007648
         ],
-        "second_snapshot_bytes": 2896
+        "second_snapshot_bytes": 3200
       },
       "ratios": {
-        "anla_1_0_vs_input": 0.5018,
-        "anla_1_0_vs_zip_deflate9_per_copy": 0.5016,
-        "anla_1_0_vs_targz_both": 0.5016
+        "anla_1_0_vs_input": 0.5019,
+        "anla_1_0_vs_zip_deflate9_per_copy": 0.5017,
+        "anla_1_0_vs_targz_both": 0.5017
       },
-      "seconds": 1.53
+      "seconds": 1.37
     },
     {
       "scenario": "shifted-insert",
@@ -282,7 +282,7 @@
         "files": 2
       },
       "sizes": {
-        "anla_1_0": 3292504,
+        "anla_1_0": 3293096,
         "anla_1_0_fixed_chunking": 6003120
       },
       "detail": {
@@ -295,22 +295,22 @@
           {
             "snapshot": 1,
             "new_chunk_bytes": 3001736,
-            "metadata_bytes": 3480
+            "metadata_bytes": 3776
           },
           {
             "snapshot": 2,
             "new_chunk_bytes": 283664,
-            "metadata_bytes": 3560
+            "metadata_bytes": 3856
           }
         ],
-        "cdc_second_snapshot_bytes": 287224,
+        "cdc_second_snapshot_bytes": 287520,
         "fixed_second_snapshot_bytes": 3001600
       },
       "ratios": {
-        "anla_1_0_vs_input": 0.5487,
-        "anla_1_0_vs_anla_1_0_fixed_chunking": 0.5485
+        "anla_1_0_vs_input": 0.5488,
+        "anla_1_0_vs_anla_1_0_fixed_chunking": 0.5486
       },
-      "seconds": 2.05
+      "seconds": 1.93
     }
   ]
 }

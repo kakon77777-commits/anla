@@ -46,6 +46,7 @@ editing `SPEC.md` and hoping.
 | CDDL schemas | [`schemas/anla-1.0.cddl`](schemas/anla-1.0.cddl), shape only |
 | Object name model (whitepaper Q4) | one `path`, deliberately not settled |
 | BLAKE3-256 | **implemented** — [`python/anla1/blake3.py`](python/anla1/blake3.py), a dependency-free reference plus the Rust fast path, 55 tests |
+| Chunking profile recorded and checked across snapshots | **implemented** |
 | Zstandard | decided (§8), not implemented |
 | Metadata namespaces and the fidelity report (§5.2.2) | **implemented** — 27 tests |
 | Symbolic links | **implemented** — stored verbatim, restored under policy |
@@ -548,7 +549,14 @@ cumulative index, and if present it is a **cache**: a reader MUST produce identi
 results with it ignored, and MUST resolve any disagreement in favour of the
 manifests. An index permitted to win is a second format.
 
-**One archive uses one hash algorithm for its chunk ids.** Chunk ids are hashes, so
+**One archive uses one chunking rule, and one hash algorithm, for its chunk ids.**
+The chunking profile is recorded in `packing_plan` and an append that would use a
+different one is refused. Two snapshots cut at different boundaries produce
+different chunk ids for identical bytes, so deduplication silently does nothing
+while every check still passes — the same shape as the hash rule below, and found
+the same way: by measuring a real corpus and noticing the numbers were wrong.
+
+ Chunk ids are hashes, so
 two algorithms in one archive means two namespaces of chunk id sharing one lookup —
 identical bytes stored twice and deduplication silently doing nothing. Hash agility
 (§7) is per archive, not per snapshot. This is the one place where agility has a

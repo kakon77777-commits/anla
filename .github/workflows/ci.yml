@@ -42,7 +42,7 @@ jobs:
         run: python -m pip install --upgrade pip pytest pyflakes blake3
 
       - name: Lint
-        run: python -m pyflakes python/anla python/anla1 python/tests conformance/make_vectors.py site tools
+        run: python -m pyflakes python/anla python/anla1 python/tests conformance/make_vectors.py site tools bench test_demo
 
       - name: Conformance suite
         # -ra reports skips. Without it a module that skipped itself — the BLAKE3
@@ -126,6 +126,14 @@ jobs:
           assert 0 < grew < before // 4, f"an unchanged tree cost {grew} of {before}"
           print(f"second snapshot of an unchanged tree cost {grew} bytes on {before}")
           PY
+
+      - name: The real corpus round-trips on this platform
+        shell: bash
+        # test_demo/ holds files a person actually wants to keep, starting with
+        # this project's own papers. Everything else in the suite tests the format
+        # against inputs the suite invented; this asks whether real bytes survive,
+        # on every platform, which is the only question that finally matters.
+        run: python test_demo/run.py
 
       - name: Reproducible across two runs of the 1.0 writer
         shell: bash

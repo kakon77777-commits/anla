@@ -105,6 +105,10 @@ def cdc_chunker(profile: Any = None) -> Chunker:
     def chunk(data: bytes) -> list[bytes]:
         return [data[start:end] for start, end in cut_points(data, chosen)]
 
+    # Carried on the function so the writer can record it without being told twice.
+    # An archive whose snapshots were cut by different rules deduplicates against
+    # nothing, and that is invisible in every check except the size.
+    chunk.plan = chosen.as_manifest_member()
     return chunk
 
 
@@ -448,6 +452,22 @@ def append_snapshot(data: bytes, *,
     # the same id over the same bytes, verifies, and extracts every byte — it just
     # cannot apply what it verified. Requiring them would refuse an archive that
     # reader could restore perfectly. See design/milestone-2-plan.md decision 3.
+    # The chunking rule is recorded for the same reason the hash algorithm is: two
+    # snapshots cut by different boundaries produce different chunk ids for
+    # identical bytes, so deduplication silently does nothing while every check
+    # still passes. Found by running the corpus in test_demo/ and noticing that a
+    # one-paragraph edit cost a whole paper.
+    plan = getattr(chunker, "plan", None)
+    if started and previous:
+        earlier = parent.manifest.get("packing_plan")
+        if earlier is not None and plan is not None and earlier != plan:
+            raise InvalidInput(
+                "an archive uses one chunking rule for its chunk boundaries",
+                archive=earlier, given=plan,
+                hint="appending with different boundaries stores every file again")
+        if plan is None:
+            plan = earlier
+
     namespaces = {ns for entry in tree_objects for ns in entry.metadata}
     optional = [f"anla:metadata:{ns}:1" for ns in sorted(namespaces)]
 
@@ -470,7 +490,7 @@ def append_snapshot(data: bytes, *,
         hasher=hasher, hash_algorithm=hash_algorithm,
         required_capabilities=capabilities, optional_capabilities=optional,
         metadata=metadata_blocks, auxiliary=auxiliary,
-        parent_snapshot=parent_id)
+        parent_snapshot=parent_id, packing_plan=plan)
 
     payload = encode(manifest)
     manifest_offset = len(out)

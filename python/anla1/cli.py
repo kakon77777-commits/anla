@@ -82,8 +82,26 @@ def _created_ns(value: int | None) -> int:
     return time.time_ns()
 
 
-def _chunker(name: str):
-    return cdc_chunker() if name == "cdc" else single_chunk
+def _chunker(name: str, average: int | None = None):
+    """The chunker, and the size the boundaries are tuned for.
+
+    The pinned default averages 256 KB with a 64 KB floor, which is right for
+    disk images and wrong for prose: a 30 KB paper is entirely below the floor, so
+    it is one chunk, so editing one paragraph rewrites the whole file. `--chunk-avg`
+    is how you say what your corpus actually looks like. It does not change
+    `anla-cdc-1` — the gear table and the boundary rule are what that pins, and the
+    sizes are declared per archive.
+    """
+    if name != "cdc":
+        return single_chunk
+    if average is None:
+        return cdc_chunker()
+    from anla.fastcdc import CdcProfile
+
+    if average & (average - 1):
+        raise InvalidInput("--chunk-avg must be a power of two", value=average)
+    return cdc_chunker(CdcProfile(min_size=max(1, average // 4), avg_size=average,
+                                  max_size=average * 4))
 
 
 def _read(path: str) -> bytes:
@@ -133,7 +151,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
         b"", files=tree.files, directories=tree.directories,
         objects=tree.objects, fidelity=tree.skipped,
         created_unix_ns=_created_ns(args.created_ns),
-        chunker=_chunker(args.chunking),
+        chunker=_chunker(args.chunking, args.chunk_avg),
         hash_algorithm=args.hash,
         archive_id=_uuid_arg(args.uuid) or _new_uuid())
     _write_out(args.output, data, args.force)
@@ -165,7 +183,7 @@ def cmd_append(args: argparse.Namespace) -> int:
         existing, files=tree.files, directories=tree.directories,
         objects=tree.objects, fidelity=tree.skipped,
         created_unix_ns=_created_ns(args.created_ns),
-        chunker=_chunker(args.chunking))
+        chunker=_chunker(args.chunking, args.chunk_avg))
     report = verify_archive(data)
     Path(args.archive).write_bytes(data)
     latest, previous = report.snapshots[-1], report.snapshots[-2]
@@ -328,6 +346,12 @@ def build_parser() -> argparse.ArgumentParser:
                             "two writers on different platforms can be compared on")
         p.add_argument("--chunking", choices=("none", "cdc"), default="cdc",
                        help="cdc = anla-cdc-1 content-defined chunking (default)")
+        p.add_argument("--chunk-avg", type=int, metavar="BYTES",
+                       help="average chunk size, a power of two. The default is "
+                            "256 KiB with a 64 KiB floor, which makes any file "
+                            "smaller than 64 KiB a single chunk \u2014 so editing one "
+                            "paragraph of a 30 KiB paper rewrites all of it. Try "
+                            "4096 for prose or source code")
         p.add_argument("--created-ns", type=int,
                        help="fix the creation timestamp, for reproducible output")
 

@@ -27,6 +27,7 @@ from anla1 import container as C  # noqa: E402
 from anla1.cbor import encode  # noqa: E402
 from anla1.manifest import compute_roots  # noqa: E402
 from anla1.snapshot import (  # noqa: E402
+    SourceEntry,
     append_snapshot,
     cdc_chunker,
     create_archive,
@@ -470,3 +471,64 @@ def test_verify_reports_the_saving():
     assert report.archive_bytes == len(data)
     # Two snapshots of an overlapping tree occupy less than the sum of their trees.
     assert report.chunk_bytes < report.logical_bytes
+
+
+def test_an_archive_uses_one_chunking_rule():
+    """The same defect as the hash algorithm, one layer down.
+
+    Two snapshots cut by different boundaries produce different chunk ids for
+    identical bytes, so deduplication silently does nothing while every check still
+    passes. Found by running `test_demo/` on real papers and noticing that a
+    one-paragraph edit cost a whole file.
+    """
+    from anla.fastcdc import CdcProfile
+
+    small = cdc_chunker(CdcProfile(min_size=1024, avg_size=4096, max_size=16384))
+    files = [SourceEntry.of("a.txt", b"x" * 50_000)]
+    one = append_snapshot(b"", files=files, created_unix_ns=CREATED, chunker=small,
+                          archive_id=ARCHIVE_ID)
+
+    # Recorded, so a later writer can be held to it rather than guessing.
+    plan = latest_snapshot(one).manifest["packing_plan"]
+    assert plan["version"] == "anla-cdc-1" and plan["avg"] == 4096
+
+    append_snapshot(one, files=files, created_unix_ns=CREATED + 1, chunker=small)
+    with pytest.raises(InvalidInput, match="one chunking rule"):
+        append_snapshot(one, files=files, created_unix_ns=CREATED + 1,
+                        chunker=cdc_chunker())
+
+
+def test_a_chunk_size_below_the_file_is_what_makes_deduplication_work():
+    """Why the rule above matters, stated as a measurement.
+
+    The pinned default has a 64 KiB floor, so a 36 KiB document is one chunk and an
+    edit anywhere in it rewrites all of it. This is the property `--chunk-avg`
+    exists for, pinned here so nobody 'simplifies' the flag away.
+    """
+    from anla.fastcdc import CdcProfile
+
+    # LCG, not arithmetic. The first version of this test used `(i * 7919) % 251`
+    # and failed, because on periodic input the gear fingerprint never satisfies the
+    # boundary condition, every cut lands on `max_size`, and a smaller average makes
+    # things *worse* rather than better. The warning about that is forty lines up in
+    # this same file, which is the whole reason it is worth writing twice.
+    state, buffer = 987654321, bytearray()
+    for _ in range(36_000):
+        state = (state * 1103515245 + 12345) & 0xFFFFFFFF
+        buffer.append((state >> 16) & 0xFF)
+    body = bytes(buffer)
+    revised = body[:12_000] + b"a new paragraph\n" + body[12_000:]
+
+    def cost(chunker) -> int:
+        one = append_snapshot(b"", files=[SourceEntry.of("p.md", body)],
+                              created_unix_ns=CREATED, chunker=chunker,
+                              archive_id=ARCHIVE_ID)
+        two = append_snapshot(one, files=[SourceEntry.of("p.md", revised)],
+                              created_unix_ns=CREATED + 1, chunker=chunker)
+        return len(two) - len(one)
+
+    default_cost = cost(cdc_chunker())
+    tuned_cost = cost(cdc_chunker(CdcProfile(min_size=1024, avg_size=4096,
+                                             max_size=16384)))
+    assert default_cost > len(body), "the default should store the whole file again"
+    assert tuned_cost < default_cost / 2, (tuned_cost, default_cost)
