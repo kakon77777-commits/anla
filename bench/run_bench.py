@@ -47,6 +47,8 @@ from anla1.fs import scan_tree                       # noqa: E402
 from anla1.snapshot import (                          # noqa: E402
     append_snapshot,
     cdc_chunker,
+    extract_snapshot,
+    list_snapshots,
     single_chunk,
     verify_archive,
 )
@@ -149,10 +151,44 @@ def composition(data: bytes) -> list[dict]:
     return rows
 
 
+def round_trip(data: bytes, expected: list[dict[str, bytes]]) -> int:
+    """Extract every snapshot and compare it with the tree that produced it.
+
+    `verify_archive` proves an archive is *internally consistent*: every hash agrees
+    with every other hash. It cannot prove the bytes are the ones that went in — a
+    writer that consistently stored the wrong content would satisfy it completely,
+    because it would also have consistently hashed the wrong content.
+
+    So this is the check the measurements were resting on and did not have. It is
+    the same shape as every other lesson in this repository: a check that compares a
+    thing to itself cannot fail for the reason you care about.
+
+    Returns the number of files compared, so a silent zero is visible.
+    """
+    compared = 0
+    snapshots = list_snapshots(data)
+    if len(snapshots) != len(expected):
+        raise AssertionError(f"{len(snapshots)} snapshots for {len(expected)} trees")
+    for snapshot, wanted in zip(snapshots, expected):
+        restored = extract_snapshot(data, snapshot)
+        if restored != wanted:
+            missing = sorted(set(wanted) - set(restored))
+            extra = sorted(set(restored) - set(wanted))
+            differs = sorted(k for k in set(wanted) & set(restored)
+                             if wanted[k] != restored[k])
+            raise AssertionError(
+                f"snapshot {snapshot.sequence} did not round trip: "
+                f"missing={missing[:3]} extra={extra[:3]} differs={differs[:3]}")
+        compared += len(wanted)
+    if not compared:
+        raise AssertionError("nothing was compared, so nothing was checked")
+    return compared
+
+
 def anla1_snapshots(roots: list[Path], *, chunking: str = "cdc") -> tuple[int, list[int], dict]:
     """Append one snapshot per tree. Returns (final size, size after each, report)."""
     chunker = cdc_chunker() if chunking == "cdc" else single_chunk
-    data, sizes = b"", []
+    data, sizes, trees = b"", [], []
     for index, root in enumerate(roots):
         # No recorded metadata at all, so the table does not move when it is
         # regenerated on a different machine: POSIX records a file mode and Windows
@@ -160,17 +196,20 @@ def anla1_snapshots(roots: list[Path], *, chunking: str = "cdc") -> tuple[int, l
         # change nobody made.
         scanned = scan_tree(root, exclude=EXCLUDE, preserve_mtime=False,
                             preserve_posix=False)
+        trees.append({entry.path: entry.read() for entry in scanned.files})
         data = append_snapshot(
             data, files=scanned.files, directories=scanned.directories,
             created_unix_ns=FIXED_TIME + index, chunker=chunker,
             archive_id=FIXED_UUID if index == 0 else None)
         sizes.append(len(data))
     report = verify_archive(data)          # never report a size we did not verify
+    compared = round_trip(data, trees)     # ...and never one we did not restore
     return len(data), sizes, {
         "snapshots": len(report.snapshots),
         "unique_chunks": report.unique_chunks,
         "chunk_bytes": report.chunk_bytes,
         "logical_bytes": report.logical_bytes,
+        "files_round_tripped": compared,
         "composition": composition(data),
     }
 
@@ -375,6 +414,12 @@ def scenario_metadata_cost(work: Path) -> Result:
 
     bare, with_times, with_posix = size(files), size(timed), size(full)
     with_links = size(full, links)
+    # This scenario builds its objects rather than scanning them, so it does its own
+    # round trip. Links carry no content and must not appear in the extraction.
+    built = append_snapshot(b"", files=full, directories=["src", "link"],
+                            objects=links, created_unix_ns=FIXED_TIME,
+                            archive_id=FIXED_UUID)
+    round_trip(built, [{f.path: f.read() for f in files}])
     logical = sum(len(f.read()) for f in files)
     return Result(
         scenario="metadata-cost",
@@ -389,7 +434,8 @@ def scenario_metadata_cost(work: Path) -> Result:
                "no_metadata": bare,
                "times_only": with_times,
                "times_and_mode": with_posix},
-        detail={"bytes_per_object_for_times": round((with_times - bare) / count, 1),
+        detail={"files_round_tripped": count,
+                "bytes_per_object_for_times": round((with_times - bare) / count, 1),
                 "bytes_per_object_for_mode": round((with_posix - with_times) / count, 1),
                 "bytes_per_symlink": round((with_links - with_posix) / count, 1)})
 

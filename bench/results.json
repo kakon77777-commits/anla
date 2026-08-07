@@ -1,6 +1,6 @@
 {
-  "generated_at_unix_ns": 1786095017416595800,
-  "revision": "c0ad581",
+  "generated_at_unix_ns": 1786112955182753400,
+  "revision": "cd2fd1d",
   "profile": "ANLA 1.0 (draft)",
   "codecs": [
     "store"
@@ -31,6 +31,7 @@
         "unique_chunks": 90,
         "chunk_bytes": 1514032,
         "logical_bytes": 1514032,
+        "files_round_tripped": 90,
         "composition": [
           {
             "snapshot": 1,
@@ -45,7 +46,7 @@
         "anla_1_0_vs_targz": 3.3716,
         "anla_1_0_vs_anla_mvp_deflate": 2.5714
       },
-      "seconds": 0.41
+      "seconds": 0.46
     },
     {
       "scenario": "metadata-cost",
@@ -63,6 +64,7 @@
         "times_and_mode": 285136
       },
       "detail": {
+        "files_round_tripped": 500,
         "bytes_per_object_for_times": 36.0,
         "bytes_per_object_for_mode": 15.0,
         "bytes_per_symlink": 105.0
@@ -73,98 +75,99 @@
         "anla_1_0_vs_times_only": 1.2163,
         "anla_1_0_vs_times_and_mode": 1.1842
       },
-      "seconds": 0.46
+      "seconds": 0.83
     },
     {
       "scenario": "git-history",
       "headline": "8 successive commits of python/, one snapshot each",
       "note": "Every version is recoverable, byte for byte. The comparison is against keeping each version as its own ZIP, which is what people do without snapshots, and against one tar.gz of all of them — gzip's 32 KB window cannot see from one copy of the tree to the next, which is why deduplication is a different mechanism and not a worse compressor.",
       "inputs": {
-        "logical_bytes": 2461429,
+        "logical_bytes": 2707420,
         "versions": 8,
         "revisions": [
-          "0e64f98",
           "77cb2d5",
           "f90ef92",
           "9898284",
           "04e28fc",
           "1b35a06",
           "ef9d860",
-          "c0ad581"
+          "c0ad581",
+          "cd2fd1d"
         ]
       },
       "sizes": {
-        "anla_1_0": 775112,
-        "zip_deflate9_per_version": 807577,
-        "targz_all_versions": 659483
+        "anla_1_0": 831552,
+        "zip_deflate9_per_version": 884703,
+        "targz_all_versions": 725033
       },
       "detail": {
         "snapshots": 8,
-        "unique_chunks": 56,
-        "chunk_bytes": 663877,
-        "logical_bytes": 2461429,
+        "unique_chunks": 59,
+        "chunk_bytes": 713799,
+        "logical_bytes": 2707420,
+        "files_round_tripped": 275,
         "composition": [
           {
             "snapshot": 1,
-            "new_chunk_bytes": 177272,
-            "metadata_bytes": 9232
+            "new_chunk_bytes": 218288,
+            "metadata_bytes": 9968
           },
           {
             "snapshot": 2,
-            "new_chunk_bytes": 41016,
-            "metadata_bytes": 10040
-          },
-          {
-            "snapshot": 3,
             "new_chunk_bytes": 49280,
             "metadata_bytes": 11872
           },
           {
-            "snapshot": 4,
+            "snapshot": 3,
             "new_chunk_bytes": 77960,
             "metadata_bytes": 12592
           },
           {
-            "snapshot": 5,
+            "snapshot": 4,
             "new_chunk_bytes": 48376,
             "metadata_bytes": 13328
           },
           {
-            "snapshot": 6,
+            "snapshot": 5,
             "new_chunk_bytes": 92872,
             "metadata_bytes": 14984
           },
           {
-            "snapshot": 7,
+            "snapshot": 6,
             "new_chunk_bytes": 12160,
             "metadata_bytes": 14984
           },
           {
-            "snapshot": 8,
+            "snapshot": 7,
             "new_chunk_bytes": 173728,
+            "metadata_bytes": 15352
+          },
+          {
+            "snapshot": 8,
+            "new_chunk_bytes": 50392,
             "metadata_bytes": 15352
           }
         ],
         "after_each_snapshot": [
-          186568,
-          237624,
-          298776,
-          389328,
-          451032,
-          558888,
-          586032,
-          775112
+          228320,
+          289472,
+          380024,
+          441728,
+          549584,
+          576728,
+          765808,
+          831552
         ],
-        "first_snapshot_bytes": 186568,
-        "later_snapshots_bytes": 588544,
-        "mean_later_snapshot_bytes": 84078
+        "first_snapshot_bytes": 228320,
+        "later_snapshots_bytes": 603232,
+        "mean_later_snapshot_bytes": 86176
       },
       "ratios": {
-        "anla_1_0_vs_input": 0.3149,
-        "anla_1_0_vs_zip_deflate9_per_version": 0.9598,
-        "anla_1_0_vs_targz_all_versions": 1.1753
+        "anla_1_0_vs_input": 0.3071,
+        "anla_1_0_vs_zip_deflate9_per_version": 0.9399,
+        "anla_1_0_vs_targz_all_versions": 1.1469
       },
-      "seconds": 2.95
+      "seconds": 3.62
     },
     {
       "scenario": "duplicate-tree",
@@ -183,6 +186,7 @@
         "unique_chunks": 5,
         "chunk_bytes": 114147,
         "logical_bytes": 570735,
+        "files_round_tripped": 25,
         "composition": [
           {
             "snapshot": 1,
@@ -223,7 +227,7 @@
         "anla_1_0_vs_input": 0.2264,
         "anla_1_0_vs_zip_deflate9_per_copy": 0.5402
       },
-      "seconds": 0.15
+      "seconds": 0.17
     },
     {
       "scenario": "incompressible",
@@ -243,6 +247,7 @@
         "unique_chunks": 8,
         "chunk_bytes": 2000000,
         "logical_bytes": 4000000,
+        "files_round_tripped": 2,
         "composition": [
           {
             "snapshot": 1,
@@ -266,7 +271,7 @@
         "anla_1_0_vs_zip_deflate9_per_copy": 0.5016,
         "anla_1_0_vs_targz_both": 0.5016
       },
-      "seconds": 1.54
+      "seconds": 1.53
     },
     {
       "scenario": "shifted-insert",
@@ -285,6 +290,7 @@
         "unique_chunks": 12,
         "chunk_bytes": 3283507,
         "logical_bytes": 6000064,
+        "files_round_tripped": 2,
         "composition": [
           {
             "snapshot": 1,
@@ -304,7 +310,7 @@
         "anla_1_0_vs_input": 0.5487,
         "anla_1_0_vs_anla_1_0_fixed_chunking": 0.5485
       },
-      "seconds": 1.99
+      "seconds": 2.05
     }
   ]
 }
