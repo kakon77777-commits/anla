@@ -39,7 +39,7 @@ jobs:
           node -e "console.log('node', process.version, 'CompressionStream', typeof CompressionStream)"
 
       - name: Install
-        run: python -m pip install --upgrade pip pytest pyflakes blake3
+        run: python -m pip install --upgrade pip pytest pyflakes blake3 zstandard
 
       - name: Lint
         run: python -m pyflakes python/anla python/anla1 python/tests conformance/make_vectors.py site tools bench test_demo
@@ -56,6 +56,13 @@ jobs:
         # skips itself when the extension is absent, so this is what makes "the two
         # implementations agree" a claim about this run rather than some other one.
         run: python tools/check_blake3.py
+
+      - name: zstd is present and still behaves as the reader assumes
+        # Same hole as the BLAKE3 check: test_codecs_1_0.py skips itself without the
+        # library, and a skipped module looks exactly like a passing one. This also
+        # re-asserts that a frame declares its content size, because that header is
+        # what the bomb check reads.
+        run: python tools/check_zstd.py
 
       - name: Published test counts match the suite
         # The landing page said 201 while the suite had 603, for weeks, because the
@@ -202,7 +209,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m pip install --upgrade pip blake3
+      - run: python -m pip install --upgrade pip blake3 zstandard
       - name: Run the whole benchmark
         # Runs it rather than trusting the committed results, so the harness cannot
         # rot between milestones and be discovered broken on the day the numbers are

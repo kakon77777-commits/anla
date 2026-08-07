@@ -461,7 +461,8 @@ BENCH_ORDER = ("anla_1_0", "anla_1_0_fixed_chunking", "anla_mvp_deflate",
                "targz", "targz_all_versions", "targz_both")
 
 BENCH_LABELS = {
-    "anla_1_0": "ANLA 1.0 (store, anla-cdc-1)",
+    "anla_1_0": "ANLA 1.0 (zstd + anla-cdc-1)",
+    "anla_1_0_store_only": "ANLA 1.0, codec turned off",
     "anla_1_0_fixed_chunking": "ANLA 1.0, fixed chunking",
     "anla_mvp_deflate": "ANLA-MVP (deflate)",
     "zip_deflate9": "ZIP, deflate -9",
@@ -522,12 +523,18 @@ def bench_reading(s: dict, document: dict) -> str:
 
     source = by_scenario.get("source-tree")
     if source and source["ratios"].get("anla_1_0_vs_targz"):
-        add("bench_read_codec", ratio=f'{source["ratios"]["anla_1_0_vs_targz"]:.1f}')
+        before = source["sizes"].get("anla_1_0_store_only", 0) / max(
+            1, source["sizes"].get("targz", 1))
+        add("bench_read_codec", ratio=f'{source["ratios"]["anla_1_0_vs_targz"]:.1f}',
+            before=f"{before:.1f}")
 
     history = by_scenario.get("git-history")
     if history and history["ratios"].get("anla_1_0_vs_targz_all_versions"):
+        store = history["sizes"].get("anla_1_0_store_only", 0) / max(
+            1, history["sizes"].get("targz_all_versions", 1))
         add("bench_read_history",
-            ratio=f'{history["ratios"]["anla_1_0_vs_targz_all_versions"]:.2f}')
+            ratio=f'{history["ratios"]["anla_1_0_vs_targz_all_versions"]:.2f}',
+            store=f"{store:.2f}")
 
     if history and len(history["detail"].get("composition", [])) > 1:
         rows = history["detail"]["composition"]

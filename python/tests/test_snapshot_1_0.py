@@ -460,7 +460,11 @@ def test_a_corrupted_chunk_is_found_by_verify_even_if_no_snapshot_reads_it():
     dropped = [cid for cid, _ in one.manifest["chunks"].items()]
     descriptor = one.manifest["chunks"][dropped[0]]
     data[descriptor["payload_offset"]] ^= 0xFF
-    with pytest.raises(IntegrityFailure, match="does not match its id"):
+    # The payload hash fires first now that stored bytes and raw bytes are hashed
+    # separately: this one catches damage to what is on disk. The chunk-id check
+    # behind it catches a codec that decoded to something else entirely, which is a
+    # different failure and has its own test in test_codecs_1_0.py.
+    with pytest.raises(IntegrityFailure, match="does not match its payload hash"):
         verify_archive(bytes(data))
 
 

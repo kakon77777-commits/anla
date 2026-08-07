@@ -47,7 +47,7 @@ editing `SPEC.md` and hoping.
 | Object name model (whitepaper Q4) | one `path`, deliberately not settled |
 | BLAKE3-256 | **implemented** — [`python/anla1/blake3.py`](python/anla1/blake3.py), a dependency-free reference plus the Rust fast path, 55 tests |
 | Chunking profile recorded and checked across snapshots | **implemented** |
-| Zstandard | decided (§8), not implemented |
+| Zstandard (§8) | **implemented** — [`python/anla1/codecs.py`](python/anla1/codecs.py), 12 tests |
 | Metadata namespaces and the fidelity report (§5.2.2) | **implemented** — 27 tests |
 | Symbolic links | **implemented** — stored verbatim, restored under policy |
 | Signatures, encryption, parity | later milestones |
@@ -671,7 +671,7 @@ chunk:
 | id | codec | state |
 |---:|---|---|
 | 0 | `store` | core |
-| 1 | `zstd` | core, not implemented |
+| 1 | `zstd` | core |
 | 2 | `deflate` | capability |
 | 3 | `lzma2` | capability |
 | 4 | `brotli` | capability |
@@ -684,6 +684,24 @@ recorded is a codec that cannot be decoded by anyone else, which is refutation
 condition 7.3 again.
 
 Compression happens before encryption, never the reverse.
+
+**A codec cannot reach `objects_root`, and can reach `preservation_root`.** Chunk ids
+are hashes of the *raw* chunk, so the tree's identity does not depend on how it was
+stored; chunk *descriptors* carry `codec_id`, `payload_length`, `payload_hash` and an
+offset, so `chunks_root` — and through it `preservation_root` — does.
+
+That has a consequence for the freeze rule at the top of this document, and it is
+better stated than discovered. Compressed output is a function of the compressor:
+two conforming writers on different libzstd builds may produce different bytes for
+the same input and both be right. So:
+
+- **byte-identical archives** is a claim about `store`, and is what the
+  cross-implementation check must use;
+- for a compressed archive, what two implementations MUST agree on is
+  `objects_root` and the set of chunk ids — the tree, not the layout.
+
+`packing_plan.codec` records the level and the libzstd version that produced the
+bytes, because a plan that omits them cannot explain why two writers disagreed.
 
 ---
 

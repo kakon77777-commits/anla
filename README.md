@@ -67,7 +67,8 @@ finds no divergence between them.** 1.0 now has canonical CBOR, the container (h
 record frame with flags, footer chain, capabilities), the pinned Merkle construction,
 the manifest with its five roots, BLAKE3-256, append-only snapshots with
 cross-snapshot deduplication, metadata namespaces with an in-archive fidelity
-report, symbolic links, and an `anla1` command that packs a real directory —
+report, symbolic links, Zstandard, and an `anla1` command that packs a real
+directory —
 a second snapshot of an unchanged tree writes no chunk records at all, and with
 `anla-cdc-1` prepending ten bytes to a 300 KB file shares 65 of its 66 chunks with
 the snapshot before it. What it does not have is a second implementation, so nothing
@@ -166,7 +167,7 @@ archive.read('docs/readme.txt');
 python -m pytest python/tests -q
 ```
 
-634 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
+646 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
 without it. Everything runs on Linux, macOS and Windows in CI. Another 76
 assertions run in a browser on the [live test page](https://anla.evemisslab.com/demo/).
 

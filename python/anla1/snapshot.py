@@ -32,6 +32,15 @@ from anla.errors import IntegrityFailure, InvalidInput, ManifestInvalid
 
 from . import container as C
 from .cbor import encode
+from .codecs import (
+    CODEC_STORE,
+    CODEC_ZSTD,
+    CODECS,
+    DEFAULT_LEVEL,
+    compress_chunk,
+    decompress_chunk,
+    plan_for,
+)
 from .manifest import (
     ChunkEntry,
     ObjectEntry,
@@ -47,6 +56,7 @@ __all__ = [
     "create_archive", "append_snapshot",
     "snapshot_id_of", "read_snapshot", "list_snapshots", "latest_snapshot",
     "extract_snapshot", "verify_archive", "diff",
+    "CODEC_STORE", "CODEC_ZSTD",
 ]
 
 Chunker = Callable[[bytes], list[bytes]]
@@ -56,7 +66,7 @@ Chunker = Callable[[bytes], list[bytes]]
 #: whole archive.
 SNAPSHOT_CAPABILITY = "anla:core:snapshots:1"
 
-STORE_CODEC = 0
+STORE_CODEC = CODEC_STORE
 
 
 @dataclass(frozen=True)
@@ -328,6 +338,8 @@ def append_snapshot(data: bytes, *,
                     fidelity: Iterable[dict] = (),
                     auxiliary: Iterable[dict] = (),
                     chunker: Chunker = single_chunk,
+                    codec: int = CODEC_STORE,
+                    level: int = DEFAULT_LEVEL,
                     hash_algorithm: str | None = None,
                     archive_id: bytes | None = None) -> bytes:
     """Append one snapshot, reusing every chunk the archive already contains.
@@ -408,23 +420,28 @@ def append_snapshot(data: bytes, *,
         payload = source.read()        # read once — see SourceEntry on the bound
         ids: list[bytes] = []
         for piece in chunker(payload):
+            # The chunk id is the hash of the *raw* chunk, before any codec touches
+            # it. That is what makes compression unable to change a chunk id, an
+            # objects_root, or a preservation_root — see codecs.py.
             chunk_id = hasher(piece)
             ids.append(chunk_id)
             if chunk_id in known or chunk_id in chunk_entries:
                 continue                       # already in the archive: never twice
+            used, stored = compress_chunk(piece, codec, level)
+            payload_hash = hasher(stored)
             offset = len(out)
             record = C.build_record(
                 "CHNK",
-                {"chunk_id": chunk_id, "codec_id": STORE_CODEC,
-                 "raw_size": len(piece), "payload_hash": chunk_id},
-                piece, sequence)
+                {"chunk_id": chunk_id, "codec_id": used,
+                 "raw_size": len(piece), "payload_hash": payload_hash},
+                stored, sequence)
             out += record
             parsed = C.parse_record(record, 0)
             chunk_entries[chunk_id] = ChunkEntry(
                 chunk_id=chunk_id, record_offset=offset, record_length=len(record),
                 payload_offset=offset + parsed.payload_offset,
-                payload_length=len(piece), raw_size=len(piece),
-                codec_id=STORE_CODEC, payload_hash=chunk_id)
+                payload_length=len(stored), raw_size=len(piece),
+                codec_id=used, payload_hash=payload_hash)
             sequence += 1
         tree_objects.append(ObjectEntry(
             kind="regular-file", path=source.path, size=len(payload),
@@ -441,6 +458,13 @@ def append_snapshot(data: bytes, *,
 
     capabilities = ["anla:core:objects:1", "anla:core:chunks:1", SNAPSHOT_CAPABILITY,
                     f"anla:hash:{hash_algorithm}:1", "anla:codec:store:1"]
+    # Declared from what was *used*, not from what was asked for: a pack where every
+    # chunk turned out incompressible stores nothing with zstd and must not require
+    # a reader to have it.
+    for entry in referenced:
+        capability = CODECS[entry.codec_id].capability
+        if capability and capability not in capabilities:
+            capabilities.append(capability)
     if any(entry.kind == "symbolic-link" for entry in tree_objects):
         # Required, because a reader that does not know the kind refuses the whole
         # manifest anyway. Saying so is the difference between a clear refusal and
@@ -458,6 +482,9 @@ def append_snapshot(data: bytes, *,
     # still passes. Found by running the corpus in test_demo/ and noticing that a
     # one-paragraph edit cost a whole paper.
     plan = getattr(chunker, "plan", None)
+    if plan is not None or codec != CODEC_STORE:
+        plan = dict(plan or {})
+        plan["codec"] = plan_for(codec, level)
     if started and previous:
         earlier = parent.manifest.get("packing_plan")
         if earlier is not None and plan is not None and earlier != plan:
@@ -545,14 +572,20 @@ def extract_snapshot(data: bytes, snapshot: Snapshot) -> dict[str, bytes]:
         parts = []
         for chunk_id in entry["chunks"]:
             descriptor = snapshot.manifest["chunks"][chunk_id]
-            if descriptor["codec_id"] != STORE_CODEC:
-                raise ManifestInvalid("unsupported codec", codec=descriptor["codec_id"])
             record = C.parse_record(data, descriptor["record_offset"])
             if record.type != "CHNK":
                 raise ManifestInvalid("chunk descriptor points at a non-CHNK record",
                                       found=record.type)
-            raw = data[descriptor["payload_offset"]:
-                       descriptor["payload_offset"] + descriptor["payload_length"]]
+            stored = data[descriptor["payload_offset"]:
+                          descriptor["payload_offset"] + descriptor["payload_length"]]
+            # The stored bytes and the raw bytes are hashed separately, and both are
+            # checked: `payload_hash` catches damage to what is on disk, `chunk_id`
+            # catches a codec that decoded to something else entirely.
+            if hasher(stored) != descriptor["payload_hash"]:
+                raise IntegrityFailure("stored chunk does not match its payload hash",
+                                       chunk_id=chunk_id.hex()[:16])
+            raw = decompress_chunk(stored, descriptor["codec_id"],
+                                   descriptor["raw_size"])
             if hasher(raw) != chunk_id:
                 raise IntegrityFailure("chunk content does not match its id",
                                        chunk_id=chunk_id.hex()[:16])
@@ -601,8 +634,13 @@ def verify_archive(data: bytes) -> ArchiveReport:
             if record.header.get("chunk_id") != chunk_id:
                 raise IntegrityFailure("chunk record disagrees with its descriptor",
                                        chunk_id=chunk_id.hex()[:16])
-            raw = data[descriptor["payload_offset"]:
-                       descriptor["payload_offset"] + descriptor["payload_length"]]
+            stored = data[descriptor["payload_offset"]:
+                          descriptor["payload_offset"] + descriptor["payload_length"]]
+            if C.hash_bytes(stored, snapshot.hash_algorithm) != descriptor["payload_hash"]:
+                raise IntegrityFailure("stored chunk does not match its payload hash",
+                                       chunk_id=chunk_id.hex()[:16])
+            raw = decompress_chunk(stored, descriptor["codec_id"],
+                                   descriptor["raw_size"])
             if C.hash_bytes(raw, snapshot.hash_algorithm) != chunk_id:
                 raise IntegrityFailure("chunk content does not match its id",
                                        chunk_id=chunk_id.hex()[:16])

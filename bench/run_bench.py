@@ -44,6 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python"))
 
 from anla1.fs import scan_tree                       # noqa: E402
+from anla1.codecs import CODEC_STORE, CODEC_ZSTD, have_zstd   # noqa: E402
 from anla1.snapshot import (                          # noqa: E402
     append_snapshot,
     cdc_chunker,
@@ -185,7 +186,8 @@ def round_trip(data: bytes, expected: list[dict[str, bytes]]) -> int:
     return compared
 
 
-def anla1_snapshots(roots: list[Path], *, chunking: str = "cdc") -> tuple[int, list[int], dict]:
+def anla1_snapshots(roots: list[Path], *, chunking: str = "cdc",
+                    codec: int = 0) -> tuple[int, list[int], dict]:
     """Append one snapshot per tree. Returns (final size, size after each, report)."""
     chunker = cdc_chunker() if chunking == "cdc" else single_chunk
     data, sizes, trees = b"", [], []
@@ -199,7 +201,7 @@ def anla1_snapshots(roots: list[Path], *, chunking: str = "cdc") -> tuple[int, l
         trees.append({entry.path: entry.read() for entry in scanned.files})
         data = append_snapshot(
             data, files=scanned.files, directories=scanned.directories,
-            created_unix_ns=FIXED_TIME + index, chunker=chunker,
+            created_unix_ns=FIXED_TIME + index, chunker=chunker, codec=codec,
             archive_id=FIXED_UUID if index == 0 else None)
         sizes.append(len(data))
     report = verify_archive(data)          # never report a size we did not verify
@@ -246,15 +248,21 @@ def scenario_source_tree(work: Path) -> Result:
     """One snapshot of a real source tree — where ANLA 1.0 loses, on purpose."""
     target = ROOT / "python"
     logical, files = tree_bytes(target)
-    size, _, report = anla1_snapshots([target])
+    size, _, report = anla1_snapshots([target], codec=CODEC_ZSTD if have_zstd()
+                                      else CODEC_STORE)
+    stored_only, _, _ = anla1_snapshots([target], codec=CODEC_STORE)
     return Result(
         scenario="source-tree",
         headline="One snapshot of this repository's python/ directory",
-        note="ANLA 1.0 stores; it does not compress. A single snapshot is therefore "
-             "larger than the tree, and both compressors beat it. This row is the "
-             "argument for Zstandard, stated as a measurement.",
+        note="This row used to be the argument for Zstandard, stated as a "
+             "measurement: with only `store` a single snapshot was larger than the "
+             "tree and both compressors beat it comfortably. The codec landed, so "
+             "the row now answers its own question — and the `store` line is kept "
+             "beside it, because a benchmark that quietly drops the case it used to "
+             "lose is not reporting, it is marketing.",
         inputs={"logical_bytes": logical, "files": files},
         sizes={"anla_1_0": size,
+               "anla_1_0_store_only": stored_only,
                "zip_deflate9": zip_bytes([target]),
                "targz": targz_bytes([target]),
                "anla_mvp_deflate": mvp_bytes(target)},
@@ -283,7 +291,9 @@ def scenario_git_history(work: Path, versions: int = 8) -> Result:
         roots.append(destination / "python")
 
     logical = sum(tree_bytes(root)[0] for root in roots)
-    size, growth, report = anla1_snapshots(roots)
+    size, growth, report = anla1_snapshots(roots, codec=CODEC_ZSTD if have_zstd()
+                                           else CODEC_STORE)
+    stored_only, _, _ = anla1_snapshots(roots, codec=CODEC_STORE)
     first = growth[0]
     return Result(
         scenario="git-history",
@@ -296,6 +306,7 @@ def scenario_git_history(work: Path, versions: int = 8) -> Result:
         inputs={"logical_bytes": logical, "versions": len(roots),
                 "revisions": revisions},
         sizes={"anla_1_0": size,
+               "anla_1_0_store_only": stored_only,
                "zip_deflate9_per_version": zip_bytes(roots),
                "targz_all_versions": targz_bytes(roots)},
         detail={**report,
@@ -496,7 +507,7 @@ def main(argv: list[str] | None = None) -> int:
         # The single most important field on the published page. Every ratio below
         # is deduplication; none of it is compression, because 1.0 has no codec that
         # compresses. Stated as data so the page cannot forget to say it.
-        "codecs": ["store"],
+        "codecs": ["store", "zstd"] if have_zstd() else ["store"],
         "chunking": "anla-cdc-1",
         "hash": "blake3-256",
         "platform": {"system": os.name, "python": sys.version.split()[0]},

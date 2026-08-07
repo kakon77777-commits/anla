@@ -40,13 +40,13 @@ STRINGS: dict[str, dict[str, str]] = {
                       "JSON file this page is generated from, so the page cannot say "
                       "anything the harness did not measure — including the rows where "
                       "ANLA loses.",
-        "bench_warning_h": "ANLA 1.0 does not compress.",
-        "bench_warning": "Its only codec is store. Every ratio below is deduplication. "
-                         "One snapshot of unique files is therefore larger than the "
-                         "tree it holds, and a general-purpose compressor beats it "
-                         "comfortably. That case is the first row rather than an "
-                         "omitted one, because a benchmark you cannot lose is not a "
-                         "benchmark.",
+        "bench_warning_h": "Deduplication and compression are different mechanisms.",
+        "bench_warning": "Zstandard landed on 2026-08-07; before it, every figure here "
+                         "was deduplication alone and a single snapshot was larger "
+                         "than the tree it held. The store-only line is kept beside "
+                         "the compressed one in the rows where it used to lose, "
+                         "because a benchmark that quietly drops the case it lost is "
+                         "not reporting, it is marketing.",
         "bench_measured": "Measured at",
         "bench_stack": "Profile",
         "bench_input": "Input",
@@ -61,12 +61,18 @@ STRINGS: dict[str, dict[str, str]] = {
         "bench_col_metadata": "Metadata",
         "bench_reading_h": "What the table says to build next",
         "bench_read_codec": "One snapshot of a source tree costs {ratio}× a tar.gz "
-                            "of the same tree. That gap is a missing codec, not a "
-                            "missing design, and it is the entire case for Zstandard.",
+                            "of the same tree, down from {before}× before "
+                            "Zstandard landed. It still loses, and for a structural "
+                            "reason rather than a missing feature: tar.gz compresses "
+                            "across file boundaries, and ANLA compresses each chunk "
+                            "on its own so that any chunk can be read without the "
+                            "others.",
         "bench_read_history": "Eight versions of that tree cost {ratio}× a single "
-                              "tar.gz of all eight — with no compression at all. "
-                              "Unlike the tar.gz, any one version extracts on its own "
-                              "and a ninth appends without rewriting a byte.",
+                              "tar.gz of all eight, and {store}× with the codec "
+                              "turned off. Deduplication is what wins here and "
+                              "compression compounds it. Unlike the tar.gz, any one "
+                              "version extracts on its own and a ninth appends "
+                              "without rewriting a byte.",
         "bench_read_metadata": "Describing a snapshot cost {first} on the first and "
                                "{last} on the eighth, and {share} of everything the "
                                "later snapshots added. A manifest describes its whole "
@@ -104,7 +110,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "Reference implementations",
         "fact_impl_v": "2, cross-verified",
         "fact_tests": "Conformance tests",
-        "fact_tests_v": "634 + fuzzing",
+        "fact_tests_v": "646 + fuzzing",
         "strip_1_t": "Local-first",
         "strip_1_d": "The workbench runs entirely in your tab: your files are read "
                      "into memory and never sent anywhere. The page makes no requests "
@@ -404,10 +410,8 @@ STRINGS: dict[str, dict[str, str]] = {
                       "替代方案對比。每一個數字都由 bench/run_bench.py 產生並寫進一份 JSON，"
                       "這個頁面是從那份 JSON 生成的——所以頁面說不出任何量測程式沒有量到的東西，"
                       "包含 ANLA 輸掉的那幾列。",
-        "bench_warning_h": "ANLA 1.0 不做壓縮。",
-        "bench_warning": "它唯一的 codec 是 store。以下每一個比值都是「去重」。因此單一 snapshot "
-                         "若檔案彼此不重複，封裝會比原樹更大，而一般用途的壓縮器會贏得很輕鬆。"
-                         "那個情境放在第一列而不是被省略掉——一個你不可能輸的基準，不是基準。",
+        "bench_warning_h": "去重跟壓縮是兩種不同的機制。",
+        "bench_warning": "Zstandard 於 2026-08-07 落地；在那之前，這裡每一個數字都只是去重，而單一 snapshot 比它所包的樹還大。在它曾經輸掉的那幾列，「store 單獨」那一行仍然留在壓縮結果旁邊——一個惄惄把自己輸過的情境拿掉的基準，不是在回報，是在行銷。",
         "bench_measured": "量測於",
         "bench_stack": "組態",
         "bench_input": "輸入",
@@ -420,12 +424,16 @@ STRINGS: dict[str, dict[str, str]] = {
         "bench_col_content": "新內容",
         "bench_col_metadata": "描述資料",
         "bench_reading_h": "這張表指出接下來該做什麼",
-        "bench_read_codec": "一棵原始碼樹的單一 snapshot，是同一棵樹 tar.gz 的 {ratio} 倍。"
-                            "這個差距是「少了一個 codec」，不是「設計不對」——"
-                            "而這就是該做 Zstandard 的全部理由。",
+        "bench_read_codec": "一棵原始碼樹的單一 snapshot，是同一棵樹 tar.gz 的 {ratio} 倍"
+                            "（Zstandard 落地前是 {before} 倍）。它仍然輸，"
+                            "而且是結構性的理由而不是少了功能："
+                            "tar.gz 跨檔案邊界壓縮，而 ANLA 每一塊各自壓，"
+                            "為的是任何一塊都能不靠其他塊讀出來。",
         "bench_read_history": "同一棵樹的八個版本，是「八個版本包成一個 tar.gz」的 "
-                              "{ratio} 倍——而且完全沒有壓縮。跟 tar.gz 不同的是，"
-                              "任何一個版本都能單獨取出，而且第九個可以附加上去而不重寫任何一個位元組。",
+                              "{ratio} 倍；把 codec 關掉則是 {store} 倍。"
+                              "贏的主力是去重，壓縮在上面相乘。"
+                              "跟 tar.gz 不同的是，任何一個版本都能單獨取出，"
+                              "而且第九個可以附加上去而不重寫任何一個位元組。",
         "bench_read_metadata": "描述一個 snapshot 的成本，第一個是 {first}、第八個是 {last}，"
                                "並且佔了後續 snapshot 所新增內容的 {share}。manifest 描述的是"
                                "它整個 snapshot 而不是差異；FLAG_COMPRESSED_METADATA 就是用來阻止"
@@ -458,7 +466,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "參考實作",
         "fact_impl_v": "2 套，互相驗證",
         "fact_tests": "一致性測試",
-        "fact_tests_v": "634 項 + 模糊測試",
+        "fact_tests_v": "646 項 + 模糊測試",
         "strip_1_t": "本機優先",
         "strip_1_d": "工作台完全在你的分頁裡執行：檔案只讀進記憶體，不會被送到任何"
                      "地方。頁面本身不發出任何請求，其內容安全政策也禁止對外連線。",

@@ -28,6 +28,7 @@ from pathlib import Path
 from anla.errors import AnlaError, InvalidInput
 
 from . import __draft__, __profile__
+from .codecs import CODEC_STORE, CODEC_ZSTD, DEFAULT_LEVEL
 from .container import CORE_HASH, HASHES
 from .fs import restore_tree, scan_tree
 from .manifest import fidelity_of
@@ -152,6 +153,8 @@ def cmd_pack(args: argparse.Namespace) -> int:
         objects=tree.objects, fidelity=tree.skipped,
         created_unix_ns=_created_ns(args.created_ns),
         chunker=_chunker(args.chunking, args.chunk_avg),
+        codec=CODEC_ZSTD if args.codec == 'zstd' else CODEC_STORE,
+        level=args.level,
         hash_algorithm=args.hash,
         archive_id=_uuid_arg(args.uuid) or _new_uuid())
     _write_out(args.output, data, args.force)
@@ -164,10 +167,18 @@ def cmd_pack(args: argparse.Namespace) -> int:
            "links": sum(1 for e in report.snapshots[-1].manifest["objects"]
                         if e["kind"] == "symbolic-link"),
            "chunks": report.unique_chunks, "hash": args.hash,
-           "chunking": args.chunking, "skipped": skipped},
+           "codec": args.codec, "chunking": args.chunking,
+           "compressed_chunks": sum(
+               1 for d in report.snapshots[-1].manifest["chunks"].values()
+               if d["codec_id"] != CODEC_STORE),
+           "logical_bytes": report.logical_bytes,
+           "stored_bytes": report.chunk_bytes,
+           "skipped": skipped},
           args.json,
           [f"packed {args.source} -> {args.output}",
-           f"  {len(data)} bytes, {report.unique_chunks} chunks, snapshot 1"]
+           f"  {len(data):,} bytes, {report.unique_chunks} chunks, snapshot 1",
+           f"  {report.chunk_bytes:,} stored for {report.logical_bytes:,} logical "
+           f"bytes ({args.codec})"]
           + [f"  skipped {s['path']} ({s['kind']})" for s in skipped])
     return code
 
@@ -183,7 +194,9 @@ def cmd_append(args: argparse.Namespace) -> int:
         existing, files=tree.files, directories=tree.directories,
         objects=tree.objects, fidelity=tree.skipped,
         created_unix_ns=_created_ns(args.created_ns),
-        chunker=_chunker(args.chunking, args.chunk_avg))
+        chunker=_chunker(args.chunking, args.chunk_avg),
+        codec=CODEC_ZSTD if args.codec == 'zstd' else CODEC_STORE,
+        level=args.level)
     report = verify_archive(data)
     Path(args.archive).write_bytes(data)
     latest, previous = report.snapshots[-1], report.snapshots[-2]
@@ -346,6 +359,14 @@ def build_parser() -> argparse.ArgumentParser:
                             "two writers on different platforms can be compared on")
         p.add_argument("--chunking", choices=("none", "cdc"), default="cdc",
                        help="cdc = anla-cdc-1 content-defined chunking (default)")
+        p.add_argument("--codec", choices=("store", "zstd"), default="zstd",
+                       help="zstd (default) compresses each chunk and keeps "
+                            "whichever came out smaller, so incompressible chunks "
+                            "are stored. Pass store for output two writers on "
+                            "different libzstd builds can compare byte for byte")
+        p.add_argument("--level", type=int, default=DEFAULT_LEVEL, metavar="N",
+                       help=f"zstd level 1-22 (default {DEFAULT_LEVEL}: an archive "
+                            f"is written once and read for years)")
         p.add_argument("--chunk-avg", type=int, metavar="BYTES",
                        help="average chunk size, a power of two. The default is "
                             "256 KiB with a 64 KiB floor, which makes any file "

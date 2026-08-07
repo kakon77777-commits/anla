@@ -7,6 +7,69 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
+## 2026-08-07 — Zstandard, and what a compressor costs the freeze rule
+
+### Added
+
+- **[`python/anla1/codecs.py`](python/anla1/codecs.py)** — the codec registry, with
+  `zstd` implemented. 12 tests. `anla1 pack --codec zstd` is the default;
+  `--level N` and `--codec store` are there when you want them.
+
+  Measured on this project's own papers: **163,200 → 92,360 bytes**. On eight
+  successive commits of `python/`: **369 KiB against 783 KiB for a single `tar.gz`
+  of all eight** — it was 1.01× that `tar.gz` with the codec off, so deduplication
+  is what wins and compression compounds it.
+
+- **`tools/check_zstd.py`**, run by CI. `test_codecs_1_0.py` skips itself without
+  the library, and a skipped module looks exactly like a passing one — the same hole
+  `check_blake3.py` closes. It also re-asserts that a zstd frame declares its
+  content size, because that header is what the bomb check reads.
+
+### Fixed
+
+- **Bomb protection is a header read, not an output limit.** `zstandard`'s
+  `max_output_size` is *ignored* for a frame that declares its content size — which
+  is every frame this writer produces — so the obvious protection does nothing
+  against the case that matters. The declared size is read out of the frame header
+  and compared with the descriptor's `raw_size` before anything is allocated, and a
+  frame that declares no size is refused rather than decoded blind.
+
+- **A chunk that grew is stored.** Random bytes come back from zstd ten bytes
+  longer. The writer keeps whichever is smaller, records which it chose, and an
+  archive where nothing compressed does not require `anla:codec:zstd:1` of its
+  readers.
+
+- **Stored bytes and raw bytes are now hashed separately.** `payload_hash` catches
+  damage to what is on disk; `chunk_id` catches a codec that decoded to something
+  else entirely. The second was unreachable while `store` was the only codec, and
+  it has a test that forges a *valid* zstd frame of the correct length with a
+  correct payload hash and a correctly rebuilt manifest — every check passes but
+  that one.
+
+### Changed
+
+- **A codec reaches `preservation_root`, and the specification now says so.** §8 had
+  no position on this and the first draft of the test asserted the opposite. Chunk
+  ids are hashes of the *raw* chunk, so `objects_root` and every chunk id are
+  invariant under compression — but descriptors carry `codec_id`, `payload_length`,
+  `payload_hash` and offsets, so `chunks_root` moves and `preservation_root` moves
+  with it.
+
+  So `preservation_root` is the identity of the snapshot *as stored*, `objects_root`
+  is the identity of the tree, and the freeze rule's **byte-identity clause is a
+  claim about `store`**. For a compressed archive what two implementations must
+  agree on is `objects_root` and the chunk-id set. `packing_plan.codec` records the
+  level and the libzstd version that produced the bytes, because a plan that omits
+  them cannot explain why two writers disagreed.
+
+- The benchmark's first row used to be the argument for Zstandard. It now answers
+  itself — 1.2× a `tar.gz`, down from 3.4× — and **still loses**, for a structural
+  reason: `tar.gz` compresses across file boundaries and ANLA compresses each chunk
+  alone so that any chunk can be read without the others. The store-only line is
+  kept beside the compressed one in every row where it used to lose.
+
+---
+
 ## 2026-08-07 — Milestone 2: an archive that records what it does not contain
 
 ### Added

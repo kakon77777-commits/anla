@@ -91,6 +91,7 @@ KNOWN_CAPABILITIES = frozenset({
     "anla:hash:blake3-256:1",
     "anla:hash:sha256:1",
     "anla:codec:store:1",
+    "anla:codec:zstd:1",
     "anla:chunking:anla-cdc-1",
     # A reader that does not know this kind refuses the manifest outright, so it is
     # required rather than optional — unlike a metadata namespace, which an
