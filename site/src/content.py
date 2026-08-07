@@ -40,7 +40,7 @@ STRINGS: dict[str, dict[str, str]] = {
                       "JSON file this page is generated from, so the page cannot say "
                       "anything the harness did not measure — including the rows where "
                       "ANLA loses.",
-        "bench_warning_h": "ANLA 1.0 does not compress",
+        "bench_warning_h": "ANLA 1.0 does not compress.",
         "bench_warning": "Its only codec is store. Every ratio below is deduplication. "
                          "One snapshot of unique files is therefore larger than the "
                          "tree it holds, and a general-purpose compressor beats it "
@@ -404,7 +404,7 @@ STRINGS: dict[str, dict[str, str]] = {
                       "替代方案對比。每一個數字都由 bench/run_bench.py 產生並寫進一份 JSON，"
                       "這個頁面是從那份 JSON 生成的——所以頁面說不出任何量測程式沒有量到的東西，"
                       "包含 ANLA 輸掉的那幾列。",
-        "bench_warning_h": "ANLA 1.0 不做壓縮",
+        "bench_warning_h": "ANLA 1.0 不做壓縮。",
         "bench_warning": "它唯一的 codec 是 store。以下每一個比值都是「去重」。因此單一 snapshot "
                          "若檔案彼此不重複，封裝會比原樹更大，而一般用途的壓縮器會贏得很輕鬆。"
                          "那個情境放在第一列而不是被省略掉——一個你不可能輸的基準，不是基準。",

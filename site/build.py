@@ -630,7 +630,7 @@ def page_bench(lang: str) -> str:
     <h1>{esc(s['bench_h1'])}</h1>
     <p class="section-desc">{esc(s['bench_desc'])}</p></div>
 
-  <div class="callout"><strong>▸ {esc(s['bench_warning_h'])}.</strong>
+  <div class="callout"><strong>▸ {esc(s['bench_warning_h'])}</strong>
     {esc(s['bench_warning'])}</div>
 
   <div class="runbar">{meta}</div>
