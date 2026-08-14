@@ -51,6 +51,18 @@ of the compressor, so two writers on different libzstd builds may legitimately
 differ. What must match under any codec is `objects_root` and the chunk-id set, and
 that is what the comparison checks there instead.
 
+**An archive names itself in two places, and they MUST agree.** `archive_id` in
+every snapshot's manifest MUST equal `archive_uuid` in the bootstrap header. Nothing
+checked this until the two writers were compared: a Rust append used an unset option
+for the manifest while inheriting the header's real value, and **both readers
+verified the result**. Two implementations agreeing that a broken archive is fine is
+exactly what a *byte* comparison catches and a *verdict* comparison cannot — which
+is the argument for having both, stated as an incident rather than as a principle.
+
+Same shape as the hash algorithm being named in a record header and in the manifest
+(§7): a field stated twice needs a rule saying they match, or it is two fields that
+happen to be spelled the same.
+
 **So what is still holding the word DRAFT in the title?** Not the freeze rule.
 Three things, and they are worth naming rather than leaving as a feeling:
 
@@ -59,9 +71,10 @@ Three things, and they are worth naming rather than leaving as a feeling:
    caught. The exercise finds every place the document was ambiguous enough that two
    writings of it diverged — five, so far — and nothing at all about the places it
    is confidently, consistently wrong.
-2. **The Rust writer is narrower than the Python one**: one snapshot, regular files
-   and directories, no metadata, no links, no append. Byte-identity is demonstrated
-   over that surface and no wider.
+2. **The Rust writer is narrower than the Python one**: no `--skip-unsupported` and
+   so no fidelity report. It now covers files, directories, symbolic links, recorded
+   metadata and appending, and byte-identity is demonstrated over all of those —
+   including a two-snapshot archive — but not over the parts still missing.
 3. **§10 still lists open questions**, including the object name model (whitepaper
    Q4), which will change `object_id` when it is answered.
 

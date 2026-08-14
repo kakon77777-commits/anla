@@ -536,3 +536,25 @@ def test_a_chunk_size_below_the_file_is_what_makes_deduplication_work():
                                              max_size=16384)))
     assert default_cost > len(body), "the default should store the whole file again"
     assert tuned_cost < default_cost / 2, (tuned_cost, default_cost)
+
+
+def test_the_header_and_the_manifest_must_agree_about_archive_id():
+    """An archive names itself in two places, so the two must agree.
+
+    Nothing checked this until the Rust writer got it wrong: an append used its
+    unset `--uuid` for the manifest while inheriting the header's real one, and
+    **both readers verified the result happily**. Two implementations agreeing that
+    a broken archive is fine is exactly the case a byte comparison catches and a
+    verdict comparison cannot.
+
+    Same shape as the hash algorithm being named in a record header and in the
+    manifest: a field stated twice needs a rule saying they match, or it is two
+    fields that happen to be spelled the same.
+    """
+    data = build_two()
+    latest = latest_snapshot(data)
+    manifest = dict(latest.manifest)
+    manifest["archive_id"] = bytes(16)          # not the header's
+    forged = replace_latest(data, reroot(manifest, latest.hash_algorithm))
+    with pytest.raises(IntegrityFailure, match="disagree about archive_id"):
+        list_snapshots(forged)

@@ -16,17 +16,21 @@
 //!   disagreed about any of them would produce a valid archive with different bytes.
 //! * **A chunk that grew is stored**, and the archive then does not require
 //!   `anla:codec:zstd:1` of its readers.
+//! * **`posix.mode` is recorded where it means something and nowhere else.** A
+//!   synthetic mode on Windows would store a fact that was never true, which is why
+//!   the same tree legitimately packs to different bytes on different platforms.
+//! * **An append resumes at the end of the newest complete snapshot**, not at the
+//!   end of the file, so a torn write is reclaimed and the next record stays
+//!   eight-byte aligned (§4.4). Getting that wrong makes the new footer *invisible*
+//!   to the backwards scan.
 //!
-//! What it does not do, stated rather than discovered: no symbolic links, no
-//! recorded metadata, no appending to an existing archive. It writes one snapshot of
-//! regular files and directories. That is exactly the surface the byte-identity
-//! comparison needs, and everything beyond it would be surface the comparison does
-//! not yet cover.
+//! What it still does not do, stated rather than discovered: no `--skip-unsupported`
+//! and so no fidelity report — an entry it cannot represent stops the pack.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::archive::{check_object_path, merkle_root};
+use crate::archive::{check_object_path, list_snapshots, merkle_root};
 use crate::cbor::{encode, Value};
 use crate::container::{crc32, hash_bytes, ALIGNMENT, ARCHIVE_MAGIC, HEADER_SIZE,
                        RECORD_FRAME_SIZE, RECORD_MAGIC};
@@ -67,20 +71,19 @@ impl CdcProfile {
         self.avg_size.trailing_zeros()
     }
 
-    pub fn as_manifest_member(&self) -> Value {
-        Value::Map(vec![
+    pub fn as_manifest_member(&self) -> Vec<(Value, Value)> {
+        vec![
             (Value::Text("algorithm".into()), Value::Text("fastcdc".into())),
             (Value::Text("version".into()), Value::Text("anla-cdc-1".into())),
             (Value::Text("gear_table_id".into()), Value::Text("anla-gear-1".into())),
-            (Value::Text("gear_table_sha256".into()),
-             Value::Text(gear_table_digest())),
+            (Value::Text("gear_table_sha256".into()), Value::Text(gear_table_digest())),
             (Value::Text("min".into()), Value::Uint(self.min_size as u64)),
             (Value::Text("avg".into()), Value::Uint(self.avg_size as u64)),
             (Value::Text("max".into()), Value::Uint(self.max_size as u64)),
             (Value::Text("normalization".into()), Value::Uint(u64::from(self.normalization))),
             (Value::Text("fingerprint".into()), Value::Text("gear32".into())),
             (Value::Text("boundary".into()), Value::Text("top-bits-zero".into())),
-        ])
+        ]
     }
 }
 
@@ -201,7 +204,7 @@ fn build_record(kind: &str, header: &Value, payload: &[u8], sequence: u64) -> Ve
 }
 
 // ---------------------------------------------------------------------------
-// the pack
+// scanning
 // ---------------------------------------------------------------------------
 
 pub struct PackOptions {
@@ -211,68 +214,129 @@ pub struct PackOptions {
     pub codec: u64,
     pub level: i32,
     pub hash_algorithm: String,
+    pub preserve_metadata: bool,
 }
 
-struct SourceFile {
+struct Entry {
     path: String,
-    disk: PathBuf,
+    kind: Kind_,
+    metadata: Vec<(Value, Value)>,
 }
 
-/// Walk a directory into the objects a snapshot describes.
+enum Kind_ {
+    File(PathBuf),
+    Directory,
+    Link(Vec<u8>),
+}
+
+/// Namespaced metadata for one object.
 ///
-/// Symbolic links and special files are refused rather than skipped: an archive
-/// that silently omitted one would still be claiming `Extract(Pack(F, P)) = F`, and
-/// this writer has no fidelity report to record the omission in.
-fn scan(root: &Path, exclude: &[String]) -> Result<(Vec<SourceFile>, Vec<String>)> {
-    let mut files = Vec::new();
-    let mut directories = Vec::new();
+/// `common` holds what every platform agrees about. `posix` holds permission bits
+/// and is recorded only where they mean something — a synthetic mode on Windows
+/// would store a fact that was never true, and a reader cannot tell an invented
+/// value from an observed one.
+fn metadata_for(meta: &std::fs::Metadata, preserve: bool) -> Vec<(Value, Value)> {
+    if !preserve {
+        return Vec::new();
+    }
+    let mut namespaces = Vec::new();
+    namespaces.push((
+        Value::Text("common".into()),
+        Value::Map(vec![(Value::Text("mtime_ns".into()), Value::Uint(mtime_ns(meta)))]),
+    ));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        namespaces.push((
+            Value::Text("posix".into()),
+            Value::Map(vec![(
+                Value::Text("mode".into()),
+                Value::Uint(u64::from(meta.mode() & 0o7777)),
+            )]),
+        ));
+    }
+    namespaces
+}
+
+fn mtime_ns(meta: &std::fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+}
+
+fn scan(root: &Path, exclude: &[String], preserve_metadata: bool) -> Result<Vec<Entry>> {
+    let mut entries = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(current) = stack.pop() {
-        let entries = std::fs::read_dir(&current)
+        let listing = std::fs::read_dir(&current)
             .map_err(|e| Error::new(Kind::InvalidInput, format!("{}: {e}", current.display())))?;
-        for entry in entries {
-            let entry = entry
-                .map_err(|e| Error::new(Kind::InvalidInput, e.to_string()))?;
-            let disk = entry.path();
+        for item in listing {
+            let item = item.map_err(|e| Error::new(Kind::InvalidInput, e.to_string()))?;
+            let disk = item.path();
             let relative = disk
                 .strip_prefix(root)
                 .map_err(|_| Error::new(Kind::InvalidInput, "path escaped the root"))?;
-            let archive_path = relative
+            let path = relative
                 .components()
                 .map(|c| c.as_os_str().to_string_lossy().into_owned())
                 .collect::<Vec<_>>()
                 .join("/");
-            check_object_path(&archive_path)?;
-            if exclude.iter().any(|prefix| archive_path == *prefix
-                || archive_path.starts_with(&format!("{prefix}/"))) {
+            check_object_path(&path)?;
+            if exclude
+                .iter()
+                .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")))
+            {
                 continue;
             }
             let meta = std::fs::symlink_metadata(&disk)
                 .map_err(|e| Error::new(Kind::InvalidInput, e.to_string()))?;
+
             if meta.file_type().is_symlink() {
-                return Err(Error::new(
-                    Kind::UnsafeObject,
-                    format!("this writer cannot represent a symbolic link: {archive_path}"),
-                ));
-            }
-            if meta.is_dir() {
-                directories.push(archive_path);
+                // Verbatim. A link target is not a name in the archive's namespace,
+                // it is an opaque string the target filesystem interprets.
+                let target = std::fs::read_link(&disk)
+                    .map_err(|e| Error::new(Kind::InvalidInput, e.to_string()))?;
+                let bytes = target.to_string_lossy().replace('\\', "/").into_bytes();
+                entries.push(Entry {
+                    path,
+                    kind: Kind_::Link(bytes),
+                    metadata: if preserve_metadata {
+                        vec![(
+                            Value::Text("common".into()),
+                            Value::Map(vec![(
+                                Value::Text("mtime_ns".into()),
+                                Value::Uint(mtime_ns(&meta)),
+                            )]),
+                        )]
+                    } else {
+                        Vec::new()
+                    },
+                });
+            } else if meta.is_dir() {
+                // Directories carry no metadata, matching the Python writer. If that
+                // changes it must change in both, and the byte comparison will say so.
+                entries.push(Entry { path, kind: Kind_::Directory, metadata: Vec::new() });
                 stack.push(disk);
             } else if meta.is_file() {
-                files.push(SourceFile { path: archive_path, disk });
+                entries.push(Entry {
+                    path,
+                    kind: Kind_::File(disk),
+                    metadata: metadata_for(&meta, preserve_metadata),
+                });
             } else {
                 return Err(Error::new(
                     Kind::UnsafeObject,
-                    format!("this writer cannot represent this entry: {archive_path}"),
+                    format!("this writer cannot represent this entry: {path}"),
                 ));
             }
         }
     }
     // By UTF-8 path bytes. Not by locale collation, which is the defect that made the
     // original browser writer's byte layout depend on the machine that ran it.
-    files.sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));
-    directories.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
-    Ok((files, directories))
+    entries.sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));
+    Ok(entries)
 }
 
 fn compress(raw: &[u8], codec: u64, level: i32) -> Result<(u64, Vec<u8>)> {
@@ -281,8 +345,6 @@ fn compress(raw: &[u8], codec: u64, level: i32) -> Result<(u64, Vec<u8>)> {
     }
     let packed = zstd::bulk::compress(raw, level)
         .map_err(|e| Error::new(Kind::InvalidInput, format!("zstd: {e}")))?;
-    // A chunk that grew is stored. Random bytes come back longer, and paying a
-    // decompression step for a larger file is a bad trade in both directions.
     if packed.len() >= raw.len() {
         Ok((CODEC_STORE, raw.to_vec()))
     } else {
@@ -290,87 +352,171 @@ fn compress(raw: &[u8], codec: u64, level: i32) -> Result<(u64, Vec<u8>)> {
     }
 }
 
-pub fn pack(root: &Path, exclude: &[String], options: &PackOptions) -> Result<Vec<u8>> {
-    let (files, directories) = scan(root, exclude)?;
+// ---------------------------------------------------------------------------
+// the pack
+// ---------------------------------------------------------------------------
+
+/// Write one snapshot. `existing` is empty to create, or a whole archive to append.
+pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOptions)
+    -> Result<Vec<u8>>
+{
+    let entries = scan(root, exclude, options.preserve_metadata)?;
     let algorithm = options.hash_algorithm.as_str();
     let hash = |data: &[u8]| -> Result<Vec<u8>> { Ok(hash_bytes(data, algorithm)?.to_vec()) };
 
-    let mut out = build_header(&options.archive_id, 0);
-    let mut sequence = 1u64;
-    let mut chunk_map: BTreeMap<Vec<u8>, Value> = BTreeMap::new();
-    let mut objects: Vec<(Vec<u8>, Value)> = Vec::new();
-    let mut used_zstd = false;
-
-    for path in &directories {
-        let identity = Value::Map(vec![
-            (Value::Text("kind".into()), Value::Text("directory".into())),
-            (Value::Text("path".into()), Value::Text(path.clone())),
-        ]);
-        objects.push(object_entry(identity, algorithm)?);
-    }
-
-    for file in &files {
-        let payload = std::fs::read(&file.disk)
-            .map_err(|e| Error::new(Kind::InvalidInput, format!("{}: {e}", file.disk.display())))?;
-        let pieces: Vec<(usize, usize)> = match &options.profile {
-            Some(profile) => cut_points(&payload, profile),
-            None if payload.is_empty() => Vec::new(),
-            None => vec![(0, payload.len())],
+    // Appending: read the chain, inherit the identity, resume at the newest complete
+    // footer rather than at the end of the file.
+    let mut known: BTreeMap<Vec<u8>, Value> = BTreeMap::new();
+    // On an append the archive's identity comes from the archive, never from an
+    // option the caller did not pass. Using the option's default wrote a manifest
+    // whose `archive_id` was sixteen zero bytes while the header kept the real one —
+    // and *both readers verified it*, which is the more interesting half of that bug.
+    let archive_id = if existing.is_empty() {
+        options.archive_id
+    } else {
+        crate::container::parse_header(existing)?.archive_uuid
+    };
+    let (mut out, mut sequence, snapshot_sequence, parent, previous_footer) =
+        if existing.is_empty() {
+            (build_header(&archive_id, 0), 1u64, 1u64, None, None)
+        } else {
+            let snapshots = list_snapshots(existing)?;
+            let latest = snapshots.last().expect("a chain has at least one snapshot");
+            for snapshot in &snapshots {
+                for (id, descriptor) in snapshot.chunks()? {
+                    let key = id
+                        .as_bytes()
+                        .map_err(|e| Error::new(Kind::ManifestInvalid, e.to_string()))?
+                        .to_vec();
+                    known.entry(key).or_insert_with(|| descriptor.clone());
+                }
+            }
+            let resume = latest.footer.record.end();
+            if !resume.is_multiple_of(ALIGNMENT) {
+                return Err(Error::new(
+                    Kind::ManifestInvalid,
+                    "the newest snapshot does not end on an alignment boundary",
+                ));
+            }
+            (
+                existing[..resume].to_vec(),
+                latest.footer.record.sequence + 1,
+                latest.sequence + 1,
+                Some(latest.snapshot_id.clone()),
+                Some(latest.footer.record.offset as u64),
+            )
         };
 
-        let mut ids = Vec::new();
-        for (start, end) in pieces {
-            let raw = &payload[start..end];
-            // The chunk id is the hash of the *raw* chunk, before any codec touches
-            // it, which is what keeps compression out of objects_root.
-            let chunk_id = hash(raw)?;
-            ids.push(Value::Bytes(chunk_id.clone()));
-            if chunk_map.contains_key(&chunk_id) {
-                continue;
-            }
-            let (codec, stored) = compress(raw, options.codec, options.level)?;
-            if codec == CODEC_ZSTD {
-                used_zstd = true;
-            }
-            let payload_hash = hash(&stored)?;
-            let offset = out.len();
-            let header = Value::Map(vec![
-                (Value::Text("chunk_id".into()), Value::Bytes(chunk_id.clone())),
-                (Value::Text("codec_id".into()), Value::Uint(codec)),
-                (Value::Text("raw_size".into()), Value::Uint(raw.len() as u64)),
-                (Value::Text("payload_hash".into()), Value::Bytes(payload_hash.clone())),
-            ]);
-            let record = build_record("CHNK", &header, &stored, sequence);
-            let header_length = encode(&header).len();
-            chunk_map.insert(
-                chunk_id,
-                Value::Map(vec![
-                    (Value::Text("record_offset".into()), Value::Uint(offset as u64)),
-                    (Value::Text("record_length".into()), Value::Uint(record.len() as u64)),
-                    (Value::Text("payload_offset".into()),
-                     Value::Uint((offset + RECORD_FRAME_SIZE + header_length) as u64)),
-                    (Value::Text("payload_length".into()), Value::Uint(stored.len() as u64)),
-                    (Value::Text("raw_size".into()), Value::Uint(raw.len() as u64)),
-                    (Value::Text("codec_id".into()), Value::Uint(codec)),
-                    (Value::Text("payload_hash".into()), Value::Bytes(payload_hash)),
-                ]),
-            );
-            out.extend_from_slice(&record);
-            sequence += 1;
-        }
+    let mut fresh: BTreeMap<Vec<u8>, Value> = BTreeMap::new();
+    let mut referenced: BTreeMap<Vec<u8>, Value> = BTreeMap::new();
+    let mut objects: Vec<(Vec<u8>, Value)> = Vec::new();
+    let mut used_zstd = false;
+    let mut has_link = false;
+    let mut namespaces: Vec<String> = Vec::new();
 
-        let identity = Value::Map(vec![
-            (Value::Text("kind".into()), Value::Text("regular-file".into())),
-            (Value::Text("path".into()), Value::Text(file.path.clone())),
-            (Value::Text("size".into()), Value::Uint(payload.len() as u64)),
-            (Value::Text("content_hash".into()), Value::Bytes(hash(&payload)?)),
-            (Value::Text("chunks".into()), Value::Array(ids)),
-        ]);
-        objects.push(object_entry(identity, algorithm)?);
+    for entry in &entries {
+        for (name, _) in &entry.metadata {
+            if let Value::Text(text) = name {
+                if !namespaces.contains(text) {
+                    namespaces.push(text.clone());
+                }
+            }
+        }
+        let identity_members: Vec<(Value, Value)> = match &entry.kind {
+            Kind_::Directory => vec![
+                (Value::Text("kind".into()), Value::Text("directory".into())),
+                (Value::Text("path".into()), Value::Text(entry.path.clone())),
+            ],
+            Kind_::Link(target) => {
+                has_link = true;
+                vec![
+                    (Value::Text("kind".into()), Value::Text("symbolic-link".into())),
+                    (Value::Text("path".into()), Value::Text(entry.path.clone())),
+                    (Value::Text("target".into()), Value::Bytes(target.clone())),
+                ]
+            }
+            Kind_::File(disk) => {
+                let payload = std::fs::read(disk).map_err(|e| {
+                    Error::new(Kind::InvalidInput, format!("{}: {e}", disk.display()))
+                })?;
+                let pieces: Vec<(usize, usize)> = match &options.profile {
+                    Some(profile) => cut_points(&payload, profile),
+                    None if payload.is_empty() => Vec::new(),
+                    None => vec![(0, payload.len())],
+                };
+                let mut ids = Vec::new();
+                for (start, end) in pieces {
+                    let raw = &payload[start..end];
+                    // The chunk id is the hash of the *raw* chunk, before any codec
+                    // touches it, which is what keeps compression out of objects_root.
+                    let chunk_id = hash(raw)?;
+                    ids.push(Value::Bytes(chunk_id.clone()));
+                    if known.contains_key(&chunk_id) || fresh.contains_key(&chunk_id) {
+                        continue;
+                    }
+                    let (codec, stored) = compress(raw, options.codec, options.level)?;
+                    if codec == CODEC_ZSTD {
+                        used_zstd = true;
+                    }
+                    let payload_hash = hash(&stored)?;
+                    let offset = out.len();
+                    let header = Value::Map(vec![
+                        (Value::Text("chunk_id".into()), Value::Bytes(chunk_id.clone())),
+                        (Value::Text("codec_id".into()), Value::Uint(codec)),
+                        (Value::Text("raw_size".into()), Value::Uint(raw.len() as u64)),
+                        (Value::Text("payload_hash".into()), Value::Bytes(payload_hash.clone())),
+                    ]);
+                    let record = build_record("CHNK", &header, &stored, sequence);
+                    let header_length = encode(&header).len();
+                    fresh.insert(
+                        chunk_id,
+                        Value::Map(vec![
+                            (Value::Text("record_offset".into()), Value::Uint(offset as u64)),
+                            (Value::Text("record_length".into()), Value::Uint(record.len() as u64)),
+                            (Value::Text("payload_offset".into()),
+                             Value::Uint((offset + RECORD_FRAME_SIZE + header_length) as u64)),
+                            (Value::Text("payload_length".into()), Value::Uint(stored.len() as u64)),
+                            (Value::Text("raw_size".into()), Value::Uint(raw.len() as u64)),
+                            (Value::Text("codec_id".into()), Value::Uint(codec)),
+                            (Value::Text("payload_hash".into()), Value::Bytes(payload_hash)),
+                        ]),
+                    );
+                    out.extend_from_slice(&record);
+                    sequence += 1;
+                }
+                // A complete manifest: descriptors for chunks written now *and* for
+                // chunks an earlier snapshot wrote, so reading this one needs no other.
+                for id in &ids {
+                    if let Value::Bytes(key) = id {
+                        if referenced.contains_key(key) {
+                            continue;
+                        }
+                        let descriptor = fresh
+                            .get(key)
+                            .or_else(|| known.get(key))
+                            .expect("a referenced chunk is fresh or known");
+                        referenced.insert(key.clone(), descriptor.clone());
+                    }
+                }
+                vec![
+                    (Value::Text("kind".into()), Value::Text("regular-file".into())),
+                    (Value::Text("path".into()), Value::Text(entry.path.clone())),
+                    (Value::Text("size".into()), Value::Uint(payload.len() as u64)),
+                    (Value::Text("content_hash".into()), Value::Bytes(hash(&payload)?)),
+                    (Value::Text("chunks".into()), Value::Array(ids)),
+                ]
+            }
+        };
+
+        let mut identity = identity_members;
+        if !entry.metadata.is_empty() {
+            identity.push((Value::Text("metadata".into()), Value::Map(entry.metadata.clone())));
+        }
+        objects.push(object_entry(Value::Map(identity), algorithm)?);
     }
 
-    // Objects sort by object_id — the order is part of the definition of
-    // objects_root, not the caller's choice.
+    // Objects sort by object_id — part of the definition of objects_root, not the
+    // caller's choice.
     objects.sort_by(|a, b| a.0.cmp(&b.0));
     let object_values: Vec<Value> = objects.iter().map(|(_, entry)| entry.clone()).collect();
 
@@ -378,7 +524,7 @@ pub fn pack(root: &Path, exclude: &[String], options: &PackOptions) -> Result<Ve
         &object_values.iter().map(encode).collect::<Vec<_>>(),
         algorithm,
     )?;
-    let chunk_leaves: Vec<Vec<u8>> = chunk_map
+    let chunk_leaves: Vec<Vec<u8>> = referenced
         .iter()
         .map(|(id, descriptor)| {
             encode(&Value::Array(vec![Value::Bytes(id.clone()), descriptor.clone()]))
@@ -400,25 +546,36 @@ pub fn pack(root: &Path, exclude: &[String], options: &PackOptions) -> Result<Ve
         format!("anla:hash:{algorithm}:1"),
         "anla:codec:store:1".to_string(),
     ];
+    if has_link {
+        required.push("anla:object:symlink:1".to_string());
+    }
     if used_zstd {
         required.push("anla:codec:zstd:1".to_string());
     }
     required.sort();
+    // Metadata namespaces are *optional*: metadata is inside `object_id`, so a
+    // reader that has never heard of one verifies identically and only loses the
+    // ability to apply it.
+    namespaces.sort();
+    let optional: Vec<Value> = namespaces
+        .iter()
+        .map(|name| Value::Text(format!("anla:metadata:{name}:1")))
+        .collect();
 
     let mut manifest_entries = vec![
         (Value::Text("anla_version".into()),
          Value::Array(vec![Value::Uint(1), Value::Uint(0)])),
-        (Value::Text("archive_id".into()), Value::Bytes(options.archive_id.to_vec())),
-        (Value::Text("snapshot_sequence".into()), Value::Uint(1)),
+        (Value::Text("archive_id".into()), Value::Bytes(archive_id.to_vec())),
+        (Value::Text("snapshot_sequence".into()), Value::Uint(snapshot_sequence)),
         (Value::Text("created_unix_ns".into()), Value::Uint(options.created_unix_ns)),
         (Value::Text("hash_algorithms".into()),
          Value::Array(vec![Value::Text(algorithm.to_string())])),
         (Value::Text("required_capabilities".into()),
          Value::Array(required.into_iter().map(Value::Text).collect())),
-        (Value::Text("optional_capabilities".into()), Value::Array(vec![])),
+        (Value::Text("optional_capabilities".into()), Value::Array(optional)),
         (Value::Text("objects".into()), Value::Array(object_values)),
         (Value::Text("chunks".into()),
-         Value::Map(chunk_map.iter().map(|(k, v)| (Value::Bytes(k.clone()), v.clone())).collect())),
+         Value::Map(referenced.iter().map(|(k, v)| (Value::Bytes(k.clone()), v.clone())).collect())),
         (Value::Text("metadata".into()), Value::Array(vec![])),
         (Value::Text("auxiliary".into()), Value::Array(vec![])),
         (Value::Text("objects_root".into()), Value::Bytes(objects_root)),
@@ -427,12 +584,12 @@ pub fn pack(root: &Path, exclude: &[String], options: &PackOptions) -> Result<Ve
         (Value::Text("preservation_root".into()), Value::Bytes(preservation_root.clone())),
         (Value::Text("auxiliary_root".into()), Value::Bytes(auxiliary_root.clone())),
     ];
-
+    if let Some(parent_id) = &parent {
+        manifest_entries.push((Value::Text("parent_snapshot".into()),
+                               Value::Bytes(parent_id.clone())));
+    }
     if let Some(profile) = &options.profile {
-        let mut plan = match profile.as_manifest_member() {
-            Value::Map(entries) => entries,
-            _ => unreachable!("as_manifest_member returns a map"),
-        };
+        let mut plan = profile.as_manifest_member();
         plan.push((Value::Text("codec".into()), codec_plan(options)?));
         let plan = Value::Map(plan);
         manifest_entries.push((Value::Text("packing_plan_digest".into()),
@@ -455,13 +612,18 @@ pub fn pack(root: &Path, exclude: &[String], options: &PackOptions) -> Result<Ve
     out.extend_from_slice(&manifest_record);
     sequence += 1;
 
-    let footer_payload = encode(&Value::Map(vec![
-        (Value::Text("snapshot_sequence".into()), Value::Uint(1)),
+    let mut footer_members = vec![
+        (Value::Text("snapshot_sequence".into()), Value::Uint(snapshot_sequence)),
         (Value::Text("manifest_offset".into()), Value::Uint(manifest_offset as u64)),
         (Value::Text("manifest_length".into()), Value::Uint(manifest_record.len() as u64)),
         (Value::Text("preservation_root".into()), Value::Bytes(preservation_root)),
         (Value::Text("auxiliary_root".into()), Value::Bytes(auxiliary_root)),
-    ]));
+    ];
+    if let Some(offset) = previous_footer {
+        footer_members.push((Value::Text("previous_footer_offset".into()),
+                             Value::Uint(offset)));
+    }
+    let footer_payload = encode(&Value::Map(footer_members));
     let footer_offset = out.len();
     out.extend_from_slice(&build_record(
         "FOOT",
@@ -474,8 +636,7 @@ pub fn pack(root: &Path, exclude: &[String], options: &PackOptions) -> Result<Ve
     ));
 
     // The hint is written last and believed by nobody.
-    let header = build_header(&options.archive_id, footer_offset as u64);
-    out[..HEADER_SIZE].copy_from_slice(&header);
+    out[..HEADER_SIZE].copy_from_slice(&build_header(&archive_id, footer_offset as u64));
     Ok(out)
 }
 

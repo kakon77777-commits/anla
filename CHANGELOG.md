@@ -11,6 +11,26 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ### Added
 
+- **The Rust writer now covers metadata, symbolic links and appending**, so
+  byte-identity is demonstrated over the surface the Python writer actually has
+  rather than a corner of it. Five comparisons, all byte-identical: `store` at two
+  chunk sizes, `store` with recorded metadata, `zstd`, and **a two-snapshot archive
+  built by create-then-append on both sides**.
+
+### Fixed
+
+- **An archive names itself in two places and nothing checked they agree.** The Rust
+  append used its unset `--uuid` for the manifest's `archive_id` while inheriting the
+  header's real one — and **both readers verified the result happily**. Both now
+  refuse it, and `SPEC-1.0-DRAFT.md` states the rule.
+
+  Worth the space because of what found it: two implementations agreeing that a
+  broken archive is fine is exactly what a **byte** comparison catches and a
+  **verdict** comparison cannot. The fuzzer had been running clean over this for
+  sixteen thousand mutants.
+
+### Added
+
 - **A Rust writer**, so the freeze rule's byte-identity clause is satisfied for the
   first time. The same directory packed by both writers, same fixed `(uuid,
   created_ns)`, no recorded metadata: **identical bytes** — with fixed chunking and

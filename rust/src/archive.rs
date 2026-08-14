@@ -303,6 +303,20 @@ pub fn read_snapshot(data: &[u8], footer: Footer) -> Result<Snapshot> {
             "footer and manifest disagree about preservation_root",
         ));
     }
+    // The header and the manifest both name the archive, so the two must agree.
+    // Neither reader checked it until a writer produced an archive where they
+    // disagreed and both said `ok`.
+    let header = container::parse_header(data)?;
+    let declared_id = manifest
+        .need("archive_id")
+        .and_then(|v| v.as_bytes())
+        .map_err(|e| invalid(e.to_string()))?;
+    if declared_id != header.archive_uuid.as_slice() {
+        return Err(Error::new(
+            Kind::IntegrityFailure,
+            "the manifest and the header disagree about archive_id",
+        ));
+    }
     let sequence = manifest
         .need("snapshot_sequence")
         .and_then(|v| v.as_u64())

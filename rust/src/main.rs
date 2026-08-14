@@ -90,7 +90,9 @@ fn read_input(path: &str) -> std::result::Result<Vec<u8>, Error> {
     std::fs::read(path).map_err(|e| Error::new(Kind::InvalidInput, format!("{path}: {e}")))
 }
 
-fn pack_command(path: &str, args: &[String]) -> std::result::Result<String, Error> {
+fn pack_command(command: &str, path: &str, args: &[String])
+    -> std::result::Result<String, Error>
+{
         // The other half of the freeze rule: same tree in, same bytes out, from
         // a program that shares no code with the Python writer.
         let mut options = writer::PackOptions {
@@ -100,6 +102,7 @@ fn pack_command(path: &str, args: &[String]) -> std::result::Result<String, Erro
             codec: 1,
             level: 10,
             hash_algorithm: "blake3-256".to_string(),
+            preserve_metadata: true,
         };
         let mut output = String::new();
         let mut exclude: Vec<String> = Vec::new();
@@ -147,6 +150,7 @@ fn pack_command(path: &str, args: &[String]) -> std::result::Result<String, Erro
                         .map_err(|_| Error::new(Kind::InvalidInput, "--level"))?
                 }
                 "--exclude" => exclude.push(next_arg(&mut rest, flag)?),
+                "--no-metadata" => options.preserve_metadata = false,
                 "--json" => {}
                 other => {
                     let _ = value;
@@ -157,15 +161,29 @@ fn pack_command(path: &str, args: &[String]) -> std::result::Result<String, Erro
                 }
             }
         }
-        if output.is_empty() {
-            return Err(Error::new(Kind::InvalidInput, "-o is required"));
-        }
-        let bytes = writer::pack(std::path::Path::new(path), &exclude, &options)?;
-        std::fs::write(&output, &bytes)
-            .map_err(|e| Error::new(Kind::InvalidInput, format!("{output}: {e}")))?;
+        // `pack <dir> -o <archive>` and `append <archive> <dir>` name their operands
+        // in opposite orders, matching the Python CLI. Resolved here explicitly
+        // rather than cleverly, because a writer that appended to the tree it was
+        // reading would be a memorable afternoon.
+        let (existing, tree, destination) = if command == "append" {
+            let archive = std::fs::read(path)
+                .map_err(|e| Error::new(Kind::InvalidInput, format!("{path}: {e}")))?;
+            if output.is_empty() {
+                return Err(Error::new(Kind::InvalidInput, "append needs -o <directory>"));
+            }
+            (archive, output.clone(), path.to_string())
+        } else {
+            if output.is_empty() {
+                return Err(Error::new(Kind::InvalidInput, "-o is required"));
+            }
+            (Vec::new(), path.to_string(), output.clone())
+        };
+        let bytes = writer::pack(&existing, std::path::Path::new(&tree), &exclude, &options)?;
+        std::fs::write(&destination, &bytes)
+            .map_err(|e| Error::new(Kind::InvalidInput, format!("{destination}: {e}")))?;
         Ok(format!(
             "{{\"archive\":\"{}\",\"bytes\":{}}}",
-            json_escape(&output),
+            json_escape(&destination),
             bytes.len()
         ))
 }
@@ -187,8 +205,8 @@ fn run(args: &[String]) -> std::result::Result<String, Error> {
     // `pack` takes a *directory*; every other command takes an archive. Reading the
     // path before dispatching tried to `fs::read` a folder, which on Windows is an
     // access-denied rather than the is-a-directory you would expect to see.
-    if command == "pack" {
-        return pack_command(path, &args[2..]);
+    if command == "pack" || command == "append" {
+        return pack_command(command, path, &args[2..]);
     }
     let data = read_input(path)?;
 

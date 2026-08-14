@@ -200,6 +200,15 @@ def read_snapshot(data: bytes, footer: C.Footer) -> Snapshot:
             and footer.auxiliary_root != manifest["auxiliary_root"]):
         raise IntegrityFailure("footer and manifest disagree about auxiliary_root",
                                offset=footer.offset)
+    # Named in two places — the bootstrap header and the manifest — so the two must
+    # agree. Nothing checked this until a writer got it wrong: an append wrote a
+    # manifest claiming a different `archive_id` than the header, and both readers
+    # verified it happily. Same shape as the hash algorithm being named twice.
+    header = C.parse_header(data)
+    if manifest["archive_id"] != header.archive_uuid:
+        raise IntegrityFailure("the manifest and the header disagree about archive_id",
+                               header=header.archive_uuid.hex(),
+                               manifest=manifest["archive_id"].hex())
     if footer.snapshot_sequence != manifest["snapshot_sequence"]:
         raise IntegrityFailure("footer and manifest disagree about the sequence",
                                footer=footer.snapshot_sequence,

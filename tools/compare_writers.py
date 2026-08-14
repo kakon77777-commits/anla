@@ -40,10 +40,10 @@ CREATED = "1785000000000000000"
 EXCLUDE = ("_out", "__pycache__")
 
 
-def python_pack(corpus: Path, out: Path, codec: str, average: int) -> None:
+def python_pack(corpus: Path, out: Path, codec: str, average: int, metadata: bool = False) -> None:
     from anla1.cli import main
 
-    argv = ["pack", str(corpus), "-o", str(out), "--no-metadata", "--force",
+    argv = ["pack", str(corpus), "-o", str(out), "--force"] + ([] if metadata else ["--no-metadata"]) + [
             "--codec", codec, "--chunk-avg", str(average),
             "--uuid", UUID, "--created-ns", CREATED, "--json"]
     for name in EXCLUDE:
@@ -57,10 +57,10 @@ def python_pack(corpus: Path, out: Path, codec: str, average: int) -> None:
         raise SystemExit(f"the python writer exited {code}")
 
 
-def rust_pack(corpus: Path, out: Path, codec: str, average: int) -> None:
+def rust_pack(corpus: Path, out: Path, codec: str, average: int, metadata: bool = False) -> None:
     argv = [str(RUST), "pack", str(corpus), "-o", str(out),
             "--codec", codec, "--chunk-avg", str(average),
-            "--uuid", UUID, "--created-ns", CREATED]
+            "--uuid", UUID, "--created-ns", CREATED] + ([] if metadata else ["--no-metadata"])
     for name in EXCLUDE:
         argv += ["--exclude", name]
     result = subprocess.run(argv, capture_output=True, text=True)
@@ -75,6 +75,65 @@ def tree_identity(path: Path) -> tuple[str, list[str]]:
             sorted(chunk.hex() for chunk in snapshot.manifest["chunks"]))
 
 
+def compare_append(corpus: Path, work: Path) -> int:
+    """Create, then append, with both writers.
+
+    A second snapshot exercises everything one snapshot cannot: the footer chain,
+    the parent link, resuming at the end of the newest complete snapshot rather than
+    the end of the file, and a manifest that lists descriptors for chunks an earlier
+    snapshot wrote.
+
+    It is also what found the `archive_id` bug: the Rust append used its unset
+    `--uuid` for the manifest while inheriting the header's, and *both readers
+    verified it*, because nothing cross-checked the two places an archive names
+    itself. Both now do.
+    """
+    import shutil
+
+    v1, v2 = work / "v1", work / "v2"
+    for target in (v1, v2):
+        if target.exists():
+            shutil.rmtree(target)
+        target.mkdir()
+    for source in sorted(corpus.glob("*.md")):
+        shutil.copyfile(source, v1 / source.name)
+        shutil.copyfile(source, v2 / source.name)
+    biggest = max(v2.glob("*.md"), key=lambda p: p.stat().st_size)
+    biggest.write_bytes(biggest.read_bytes() + b"\n\n(a second draft)\n")
+    (v2 / "added.md").write_bytes(b"new in the second snapshot\n")
+
+    py, rs = work / "py-append.anla", work / "rs-append.anla"
+    python_pack(v1, py, "store", 4096)
+    rust_pack(v1, rs, "store", 4096)
+
+    from anla1.cli import main as anla1_main
+    import contextlib
+    import io
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        code = anla1_main(["append", str(py), str(v2), "--no-metadata", "--codec",
+                           "store", "--chunk-avg", "4096",
+                           "--created-ns", str(int(CREATED) + 1), "--json"])
+    if code != 0:
+        print(f"  append               the python writer exited {code}", file=sys.stderr)
+        return 1
+    result = subprocess.run(
+        [str(RUST), "append", str(rs), "-o", str(v2), "--no-metadata", "--codec",
+         "store", "--chunk-avg", "4096", "--created-ns", str(int(CREATED) + 1)],
+        capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"  append               the rust writer exited {result.returncode}: "
+              f"{result.stderr}", file=sys.stderr)
+        return 1
+
+    if py.read_bytes() == rs.read_bytes():
+        print(f"  append (2 snapshots) byte-identical, {py.stat().st_size:,} bytes")
+        return 0
+    print(f"  append (2 snapshots) DIFFER — {py.stat().st_size:,} vs "
+          f"{rs.stat().st_size:,} bytes", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str]) -> int:
     corpus = Path(argv[0]) if argv else ROOT / "test_demo"
     if not RUST.exists():
@@ -85,14 +144,15 @@ def main(argv: list[str]) -> int:
     failures = 0
     with tempfile.TemporaryDirectory(prefix="anla-writers-") as tmp:
         work = Path(tmp)
-        for codec, average, must_match in (("store", 4096, True),
-                                           ("store", 262144, True),
-                                           ("zstd", 4096, False)):
+        for codec, average, metadata, must_match in (("store", 4096, False, True),
+                                                     ("store", 262144, False, True),
+                                                     ("store", 4096, True, True),
+                                                     ("zstd", 4096, True, False)):
             py, rs = work / "py.anla", work / "rs.anla"
-            python_pack(corpus, py, codec, average)
-            rust_pack(corpus, rs, codec, average)
+            python_pack(corpus, py, codec, average, metadata)
+            rust_pack(corpus, rs, codec, average, metadata)
             same = py.read_bytes() == rs.read_bytes()
-            label = f"{codec}/avg={average}"
+            label = f"{codec}/avg={average}" + ("/metadata" if metadata else "")
 
             if same:
                 print(f"  {label:<20} byte-identical, {py.stat().st_size:,} bytes")
@@ -112,6 +172,8 @@ def main(argv: list[str]) -> int:
             else:
                 print(f"  {label:<20} bytes differ (different libzstd builds), "
                       f"objects_root and every chunk id identical — §8 as written")
+
+        failures += compare_append(corpus, work)
 
     if failures:
         print(f"{failures} comparison(s) failed", file=sys.stderr)
