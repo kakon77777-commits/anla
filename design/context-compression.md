@@ -253,6 +253,43 @@ So the next piece of format work is named, and it is not `INDX`:
 **`FLAG_COMPRESSED_METADATA`**, which §4 reserved for exactly this. Until then, a
 context store should checkpoint on meaningful boundaries rather than on a timer.
 
+### Real embeddings, and the negative result they produced
+
+2,182 turns of this conversation embedded with `text-embedding-3-small` at 768
+dimensions, for about half a cent. The pipeline works end to end: export, embed,
+attach, retrieve, with the semantic channel reporting itself present. The retrieval
+does not work well, and the measurement says why.
+
+**The corpus is too homogeneous for turn-level vectors to discriminate.**
+
+| | random-pair cosine | |
+|---|---|---|
+| raw | mean **+0.317**, p95 +0.523 | |
+| centred | mean 0.000, p95 +0.238 | |
+
+A random pair of *unrelated* turns scored 0.317, and the best match for a real
+question scored 0.485 — **below the 95th percentile of random pairs**. The signal
+was inside the noise, and no threshold could have separated them.
+
+Subtracting the corpus mean fixes the geometry and is kept: the margin between the
+best match and the corpus average went from +0.22 to +0.33, and the turn that
+actually answered one of the questions climbed from nowhere into second place.
+
+**It is not enough, and tuning will not make it enough.** The unit is wrong. A
+conversational turn is a *transport* unit — one of these turns covers a defect, a
+measurement, a decision and a joke — and its embedding is the average of all of
+them, which is "technical conversation about software" and describes every turn in
+the corpus equally. That is exactly the shared component centring removes, and
+what is left underneath is thin because the turn never had one subject.
+
+So the next step is not a better threshold or a better weighting. It is **embedding
+coherent segments rather than turns** — which is MS3E's framing arriving a second
+time: compile the linear thing into addressable *structured* state, and the
+structure has to be the unit of meaning rather than the unit of transmission.
+
+Worth stating plainly because it would be easy to ship the pipeline, see
+`semantic: PRESENT`, and believe the channel is working.
+
 ## 5. What is missing, honestly
 
 1. **Addressable partial extraction.** `INDX` is a reserved record type and nothing
