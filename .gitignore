@@ -16,3 +16,4 @@ conformance/fuzz-findings/
 conformance/.fuzz-work/
 repro-digest.txt
 test_demo/_out/
+rust/target/

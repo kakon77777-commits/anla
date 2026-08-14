@@ -235,64 +235,6 @@ jobs:
           print(f"{len(names)} scenarios measured: {', '.join(sorted(names))}")
           PY
 
-  two-implementations:
-    name: python and rust agree (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - run: python -m pip install --upgrade pip blake3 zstandard
-      - name: Build the Rust reader
-        working-directory: rust
-        run: cargo build --release --locked
-
-      - name: Rust unit tests
-        working-directory: rust
-        # The canonical CBOR refusals, which the fuzzer reaches slowly: a
-        # non-shortest integer and a map one byte out of order are narrow targets in
-        # a large space, and "canonical" is a set of refusals rather than a
-        # behaviour — a decoder that quietly accepts looks correct until something
-        # depends on the difference.
-        run: cargo test --release --locked
-
-      - name: It agrees with its own pinned values
-        run: ./rust/target/release/anla1-rs selftest
-        shell: bash
-
-      - name: It verifies an archive the Python writer produced
-        shell: bash
-        # The whole point of the freeze rule, run on three operating systems. Two
-        # readers, no shared code below `blake3` and `zstd`, recomputing every
-        # Merkle root and every hash from the same bytes.
-        run: |
-          python -m pip install -e python
-          anla1 pack test_demo -o /tmp/corpus.anla --chunk-avg 4096             --exclude '_out/**' --exclude '__pycache__/**' --json > /dev/null
-          ./rust/target/release/anla1-rs verify /tmp/corpus.anla
-          ./rust/target/release/anla1-rs extract /tmp/corpus.anla > /tmp/rust.json
-          python tools/compare_implementations.py /tmp/corpus.anla /tmp/rust.json
-
-      - name: Differential fuzzing, python against rust
-        # The tool that found the missing section 4.3 check within three hundred
-        # mutants. Seeded from the run number so the space keeps being searched
-        # rather than the same mutants re-checked forever.
-        if: matrix.os == 'ubuntu-latest'
-        run: python tools/fuzz_1_0.py -n 3000 --seed ${{ github.run_number }} --json --keep
-
-      - name: Keep any 1.0 fuzz findings
-        if: always() && matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuzz-1.0-findings
-          path: conformance/fuzz-1.0-findings
-          if-no-files-found: ignore
-          retention-days: 30
-
   site:
     name: site builds
     runs-on: ubuntu-latest

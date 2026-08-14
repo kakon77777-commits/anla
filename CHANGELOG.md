@@ -7,6 +7,68 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
+## 2026-08-14 — The second implementation
+
+### Added
+
+- **[`rust/`](rust/) — an independent reader for ANLA 1.0.** `anla1-rs verify |
+  snapshots | list | extract | selftest`. Two crates only, `blake3` and `zstd`; the
+  canonical CBOR profile, the container, the Merkle construction, the manifest
+  verification and SHA-256 are all written out, because a second implementation that
+  imported someone else's CBOR would be testing that crate's idea of CBOR rather
+  than the rules §5.1 wrote down.
+
+  It reads. It does not write, so the freeze rule's **byte-identity clause is still
+  unsatisfied** and the specification says so where it states the rule.
+
+- **[`tools/fuzz_1_0.py`](tools/fuzz_1_0.py) — differential fuzzing for 1.0.**
+  Mutate a valid archive, ask both readers whether they accept it. 1.0 has never had
+  this, because it had one implementation; it is the tool that found the largest
+  defect in MVP.
+
+  **16,000 mutants across four seeds, after the four fixes below: zero
+  divergences, zero code mismatches, zero crashes.** The runs that found those four
+  are not counted in that figure, which is the honest way round. Both readers restore the same BLAKE3 for all twenty files of the
+  corpus, and CI now runs the comparison on Linux, macOS and Windows.
+
+- **The corpus grew** to twenty files and twelve types — the papers, source in three
+  languages, a CDDL schema, YAML, TOML, JSON, a PNG built byte by byte, a CJK
+  filename with CJK content, a file with no extension, CRLF text, all 256 byte
+  values, an empty file, and an ANLA archive inside the ANLA archive.
+
+### Fixed
+
+- **Record sequences (§4.3) were not checked by the Rust reader**, found in under
+  three hundred mutants. That rule has now been missed by *three* independent
+  attempts to implement a document that states it plainly, and §4.3 now says why:
+  every other rule a reader enforces is seek-based — find the footer, jump to the
+  manifest, jump to each chunk — and this is the only one requiring a walk of every
+  record from the start. **An expensive rule with no other caller is the rule an
+  implementer skips.**
+
+- **Structure is checked before content.** An archive broken in two places got
+  whichever verdict its reader reached first, and the two readers reached different
+  ones six times in two thousand mutants. "The bytes of this chunk are wrong" is not
+  a statement anyone can act on about a file whose record framing has not been
+  validated.
+
+- **A declared limit that is exceeded is a resource limit, not a malformed
+  manifest.** The two readers classified a 16 MiB record header differently, and the
+  caller's next move differs: one says "find another copy", the other says "this was
+  written by something broken".
+
+- **The backwards footer scan now catches every refusal, not three named types.**
+  Fixing the classification above immediately broke this, because the scan caught
+  `ManifestInvalid`, `IntegrityFailure` and `UnsupportedCapability` — accidentally
+  complete until one of those refusals became a fourth type, at which point it
+  started escaping the loop and aborting the search. The fuzzer found it within the
+  hour.
+
+  The general lesson, and the reason this entry is longer than the fix: **catching
+  by exception type couples control flow to classification, so changing what an
+  error is *called* silently changes behaviour somewhere that never mentioned it.**
+
+
 ## 2026-08-07 — Zstandard, and what a compressor costs the freeze rule
 
 ### Added

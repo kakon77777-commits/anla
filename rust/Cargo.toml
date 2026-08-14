@@ -1,0 +1,22 @@
+[package]
+name = "anla1"
+version = "0.1.0"
+edition = "2021"
+description = "An independent reader for ANLA 1.0 (draft), written against SPEC-1.0-DRAFT.md"
+license = "Apache-2.0"
+
+[[bin]]
+name = "anla1-rs"
+path = "src/main.rs"
+
+[dependencies]
+# Only the two primitives the format names. Everything the specification actually
+# defines — the canonical CBOR profile, the container, the Merkle construction — is
+# written here rather than pulled in, because a second implementation that imported
+# someone else's CBOR crate would be testing that crate's idea of CBOR rather than
+# the rules this format wrote down.
+blake3 = "1"
+zstd = "0.13"
+
+[profile.release]
+overflow-checks = true

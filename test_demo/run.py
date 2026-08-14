@@ -49,7 +49,7 @@ from anla1.snapshot import (                           # noqa: E402
 #: The runner's own output. Everything else in this folder is corpus, including
 #: this file — a Python source file is exactly the kind of thing that is going in
 #: here next, so there is no reason to hide it from the archive.
-EXCLUDE = ("_out", "_out/**")
+EXCLUDE = ("_out", "_out/**", "__pycache__", "__pycache__/**", "*.pyc")
 
 FIXED_UUID = bytes(range(16))
 FIXED_TIME = 1_785_000_000_000_000_000

@@ -253,14 +253,22 @@ def test_a_frame_that_decodes_to_something_else_is_caught():
         manifest[name] = getattr(roots, name)
 
     payload = encode(manifest)
+    manifest_sequence = C.parse_record(bytes(data),
+                                       snapshot.footer.manifest_offset).sequence
     record = C.build_record("MANF", {"hash_algorithm": C.CORE_HASH,
                                      "payload_hash": H(payload)}, payload,
-                            C.parse_record(bytes(data),
-                                           snapshot.footer.manifest_offset).sequence)
-    out = bytes(data[:snapshot.footer.manifest_offset]) + record
+                            manifest_sequence)
+    head = bytes(data[:snapshot.footer.manifest_offset])
+    out = head + record
     footer_offset = len(out)
+    # The footer's sequence has to be the real next one. An arbitrary number is a
+    # *second* defect, and now that verification checks structure before content it
+    # is the one that gets reported — so the test would pass while proving something
+    # else entirely. Found by the ordering change, which is the ordering change
+    # earning its place.
     out += C.build_footer_record(
-        sequence=999, snapshot_sequence=1, manifest_offset=len(data[:snapshot.footer.manifest_offset]),
+        sequence=manifest_sequence + 1, snapshot_sequence=1,
+        manifest_offset=len(head),
         manifest_length=len(record), preservation_root=manifest["preservation_root"],
         auxiliary_root=manifest["auxiliary_root"], hash_algorithm=C.CORE_HASH)
     forged_archive = C.with_footer_hint(out, footer_offset)

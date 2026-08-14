@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator
 
 from anla.errors import (  # the error vocabulary is shared: same codes, same exit codes
+    AnlaError,
     IntegrityFailure,
     InvalidInput,
     ManifestInvalid,
@@ -293,8 +294,13 @@ def parse_record(data: bytes, offset: int) -> Record:
         raise ManifestInvalid("record sequence must be at least 1",
                               offset=offset, sequence=sequence)
     if header_length > MAX_RECORD_HEADER:
-        raise ManifestInvalid("record header exceeds 16 MiB", offset=offset,
-                              size=header_length)
+        # A declared limit being exceeded is a resource limit, not a malformed
+        # manifest. The two readers classified this differently and the fuzzer said
+        # so; the caller's next move differs, which is the whole reason the codes
+        # are separate — one says "find another copy", the other says "this was
+        # written by something broken".
+        raise ResourceLimitExceeded("record header exceeds 16 MiB", offset=offset,
+                                    size=header_length, limit=MAX_RECORD_HEADER)
     unpadded = RECORD_FRAME_SIZE + header_length + payload_length
     end = offset + unpadded + padding_for(unpadded)
     if end > len(data):
@@ -312,7 +318,17 @@ def parse_record(data: bytes, offset: int) -> Record:
                              offset=offset) from exc
     if not isinstance(header, dict):
         raise ManifestInvalid("record header is not a CBOR map", offset=offset)
-    return Record(offset=offset, type=frame[4:8].decode("ascii", errors="replace"),
+    # §4: a record type is four ASCII bytes. `errors="replace"` used to stand here,
+    # which turned a malformed type into U+FFFD and carried on — the writer checked
+    # it and the reader repaired it, which is the same asymmetry the strict CBOR
+    # decoder exists to refuse. Found by the Rust reader, which checked it, and the
+    # 1.0 differential fuzzer, which noticed the two disagreeing.
+    try:
+        record_type = frame[4:8].decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise ManifestInvalid("record type is not four ASCII bytes", offset=offset,
+                              found=frame[4:8].hex()) from exc
+    return Record(offset=offset, type=record_type,
                   version=version, flags=flags, header=header,
                   header_length=header_length,
                   payload_offset=offset + RECORD_FRAME_SIZE + header_length,
@@ -451,7 +467,20 @@ def find_latest_footer(data: bytes) -> Footer:
         if data[at:at + 4] == RECORD_MAGIC and data[at + 4:at + 8] == b"FOOT":
             try:
                 footer = parse_footer_record(data, at)
-            except (ManifestInvalid, IntegrityFailure, UnsupportedCapability):
+            except AnlaError:
+                # Every refusal, not a list of three. This is a *search*: anything
+                # that fails to parse at a candidate offset means "not a footer
+                # here", and the reason is irrelevant to the search.
+                #
+                # It used to name three exception types, which was accidentally
+                # complete until the 16 MiB header limit was reclassified from
+                # `ManifestInvalid` to `ResourceLimitExceeded` — at which point that
+                # one refusal started escaping the loop and aborting the scan. The
+                # differential fuzzer found it within an hour of the reclassification.
+                #
+                # The general lesson: catching by exception type couples control flow
+                # to classification, so changing what an error *is called* silently
+                # changes behaviour somewhere that never mentioned it.
                 # A torn or corrupt trailing footer is not the latest footer; it is
                 # a failed append. Keep looking backwards for the last good one.
                 at -= RECORD_ALIGNMENT

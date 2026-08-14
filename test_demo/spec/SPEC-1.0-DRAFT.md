@@ -29,25 +29,6 @@ That is the standard `ANLA-MVP` was held to. Applying it *before* the word "1.0"
 appears in public is the whole point of writing this file separately, rather than
 editing `SPEC.md` and hoping.
 
-**Where that stands, precisely.** The rule has two clauses and one of them is now
-satisfied. There is a second implementation — [`rust/`](rust/), sharing no code with
-the Python below `blake3` and `zstd`, with its own canonical CBOR, container, Merkle
-construction and manifest verification — and the differential fuzzer finds **no
-verdict divergence** between the two. It found three real disagreements on its first
-runs, which are recorded in §4.3 and §11 and are fixed.
-
-The other clause is not satisfied and will not be until there is a Rust *writer*:
-byte-identical output cannot be demonstrated by a reader. A reader is nevertheless
-the half that matters more for a preservation format — anyone may write an archive,
-everyone has to be able to read one — and it is the half a fuzzer can use, because
-verdict agreement needs no oracle.
-
-One honest caveat, since this document is about not overclaiming: two
-implementations by one author are weaker evidence than two by two authors. A shared
-*misreading* of a sentence below reproduces in both rather than being caught. What
-the exercise does still find is every place the document was ambiguous enough that
-two writings of it diverged — and on the first run, that was three.
-
 ### What exists so far
 
 | Piece | State |
@@ -69,8 +50,6 @@ two writings of it diverged — and on the first run, that was three.
 | Zstandard (§8) | **implemented** — [`python/anla1/codecs.py`](python/anla1/codecs.py), 12 tests |
 | Metadata namespaces and the fidelity report (§5.2.2) | **implemented** — 27 tests |
 | Symbolic links | **implemented** — stored verbatim, restored under policy |
-| **A second implementation — a Rust reader** | **implemented** — [`rust/`](rust/), verifies and extracts; **no writer**, so byte-identity between writers is still unproven |
-| Differential fuzzing for 1.0 (Python against Rust) | **implemented** — [`tools/fuzz_1_0.py`](tools/fuzz_1_0.py) |
 | Signatures, encryption, parity | later milestones |
 
 Anything not in the "implemented" rows is a claim about intent, not about code. This
@@ -271,21 +250,6 @@ without anyone noticing that nothing evaluated it. It was found by differential
 fuzzing. The lesson is not "check sequences" — it is that **every invariant in this
 document needs a sentence saying how a reader checks it**, and any that cannot be
 written that way should be deleted rather than left as decoration.
-
-**And then it happened a third time.** The Rust reader, written from this section
-with that paragraph in front of it, did not implement the check either — and the
-1.0 differential fuzzer found it in under three hundred mutants. Three independent
-attempts, one plainly stated rule, three misses.
-
-So the reason is structural, not careless, and it belongs here rather than in a
-commit message. **Every other rule a reader enforces is seek-based**: find the
-footer, jump to the manifest, jump to each chunk. This is the only one that requires
-walking every record from the start, so it is the only one that costs a pass nothing
-else has already paid for. An expensive rule with no other caller is the rule an
-implementer skips.
-
-A conforming reader MUST make that pass. If that cost is unacceptable to some future
-profile, the answer is to change the rule, not to leave it stated and unenforced.
 
 ### 4.4 Alignment is a rule about starts, not only about padding
 

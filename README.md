@@ -71,9 +71,10 @@ report, symbolic links, Zstandard, and an `anla1` command that packs a real
 directory —
 a second snapshot of an unchanged tree writes no chunk records at all, and with
 `anla-cdc-1` prepending ten bytes to a 300 KB file shares 65 of its 66 chunks with
-the snapshot before it. What it does not have is a second implementation, so nothing
-is frozen. `SPEC-1.0-DRAFT.md` opens with a table of what exists, which is the first
-thing that changes when that changes.
+the snapshot before it. As of 2026-08-14 it also has a **second implementation** —
+see below — which satisfies one of the freeze rule's two clauses. The other needs a
+Rust *writer*, so nothing is frozen. `SPEC-1.0-DRAFT.md` opens with a table of what
+exists, which is the first thing that changes when that changes.
 
 ```bash
 anla1 pack ./my-project -o project.anla --exclude .git --exclude '.git/**'
@@ -81,6 +82,24 @@ anla1 append project.anla ./my-project      # a snapshot, storing only what chan
 anla1 snapshots project.anla
 anla1 diff project.anla --from 1 --to 2
 anla1 extract project.anla --to restored -s 1
+```
+
+## ANLA 1.0 has a second implementation now
+
+[`rust/`](rust/) is an independent reader — its own canonical CBOR, container,
+Merkle construction and manifest verification, sharing no code with the Python below
+`blake3` and `zstd`. `tools/fuzz_1_0.py` mutates a valid archive and asks both
+readers the same question; **16,000 mutants across four seeds produce no verdict
+divergence**, and both restore the same BLAKE3 for every file of the corpus.
+
+Half the freeze rule. The other half needs a Rust *writer*, because byte-identical
+output cannot be demonstrated by a reader — and [`rust/README.md`](rust/README.md)
+is honest about the rest, including that two implementations by one author are
+weaker evidence than two by two.
+
+```bash
+cd rust && cargo build --release
+./target/release/anla1-rs verify ../project.anla
 ```
 
 ## Two implementations, on purpose

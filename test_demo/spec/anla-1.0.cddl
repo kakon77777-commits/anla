@@ -1,0 +1,158 @@
+; ANLA 1.0 — CDDL schema for the canonical CBOR structures.  DRAFT.
+;
+; Normative prose: SPEC-1.0-DRAFT.md.  This file is the shape only; it cannot
+; express the rules that actually matter — canonical encoding, the Merkle
+; construction, that a declared root must equal the root recomputed from the
+; contents beside it — and a validator that accepts a document here has checked
+; considerably less than a conforming reader does.
+;
+; Stated up front because a schema is the easiest thing in a specification to
+; mistake for the specification.
+;
+; Everything is encoded per RFC 8949 §4.2.1 deterministic encoding, plus this
+; profile's restrictions: no floats, no tags, no null, no undefined, no
+; indefinite lengths, map keys sorted by encoded bytes.  See SPEC-1.0-DRAFT.md §5.1.
+
+start = manifest
+
+; ---------------------------------------------------------------------------
+; manifest — the MANF record payload
+; ---------------------------------------------------------------------------
+
+manifest = {
+  anla_version:          [1, 0]
+  archive_id:            bstr .size 16
+  snapshot_sequence:     uint
+  created_unix_ns:       uint
+  hash_algorithms:       [+ tstr]        ; read, never inferred (§7)
+  required_capabilities: [* capability]
+  optional_capabilities: [* capability]
+  objects:               [* object]
+  chunks:                {* chunk-id => chunk-descriptor}
+  metadata:              [* metadata-entry]
+  auxiliary:             [* auxiliary-entry]
+
+  ; Roots.  Each MUST equal the root recomputed from the contents above it;
+  ; CDDL cannot say that, and a reader MUST check it (§5.3).
+  objects_root:      digest
+  chunks_root:       digest
+  metadata_root:     digest
+  preservation_root: digest             ; over the three above, domain-separated
+  auxiliary_root:    digest             ; deliberately NOT an input to the above
+
+  ; Optional members are omitted when absent.  There is no null in this profile,
+  ; so "absent" is the absence of the key and never an encoded nothing.
+  ? parent_snapshot:     digest
+  ? packing_plan:        packing-plan
+  ? packing_plan_digest: digest
+}
+
+capability = tstr                        ; e.g. "anla:core:objects:1"
+digest     = bstr                        ; width follows hash_algorithms
+chunk-id   = bstr
+
+; ---------------------------------------------------------------------------
+; objects
+; ---------------------------------------------------------------------------
+;
+; `path` is the portable UTF-8 name and is the only name form this draft carries.
+; Whitepaper open question 4 — the Windows NT / POSIX byte name model — is not
+; settled, and answering it WILL change how object_id is computed.  Nothing in
+; the container depends on an object id being stable across draft revisions.
+
+object = directory-object / file-object
+
+directory-object = {
+  object_id: digest
+  kind:      "directory"
+  path:      tstr
+  ? metadata: object-metadata
+}
+
+file-object = {
+  object_id:    digest
+  kind:         "regular-file"
+  path:         tstr
+  size:         uint
+  content_hash: digest
+  chunks:       [* chunk-id]             ; empty for an empty file
+  ? metadata:   object-metadata
+}
+
+; Common metadata only.  Platform namespaces (POSIX / Windows / macOS) arrive
+; with Milestone 2 and will be their own subtrees under metadata_root.
+object-metadata = {
+  ? mtime_ns: uint
+  * tstr => any
+}
+
+; ---------------------------------------------------------------------------
+; chunks
+; ---------------------------------------------------------------------------
+;
+; The offsets are redundant with the record stream on purpose: they give random
+; access without a scan, and they give a verifier a second, independent statement
+; to cross-check.  A reader MUST check them against the parsed record rather than
+; trusting them.
+
+chunk-descriptor = {
+  record_offset:  uint
+  record_length:  uint
+  payload_offset: uint
+  payload_length: uint
+  raw_size:       uint
+  codec_id:       codec-id
+  payload_hash:   digest
+}
+
+codec-id = 0 / 1 / 2 / 3 / 4 / 5         ; store, zstd, deflate, lzma2, brotli, lz4
+
+; ---------------------------------------------------------------------------
+; metadata and the intelligence plane
+; ---------------------------------------------------------------------------
+
+metadata-entry = {
+  namespace: tstr                        ; "posix", "windows", "macos", …
+  object_id: digest
+  * tstr => any
+}
+
+; The intelligence plane.  Its shape is deliberately open: it is disposable, so a
+; reader that does not understand an entry loses nothing by ignoring it, and a
+; schema that constrained it would be claiming an authority it does not have.
+auxiliary-entry = {* tstr => any}
+
+packing-plan = {* tstr => any}
+
+; ---------------------------------------------------------------------------
+; record headers
+; ---------------------------------------------------------------------------
+
+chnk-header = {
+  chunk_id:     chunk-id
+  codec_id:     codec-id
+  raw_size:     uint
+  payload_hash: digest
+  ? codec_parameters: {* tstr => any}    ; enough for an independent decoder (§8)
+}
+
+; A manifest and a footer each name their own hash algorithm.  For the footer this
+; is not redundancy: it is read BEFORE the manifest that declares
+; hash_algorithms, so it cannot inherit the choice from it (§6).
+manf-header = {
+  hash_algorithm: tstr
+  payload_hash:   digest
+}
+
+foot-header = manf-header
+
+foot-payload = {
+  snapshot_sequence: uint
+  manifest_offset:   uint
+  manifest_length:   uint
+  preservation_root: digest
+  ? previous_footer_offset: uint         ; omitted in the first snapshot
+  ? auxiliary_root:         digest
+  ? index_offset:           uint
+  ? index_length:           uint
+}

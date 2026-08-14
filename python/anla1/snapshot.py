@@ -620,6 +620,14 @@ def verify_archive(data: bytes) -> ArchiveReport:
     pass like this one and were, in MVP, checkable by nothing at all.
     """
     snapshots = list_snapshots(data)
+    # Structure before content, and the order is load-bearing rather than tidy.
+    # An archive damaged in two places at once gets whichever verdict its reader
+    # happens to reach first, and "the bytes of this chunk are wrong" is not a
+    # statement anyone can act on about a file whose record framing has not been
+    # validated. The differential fuzzer found the two implementations reporting
+    # different codes for the same mutant six times out of two thousand, purely
+    # because they checked in different orders.
+    _check_record_sequences(data, snapshots)
     seen: dict[bytes, dict] = {}
     chunk_bytes = 0
     for snapshot in snapshots:
@@ -646,7 +654,6 @@ def verify_archive(data: bytes) -> ArchiveReport:
                                        chunk_id=chunk_id.hex()[:16])
             seen[chunk_id] = descriptor
             chunk_bytes += descriptor["payload_length"]
-    _check_record_sequences(data, snapshots)
     return ArchiveReport(snapshots=snapshots, unique_chunks=len(seen),
                          chunk_bytes=chunk_bytes, archive_bytes=len(data))
 

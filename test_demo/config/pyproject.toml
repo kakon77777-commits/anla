@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anla"
+version = "0.1.0"
+description = "Reference implementation of ANLA-MVP v0.1, the Agent-Native Lossless Archive profile"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "Neo.K" }]
+keywords = ["archive", "lossless", "deduplication", "content-addressed", "agent"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Topic :: System :: Archiving :: Compression",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "blake3>=1.0", "zstandard>=0.22"]
+# The Rust BLAKE3 is a fast path, never a requirement: anla1.blake3 carries a
+# readable pure-Python reference, and the suite asserts the two agree. A format
+# whose hash is only available as a compiled wheel cannot be checked by reading.
+speed = ["blake3>=1.0"]
+# Unlike BLAKE3, there is no pure-Python fallback for this one and there is not
+# going to be: zstd is not something to reimplement for a specification's
+# readability. An archive that uses it declares anla:codec:zstd:1 as *required*, and
+# a reader without the library refuses cleanly rather than guessing.
+zstd = ["zstandard>=0.22"]
+
+[project.scripts]
+anla = "anla.cli:main"
+# A separate command, not a flag on `anla`, for the same reason 1.0 has its own
+# magic number: one command switching profiles on a flag invites an archive written
+# under one and read under the other.
+anla1 = "anla1.cli:main"
+
+[project.urls]
+Homepage = "https://anla.evemisslab.com"
+Source = "https://github.com/kakon77777-commits/anla"
+Specification = "https://anla.evemisslab.com/spec/"
+
+[tool.setuptools.packages.find]
+include = ["anla*", "anla1*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
