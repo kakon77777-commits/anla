@@ -317,11 +317,11 @@ jobs:
         # when called directly and no client could have called one of them.
         if: matrix.os == 'ubuntu-latest'
         run: |
-          # Pinned: an unpinned `pip install mcp` resolved to something without
-          # `mcp.server.fastmcp` and the step failed with a ModuleNotFoundError that
-          # said nothing about which version it got. The version is printed for the
-          # same reason.
-          python -m pip install --quiet "mcp>=1.10"
+          # Pinned below 2.0: `mcp` 2.0 moved `mcp.server.fastmcp`, which an
+          # unpinned install found the hard way. The version is printed so the next
+          # version problem names itself instead of arriving as a bare
+          # ModuleNotFoundError.
+          python -m pip install --quiet "mcp>=1.10,<2"
           python -c "import importlib.metadata as m; print('mcp', m.version('mcp'))"
           python tools/mcp/test_mcp.py
 

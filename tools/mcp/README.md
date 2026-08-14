@@ -5,7 +5,7 @@ python tools/mcp/anla_mcp.py
 ```
 
 Registered for this repository in [`.mcp.json`](../../.mcp.json), so an agent working
-here has it without any setup. Needs `mcp`, `blake3` and `zstandard`; stdio only,
+here has it without any setup. Needs `mcp>=1.10,<2` (2.0 moved `mcp.server.fastmcp`; the server says so rather than failing with a bare import error), `blake3` and `zstandard`; stdio only,
 because it touches the filesystem and nothing here should be reachable over a network.
 
 ## Why this is not a CLI wrapper

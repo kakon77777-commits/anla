@@ -40,7 +40,23 @@ import uuid
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
-from mcp.server.fastmcp import FastMCP  # noqa: E402
+try:                                                            # noqa: E402
+    from mcp.server.fastmcp import FastMCP
+except ImportError as exc:                                      # pragma: no cover
+    # `mcp` 2.0 moved this entry point and CI found it by installing an unpinned
+    # `mcp` and getting 2.0.0. Rather than guess at where it went — a shim I could
+    # not test is a guess with a comment on it — say precisely what is wrong.
+    import importlib.metadata as _meta
+    try:
+        _found = _meta.version("mcp")
+    except Exception:                                           # noqa: BLE001
+        _found = "not installed"
+    raise SystemExit(
+        f"this server is written against the mcp 1.x API and found {_found}: "
+        f"`mcp.server.fastmcp.FastMCP` does not exist here. "
+        f"Install `pip install 'mcp>=1.10,<2'`, or port it — the 2.x entry point "
+        f"has moved and nothing here has been tested against it."
+    ) from exc
 
 from anla.errors import AnlaError  # noqa: E402
 from anla.fastcdc import CdcProfile  # noqa: E402
