@@ -29,24 +29,45 @@ That is the standard `ANLA-MVP` was held to. Applying it *before* the word "1.0"
 appears in public is the whole point of writing this file separately, rather than
 editing `SPEC.md` and hoping.
 
-**Where that stands, precisely.** The rule has two clauses and one of them is now
-satisfied. There is a second implementation — [`rust/`](rust/), sharing no code with
-the Python below `blake3` and `zstd`, with its own canonical CBOR, container, Merkle
-construction and manifest verification — and the differential fuzzer finds **no
-verdict divergence** between the two. It found three real disagreements on its first
-runs, which are recorded in §4.3 and §11 and are fixed.
+**Where that stands, precisely: both clauses are now satisfied.**
 
-The other clause is not satisfied and will not be until there is a Rust *writer*:
-byte-identical output cannot be demonstrated by a reader. A reader is nevertheless
-the half that matters more for a preservation format — anyone may write an archive,
-everyone has to be able to read one — and it is the half a fuzzer can use, because
-verdict agreement needs no oracle.
+There is a second implementation — [`rust/`](rust/), sharing no code with the Python
+below `blake3` and `zstd`, with its own canonical CBOR, container, Merkle
+construction, manifest verification, SHA-256, `anla-cdc-1` chunker, reader and
+writer.
 
-One honest caveat, since this document is about not overclaiming: two
-implementations by one author are weaker evidence than two by two authors. A shared
-*misreading* of a sentence below reproduces in both rather than being caught. What
-the exercise does still find is every place the document was ambiguous enough that
-two writings of it diverged — and on the first run, that was three.
+* **Byte-identity.** The same directory packed by both writers, under the same fixed
+  `(uuid, created_ns)` with no recorded metadata, produces **identical bytes** — with
+  fixed chunking and with `anla-cdc-1` at two profiles. Canonical CBOR, object
+  ordering, chunk boundaries, record framing and every Merkle root have to agree
+  exactly for that to happen, because any one of them disagreeing moves an offset.
+  Checked by [`tools/compare_writers.py`](tools/compare_writers.py) in CI.
+* **No verdict divergence.** 16,000 mutants across four seeds, after the four
+  disagreements the fuzzer found on its first runs and which are recorded in §4.3
+  and below.
+
+The clause is stated over `store`, and §8 says why: compressed output is a function
+of the compressor, so two writers on different libzstd builds may legitimately
+differ. What must match under any codec is `objects_root` and the chunk-id set, and
+that is what the comparison checks there instead.
+
+**So what is still holding the word DRAFT in the title?** Not the freeze rule.
+Three things, and they are worth naming rather than leaving as a feeling:
+
+1. **Two implementations by one author are weaker evidence than two by two.** A
+   shared *misreading* of a sentence below reproduces in both rather than being
+   caught. The exercise finds every place the document was ambiguous enough that two
+   writings of it diverged — five, so far — and nothing at all about the places it
+   is confidently, consistently wrong.
+2. **The Rust writer is narrower than the Python one**: one snapshot, regular files
+   and directories, no metadata, no links, no append. Byte-identity is demonstrated
+   over that surface and no wider.
+3. **§10 still lists open questions**, including the object name model (whitepaper
+   Q4), which will change `object_id` when it is answered.
+
+Freezing means promising not to change these bytes. The rule this draft set itself
+has been met; the judgement about whether the design is *right* has not been made,
+and it is a different judgement.
 
 ### What exists so far
 
@@ -69,7 +90,7 @@ two writings of it diverged — and on the first run, that was three.
 | Zstandard (§8) | **implemented** — [`python/anla1/codecs.py`](python/anla1/codecs.py), 12 tests |
 | Metadata namespaces and the fidelity report (§5.2.2) | **implemented** — 27 tests |
 | Symbolic links | **implemented** — stored verbatim, restored under policy |
-| **A second implementation — a Rust reader** | **implemented** — [`rust/`](rust/), verifies and extracts; **no writer**, so byte-identity between writers is still unproven |
+| **A second implementation — reader *and* writer** | **implemented** — [`rust/`](rust/); `store` output is byte-identical to the Python writer's, checked in CI on three platforms |
 | Differential fuzzing for 1.0 (Python against Rust) | **implemented** — [`tools/fuzz_1_0.py`](tools/fuzz_1_0.py) |
 | Signatures, encryption, parity | later milestones |
 

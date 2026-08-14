@@ -277,6 +277,20 @@ jobs:
           ./rust/target/release/anla1-rs extract /tmp/corpus.anla > /tmp/rust.json
           python tools/compare_implementations.py /tmp/corpus.anla /tmp/rust.json
 
+      - name: Two writers, one tree, the same bytes
+        shell: bash
+        # The freeze rule's other clause. `store` must be byte-identical: canonical
+        # CBOR, object ordering, chunk boundaries, record framing and Merkle roots
+        # all have to agree exactly, and any one of them disagreeing moves an offset.
+        #
+        # `zstd` is reported and does not fail, because §8 predicts it: compressed
+        # output is a function of the compressor, and the Rust `zstd` crate and the
+        # Python `zstandard` wheel do not necessarily bundle the same libzstd. What
+        # must match under any codec is `objects_root` and the chunk-id set, which
+        # is what gets checked there instead. On a machine where both link the same
+        # library the bytes match too, and the run says which case it saw.
+        run: python tools/compare_writers.py test_demo
+
       - name: Differential fuzzing, python against rust
         # The tool that found the missing section 4.3 check within three hundred
         # mutants. Seeded from the run number so the space keeps being searched

@@ -28,6 +28,7 @@ mod archive;
 mod cbor;
 mod container;
 mod error;
+mod writer;
 
 #[cfg(test)]
 mod tests;
@@ -54,6 +55,30 @@ fn json_escape(text: &str) -> String {
     out
 }
 
+fn next_arg(
+    rest: &mut std::slice::Iter<'_, String>,
+    flag: &str,
+) -> std::result::Result<String, Error> {
+    rest.next()
+        .cloned()
+        .ok_or_else(|| Error::new(Kind::InvalidInput, format!("{flag} needs a value")))
+}
+
+fn rest_value(_flag: &str) {}
+
+fn parse_uuid(text: &str) -> std::result::Result<[u8; 16], Error> {
+    let clean: String = text.chars().filter(|c| *c != '-').collect();
+    if clean.len() != 32 {
+        return Err(Error::new(Kind::InvalidInput, "--uuid must be 16 bytes of hex"));
+    }
+    let mut out = [0u8; 16];
+    for (index, slot) in out.iter_mut().enumerate() {
+        *slot = u8::from_str_radix(&clean[index * 2..index * 2 + 2], 16)
+            .map_err(|_| Error::new(Kind::InvalidInput, "--uuid must be hex"))?;
+    }
+    Ok(out)
+}
+
 fn read_input(path: &str) -> std::result::Result<Vec<u8>, Error> {
     if path == "-" {
         let mut buffer = Vec::new();
@@ -63,6 +88,86 @@ fn read_input(path: &str) -> std::result::Result<Vec<u8>, Error> {
         return Ok(buffer);
     }
     std::fs::read(path).map_err(|e| Error::new(Kind::InvalidInput, format!("{path}: {e}")))
+}
+
+fn pack_command(path: &str, args: &[String]) -> std::result::Result<String, Error> {
+        // The other half of the freeze rule: same tree in, same bytes out, from
+        // a program that shares no code with the Python writer.
+        let mut options = writer::PackOptions {
+            archive_id: [0u8; 16],
+            created_unix_ns: 0,
+            profile: None,
+            codec: 1,
+            level: 10,
+            hash_algorithm: "blake3-256".to_string(),
+        };
+        let mut output = String::new();
+        let mut exclude: Vec<String> = Vec::new();
+        let mut rest = args.iter();
+        while let Some(flag) = rest.next() {
+            let value = || {
+                rest_value(flag)
+            };
+            match flag.as_str() {
+                "-o" | "--output" => output = next_arg(&mut rest, flag)?,
+                "--uuid" => options.archive_id = parse_uuid(&next_arg(&mut rest, flag)?)?,
+                "--created-ns" => {
+                    options.created_unix_ns = next_arg(&mut rest, flag)?
+                        .parse()
+                        .map_err(|_| Error::new(Kind::InvalidInput, "--created-ns"))?
+                }
+                "--chunk-avg" => {
+                    let average: usize = next_arg(&mut rest, flag)?
+                        .parse()
+                        .map_err(|_| Error::new(Kind::InvalidInput, "--chunk-avg"))?;
+                    if !average.is_power_of_two() {
+                        return Err(Error::new(
+                            Kind::InvalidInput,
+                            "--chunk-avg must be a power of two",
+                        ));
+                    }
+                    options.profile = Some(writer::CdcProfile {
+                        min_size: (average / 4).max(1),
+                        avg_size: average,
+                        max_size: average * 4,
+                        normalization: 2,
+                    });
+                }
+                "--chunking" => {
+                    if next_arg(&mut rest, flag)? == "cdc" {
+                        options.profile = Some(writer::CdcProfile::default());
+                    }
+                }
+                "--codec" => {
+                    options.codec = if next_arg(&mut rest, flag)? == "zstd" { 1 } else { 0 }
+                }
+                "--level" => {
+                    options.level = next_arg(&mut rest, flag)?
+                        .parse()
+                        .map_err(|_| Error::new(Kind::InvalidInput, "--level"))?
+                }
+                "--exclude" => exclude.push(next_arg(&mut rest, flag)?),
+                "--json" => {}
+                other => {
+                    let _ = value;
+                    return Err(Error::new(
+                        Kind::InvalidInput,
+                        format!("unknown option: {other}"),
+                    ));
+                }
+            }
+        }
+        if output.is_empty() {
+            return Err(Error::new(Kind::InvalidInput, "-o is required"));
+        }
+        let bytes = writer::pack(std::path::Path::new(path), &exclude, &options)?;
+        std::fs::write(&output, &bytes)
+            .map_err(|e| Error::new(Kind::InvalidInput, format!("{output}: {e}")))?;
+        Ok(format!(
+            "{{\"archive\":\"{}\",\"bytes\":{}}}",
+            json_escape(&output),
+            bytes.len()
+        ))
 }
 
 fn run(args: &[String]) -> std::result::Result<String, Error> {
@@ -77,7 +182,14 @@ fn run(args: &[String]) -> std::result::Result<String, Error> {
 
     let path = args
         .get(1)
-        .ok_or_else(|| Error::new(Kind::InvalidInput, "an archive path is required"))?;
+        .ok_or_else(|| Error::new(Kind::InvalidInput, "a path is required"))?;
+
+    // `pack` takes a *directory*; every other command takes an archive. Reading the
+    // path before dispatching tried to `fs::read` a folder, which on Windows is an
+    // access-denied rather than the is-a-directory you would expect to see.
+    if command == "pack" {
+        return pack_command(path, &args[2..]);
+    }
     let data = read_input(path)?;
 
     match command {

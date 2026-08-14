@@ -84,22 +84,32 @@ anla1 diff project.anla --from 1 --to 2
 anla1 extract project.anla --to restored -s 1
 ```
 
-## ANLA 1.0 has a second implementation now
+## ANLA 1.0 has a second implementation, and the freeze rule is met
 
-[`rust/`](rust/) is an independent reader — its own canonical CBOR, container,
-Merkle construction and manifest verification, sharing no code with the Python below
-`blake3` and `zstd`. `tools/fuzz_1_0.py` mutates a valid archive and asks both
-readers the same question; **16,000 mutants across four seeds produce no verdict
-divergence**, and both restore the same BLAKE3 for every file of the corpus.
+[`rust/`](rust/) is an independent reader **and writer** — its own canonical CBOR,
+container, Merkle construction, manifest verification, SHA-256 and `anla-cdc-1`
+chunker, sharing no code with the Python below `blake3` and `zstd`.
 
-Half the freeze rule. The other half needs a Rust *writer*, because byte-identical
-output cannot be demonstrated by a reader — and [`rust/README.md`](rust/README.md)
-is honest about the rest, including that two implementations by one author are
-weaker evidence than two by two.
+The draft set itself a rule in July: *nothing is frozen until two independent
+implementations produce byte-identical archives and a differential fuzzer finds no
+verdict divergence*. Both halves now hold.
+
+| | |
+|---|---|
+| Byte-identical output | same tree, same `(uuid, created_ns)`, **identical bytes** — fixed chunking and `anla-cdc-1` at two profiles |
+| No verdict divergence | **16,000 mutants across four seeds**, zero divergences, zero code mismatches, zero crashes |
+| Same restored content | both readers give the same BLAKE3 for every file of the corpus, on three platforms |
+
+It is still a draft, and [`SPEC-1.0-DRAFT.md`](SPEC-1.0-DRAFT.md) says exactly what
+is holding that: two implementations by *one author* are weaker evidence than two by
+two, the Rust writer is narrower than the Python one, and the object name model is
+still open. The rule has been met; the judgement about whether the design is right
+is a different judgement and has not been made.
 
 ```bash
 cd rust && cargo build --release
-./target/release/anla1-rs verify ../project.anla
+./target/release/anla1-rs pack   ../my-project -o project.anla --codec store
+./target/release/anla1-rs verify project.anla
 ```
 
 ## Two implementations, on purpose

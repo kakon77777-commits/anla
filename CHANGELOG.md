@@ -7,7 +7,29 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
-## 2026-08-14 — The second implementation
+## 2026-08-14 — The second implementation, and both halves of the freeze rule
+
+### Added
+
+- **A Rust writer**, so the freeze rule's byte-identity clause is satisfied for the
+  first time. The same directory packed by both writers, same fixed `(uuid,
+  created_ns)`, no recorded metadata: **identical bytes** — with fixed chunking and
+  with `anla-cdc-1` at two profiles. Canonical CBOR, object ordering, chunk
+  boundaries, record framing and every Merkle root have to agree exactly for that,
+  because any one of them disagreeing moves an offset.
+
+  `anla-cdc-1` in Rust derives its gear table rather than copying it — `SHA-256(
+  "anla-gear-1" ‖ 0x00 ‖ i)[0..4]` — so there was no table of constants to
+  transcribe wrongly, which is what that design decision was for.
+
+  [`tools/compare_writers.py`](tools/compare_writers.py) runs it in CI and is shown
+  able to fail: a one-nanosecond change to `created_ns` moves the bytes.
+
+  **`zstd` is reported and does not fail**, because §8 predicts it — the Rust `zstd`
+  crate and the Python `zstandard` wheel need not bundle the same libzstd. What must
+  match under any codec is `objects_root` and the chunk-id set, and that is checked
+  there instead. On this machine both link libzstd 1.5.7 and the bytes match too;
+  the run says which case it saw rather than assuming.
 
 ### Added
 

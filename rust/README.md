@@ -7,6 +7,7 @@ cargo build --release
 ./target/release/anla1-rs list      ../some.anla
 ./target/release/anla1-rs extract   ../some.anla    # path + BLAKE3 per file
 ./target/release/anla1-rs selftest
+./target/release/anla1-rs pack ../tree -o out.anla --codec store --chunk-avg 4096     --uuid 00112233445566778899aabbccddeeff --created-ns 1785000000000000000
 ```
 
 This exists for one reason. The freeze rule at the top of
@@ -16,19 +17,24 @@ This exists for one reason. The freeze rule at the top of
 > byte-identical archives from the same input, and a differential fuzzer finds no
 > verdict divergence between them.
 
-Since July there has been one. This is the other half.
+Since July there has been one. This is the other half, and as of 2026-08-14 both
+clauses of that rule hold.
 
 ## What it does and does not do
 
-It **reads**. It does not write. A reader is the half that matters more for a
-preservation format — anyone may write an archive, everyone has to be able to read
-one — and it is the half a differential fuzzer can use, because verdict agreement
-needs no oracle.
+It reads **and writes**, and the writer is what closes the rule: the same directory
+packed by both writers, same fixed `(uuid, created_ns)`, no recorded metadata,
+produces **identical bytes** — with fixed chunking and with `anla-cdc-1` at two
+profiles.
 
-Byte-identity of *writers* is therefore still unproven, and the specification says
-which part of that is even provable: compressed output is a function of the
-compressor, so byte-identity is a claim about `store` while `objects_root` and the
-chunk-id set are what must match under any codec (§8).
+The writer is deliberately narrower than the Python one: one snapshot, regular files
+and directories, no metadata, no links, no append. Byte-identity is demonstrated over
+that surface and no wider, which is worth saying because the surface is the claim.
+
+`store` is where byte-identity is claimed. §8 says why: compressed output is a
+function of the compressor, so two writers on different libzstd builds may
+legitimately differ, and what must match under any codec is `objects_root` and the
+chunk-id set.
 
 ## What is written here rather than imported
 
