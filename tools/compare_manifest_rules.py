@@ -36,7 +36,8 @@ from anla1.blake3 import blake3_256 as H  # noqa: E402
 from anla1.cbor import decode, encode  # noqa: E402
 from anla1.manifest import compute_roots  # noqa: E402
 from anla1.snapshot import (  # noqa: E402
-    CODEC_ZSTD, SourceEntry, append_snapshot, verify_archive,
+    CODEC_ZSTD, SourceEntry, append_snapshot, extract_snapshot, list_snapshots,
+    verify_archive,
 )
 
 RUST = pathlib.Path(__file__).resolve().parent.parent / "rust" / "target" / "release"
@@ -141,6 +142,23 @@ def rust_verdict(binary: pathlib.Path, data: bytes) -> str:
     if marker in text:
         return text.split(marker, 1)[1].split('"', 1)[0]
     return f"exit:{done.returncode}"
+
+
+def extract_verdict(data: bytes) -> str:
+    """Whether extraction succeeds, in one word.
+
+    `verify` exists to predict this. The chunk-reference defect was found the other
+    way round — an archive `verify` called sound and `extract` died on — so the
+    prediction is now checked directly, on every case the enumeration builds.
+    """
+    try:
+        for snapshot in list_snapshots(data):
+            extract_snapshot(data, snapshot)
+        return "ok"
+    except AnlaError:
+        return "refused"
+    except Exception as exc:
+        return f"crash:{type(exc).__name__}"
 
 
 #: Python's codes against Rust's names. Two vocabularies for one set of outcomes,
@@ -293,7 +311,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest = decode(archive[record.payload_offset:
                               record.payload_offset + record.payload_length])
 
-    compared, skipped, refused, disagreements = 0, 0, 0, []
+    compared, skipped, refused, disagreements, mispredicted = 0, 0, 0, [], []
     for label, edit in cases(manifest):
         member = label.split(":")[0]
         data = rebuild(archive, edit,
@@ -306,9 +324,17 @@ def main(argv: list[str] | None = None) -> int:
         refused += rs != "ok"
         if EQUIVALENT.get(py, py) != rs:
             disagreements.append({"case": label, "python": py, "rust": rs})
+        # And the promise `verify` makes: an archive it accepts must extract, and one
+        # it refuses must not extract silently. A crash on either side is a failure
+        # of the promise however the verdicts line up.
+        ex = extract_verdict(data)
+        if (py == "ok") != (ex == "ok") or ex.startswith("crash"):
+            mispredicted.append({"case": label, "verify": py, "extract": ex})
 
     result = {"compared": compared, "unbuildable": skipped, "refused": refused,
-              "disagreements": len(disagreements), "detail": disagreements}
+              "disagreements": len(disagreements), "detail": disagreements,
+              "verify_mispredicts_extract": len(mispredicted),
+              "mispredicted": mispredicted}
     if args.json:
         print(json.dumps(result, indent=2))
     else:
@@ -317,6 +343,9 @@ def main(argv: list[str] | None = None) -> int:
         for row in disagreements:
             print(f"    {row['case']:<38} python={row['python']:<28} rust={row['rust']}")
         print(f"  {refused} of them were refused by both, {compared - refused} accepted")
+        for row in mispredicted:
+            print(f"    VERIFY MISPREDICTS  {row['case']:<34} verify={row['verify']:<26} "
+                  f"extract={row['extract']}")
         if not disagreements:
             print("  both readers reach the same verdict on every one")
     # Agreement is only worth something if the edits were *doing* something. If every
@@ -327,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  only {refused}/{compared} were refused at all — these edits are not "
               f"reaching the rules, so agreement means nothing", file=sys.stderr)
         return 1
-    return 1 if disagreements else 0
+    return 1 if disagreements or mispredicted else 0
 
 
 if __name__ == "__main__":
