@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "anla": {
+      "command": "python",
+      "args": ["tools/mcp/anla_mcp.py"]
+    }
+  }
+}
