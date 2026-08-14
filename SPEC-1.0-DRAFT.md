@@ -94,10 +94,16 @@ Three things, and they are worth naming rather than leaving as a feeling:
    caught. The exercise finds every place the document was ambiguous enough that two
    writings of it diverged — five, so far — and nothing at all about the places it
    is confidently, consistently wrong.
-2. **The Rust writer is narrower than the Python one**: no `--skip-unsupported` and
-   so no fidelity report. It now covers files, directories, symbolic links, recorded
-   metadata and appending, and byte-identity is demonstrated over all of those —
-   including a two-snapshot archive — but not over the parts still missing.
+2. **The Rust writer is narrower than the Python one**: it does not carry native
+   names (§5.2.1.1), and **refuses** a name that is not valid UTF-8 rather than
+   guessing. It used to `to_string_lossy()` it — silently storing `caf<0xE9>.txt` as
+   `caf<U+FFFD>.txt`, a different name with every hash verifying, and collapsing two
+   files differing only in an undecodable byte onto one path. That is the same
+   defect as the `errors="replace"` this implementation caught in the *Python*
+   reader, and the difference between *narrower* and *wrong*. It covers files,
+   directories, symbolic links, recorded metadata, appending and the fidelity
+   report, and byte-identity is demonstrated over all of those — including a
+   two-snapshot archive — but not over what it declines to do.
 3. **§10 still lists open questions.** The object name model (whitepaper Q4) is now
    answered in §5.2.1.1 and does *not* change `object_id` for any object whose name
    was already UTF-8 — that absence rule is why it could be answered at this stage

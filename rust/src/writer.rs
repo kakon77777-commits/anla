@@ -284,11 +284,7 @@ fn scan(root: &Path, exclude: &[String], preserve_metadata: bool, allow_unsuppor
             let relative = disk
                 .strip_prefix(root)
                 .map_err(|_| Error::new(Kind::InvalidInput, "path escaped the root"))?;
-            let path = relative
-                .components()
-                .map(|c| c.as_os_str().to_string_lossy().into_owned())
-                .collect::<Vec<_>>()
-                .join("/");
+            let path = native_relative_path(relative)?;
             check_object_path(&path)?;
             if exclude
                 .iter()
@@ -369,6 +365,41 @@ fn compress(raw: &[u8], codec: u64, level: i32) -> Result<(u64, Vec<u8>)> {
 // ---------------------------------------------------------------------------
 
 /// Write one snapshot. `existing` is empty to create, or a whole archive to append.
+/// A relative path as text, or a refusal — never a *lossy* approximation.
+///
+/// This was `to_string_lossy()`, which replaces each undecodable byte with U+FFFD.
+/// On Linux that silently stores `caf<0xE9>.txt` as `caf<U+FFFD>.txt`: a different
+/// name, with every hash verifying — the same defect as the `errors="replace"` this
+/// implementation caught in the *Python* reader's record-type parsing, and the same
+/// shape as SPEC §5.2.1's rule that a path needing rewriting is refused rather than
+/// rewritten. Two files differing only in an undecodable byte would also collapse
+/// onto one path.
+///
+/// The Python writer answers this properly, by carrying the native bytes in `name`
+/// (§5.2.1.1). This writer does not implement that yet and says so instead of
+/// guessing, which is the difference between *narrower* and *wrong*. The spec's
+/// list of what the Rust writer does not cover is where that is recorded.
+fn native_relative_path(relative: &std::path::Path) -> Result<String> {
+    let mut parts = Vec::new();
+    for component in relative.components() {
+        let raw = component.as_os_str();
+        match raw.to_str() {
+            Some(text) => parts.push(text.to_string()),
+            None => {
+                return Err(Error::new(
+                    Kind::UnsafeObject,
+                    format!(
+                        "this name is not valid UTF-8 and this writer cannot carry \
+                         its native form: {}",
+                        raw.to_string_lossy()
+                    ),
+                ))
+            }
+        }
+    }
+    Ok(parts.join("/"))
+}
+
 pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOptions)
     -> Result<Vec<u8>>
 {
