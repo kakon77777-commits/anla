@@ -418,3 +418,76 @@ jobs:
           else
             echo "no findings"
           fi
+
+  distributables:
+    # Build what a release would publish, on every push, and prove the built
+    # artifact works rather than merely that it built. Publishing has never been
+    # rehearsed here — `pypi.org/project/anla/` is 404 and the crate is
+    # unpublished — and an unrehearsed release step is one that fails on the day it
+    # matters, with an audience.
+    #
+    # The wheel is checked by *installing it into a clean environment and using it*.
+    # Building a wheel proves setuptools ran; a round trip through the installed
+    # console script proves a stranger can pack and get their bytes back, which is
+    # the only claim worth making.
+    name: what a release would ship (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build the Python distributions
+        working-directory: python
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --sdist --outdir ../dist
+
+      - name: Install the wheel into a clean environment and use it
+        shell: bash
+        run: |
+          set -e
+          python -m venv /tmp/anla-clean || python -m venv "$RUNNER_TEMP/anla-clean"
+          root="${RUNNER_TEMP:-/tmp}/anla-clean"
+          [ -d "$root" ] || root=/tmp/anla-clean
+          bin="$root/bin"; [ -d "$bin" ] || bin="$root/Scripts"
+          "$bin/python" -m pip install --quiet --upgrade pip
+          # `[speed,zstd]` because that is what a user who wants it to work installs,
+          # and because the pure-Python fallbacks would otherwise be the only thing
+          # this ever exercised.
+          "$bin/python" -m pip install --quiet "$(ls dist/*.whl)[speed,zstd]"
+          mkdir -p smoke/src && printf 'hello\n' > smoke/src/a.txt
+          printf 'and a second file\n' > smoke/src/b.txt
+          "$bin/anla1" pack smoke/src -o smoke/out.anla
+          "$bin/anla1" verify smoke/out.anla
+          "$bin/anla1" extract smoke/out.anla --to smoke/back
+          diff -r smoke/src smoke/back
+          echo "the installed wheel packs, verifies and restores byte for byte"
+
+      - name: Build the Rust binary a release would attach
+        working-directory: rust
+        run: cargo build --release --locked
+
+      - name: The binary runs and agrees with the wheel
+        shell: bash
+        run: |
+          set -e
+          binary=rust/target/release/anla1-rs
+          [ -f "$binary" ] || binary=rust/target/release/anla1-rs.exe
+          "$binary" verify smoke/out.anla
+          echo "the Rust binary reads what the Python wheel wrote"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributables-${{ matrix.os }}
+          path: |
+            dist/*
+            rust/target/release/anla1-rs
+            rust/target/release/anla1-rs.exe
+          if-no-files-found: error
+          retention-days: 30
