@@ -130,6 +130,9 @@ pub fn verify_manifest(manifest: &Value, algorithm: &str) -> Result<()> {
             .and_then(|v| v.as_text())
             .map_err(|e| invalid(e.to_string()))?;
         check_object_path(path)?;
+        if let Some(name) = entry.get("name") {
+            check_native_name(name, path)?;
+        }
         let kind = entry
             .need("kind")
             .and_then(|v| v.as_text())
@@ -219,6 +222,69 @@ pub fn verify_manifest(manifest: &Value, algorithm: &str) -> Result<()> {
 }
 
 /// SPEC-1.0-DRAFT.md section 5.2.1: relative, no NUL, no drive letter, no `.` or
+/// The portable rendering of a name that may not be UTF-8 — SPEC §5.2.1.
+///
+/// Decode as UTF-8; write each byte that will not decode as `%XX`, uppercase. The
+/// Python implementation reaches the same answer through `surrogateescape`, which
+/// puts an undecodable byte at `U+DC00 + byte`; this one walks the bytes directly
+/// because Rust has no such decoding mode. Two routes to one definition is exactly
+/// the situation the byte comparison exists to check, and the reason this rule is
+/// written out in the specification rather than left as "what the writer does".
+pub fn derive_path(name: &[u8]) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut i = 0;
+    while i < name.len() {
+        // The longest valid UTF-8 sequence starting here, if any. `from_utf8` on a
+        // shrinking window is O(1) amortised for the 1–4 byte cases that exist.
+        let mut taken = 0;
+        for width in (1..=4.min(name.len() - i)).rev() {
+            if let Ok(text) = core::str::from_utf8(&name[i..i + width]) {
+                out.push_str(text);
+                taken = width;
+                break;
+            }
+        }
+        if taken == 0 {
+            out.push_str(&format!("%{:02X}", name[i]));
+            taken = 1;
+        }
+        i += taken;
+    }
+    out
+}
+
+/// A native name is legal only if `path` is what it derives — SPEC §5.2.1.
+///
+/// That relation is the safety argument. Without it an archive could carry a
+/// harmless `path` and a traversing `name`, and a reader that prefers the name
+/// would write outside the destination while one that falls back would not — two
+/// conforming readers disagreeing about where a file goes, with every hash
+/// verifying. This reader accepted all of that until the Python side was built and
+/// the two were compared.
+fn check_native_name(name: &Value, path: &str) -> Result<()> {
+    let bytes = name
+        .as_bytes()
+        .map_err(|_| invalid(format!("a native name must be a byte string: {path}")))?;
+    if bytes.is_empty() {
+        return Err(Error::new(
+            Kind::UnsafeObject,
+            format!("a native name must not be empty: {path}"),
+        ));
+    }
+    if bytes == path.as_bytes() {
+        return Err(invalid(format!(
+            "a native name equal to the path carries nothing and is omitted: {path}"
+        )));
+    }
+    let derived = derive_path(bytes);
+    if derived != path {
+        return Err(invalid(format!(
+            "the path is not this name's derivation: {path} vs {derived}"
+        )));
+    }
+    Ok(())
+}
+
 /// `..` component, `/` the only separator — and a path that would have to be
 /// *changed* to satisfy that is refused rather than changed.
 pub fn check_object_path(path: &str) -> Result<()> {

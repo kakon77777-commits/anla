@@ -60,8 +60,7 @@ def pack(root: Path, **kwargs) -> bytes:
     symlink in it.
     """
     tree = scan_tree(root, **kwargs)
-    return append_snapshot(b"", files=tree.files, directories=tree.directories,
-                           objects=tree.objects, fidelity=tree.skipped,
+    return append_snapshot(b"", **tree.as_source(),
                            created_unix_ns=CREATED, archive_id=ARCHIVE_ID)
 
 

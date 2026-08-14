@@ -104,6 +104,12 @@ KNOWN_CAPABILITIES = frozenset({
     # refuse an archive this reader could restore the contents of perfectly.
     "anla:metadata:common:1",
     "anla:metadata:posix:1",
+    # Optional for the same reason: a reader that ignores a native name restores the
+    # object under its portable path, which is a complete restore of the content
+    # under a different label. Refusing the archive instead would be a worse failure
+    # than restoring it and saying so — and saying so is required, in the restore
+    # report rather than the archive, because only the reader knows it happened.
+    "anla:object:native-name:1",
 })
 
 #: Hash agility, and the footer names its own: a footer is read *before* the

@@ -26,7 +26,7 @@ by an invariant that was written down and checked by nobody.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
@@ -49,6 +49,7 @@ from .manifest import (
     build_manifest,
     check_fidelity,
     sorted_by_path,
+    NATIVE_NAME_CAPABILITY,
     parse_manifest,
     verify_manifest,
 )
@@ -414,6 +415,7 @@ def append_snapshot(data: bytes, *,
                     metadata: Mapping[str, dict] | None = None,
                     prior: "list[Snapshot] | None" = None,
                     objects: Iterable[ObjectEntry] = (),
+                    native_names: Mapping[str, bytes] | None = None,
                     fidelity: Iterable[dict] = (),
                     auxiliary: Iterable[dict] = (),
                     sink: "_Sink | None" = None,
@@ -502,9 +504,18 @@ def append_snapshot(data: bytes, *,
         sink = _MemorySink(data[:resume_at] if started else data)
     out = sink
     chunk_entries: dict[bytes, ChunkEntry] = {}
-    tree_objects = [ObjectEntry(kind="directory", path=path)
+    # One mapping for every kind, applied where the entries are built. A directory
+    # is a bare string with no entry to hang a field on, so plumbing the native name
+    # through three separate paths would have meant three chances to forget one —
+    # and an object that lost its native name would restore under the escaped label
+    # with nothing saying it had been possible to do better. An explicit `name` on a
+    # caller-supplied `ObjectEntry` wins over the mapping.
+    natives = dict(native_names or {})
+    tree_objects = [ObjectEntry(kind="directory", path=path, name=natives.get(path))
                     for path in sorted_by_path(directories, lambda p: p)]
-    tree_objects += list(objects)
+    tree_objects += [entry if entry.name is not None or entry.path not in natives
+                     else replace(entry, name=natives[entry.path])
+                     for entry in objects]
     # A complete manifest: descriptors for chunks written now *and* for chunks
     # written by an earlier snapshot, so that reading this snapshot needs no other.
     referenced: list[ChunkEntry] = []
@@ -540,6 +551,7 @@ def append_snapshot(data: bytes, *,
         tree_objects.append(ObjectEntry(
             kind="regular-file", path=source.path, size=len(payload),
             content_hash=hasher(payload), chunks=tuple(ids),
+            name=natives.get(source.path),
             metadata=dict(source.metadata)))
         for chunk_id in ids:
             if chunk_id in listed:
@@ -591,6 +603,8 @@ def append_snapshot(data: bytes, *,
 
     namespaces = {ns for entry in tree_objects for ns in entry.metadata}
     optional = [f"anla:metadata:{ns}:1" for ns in sorted(namespaces)]
+    if any(entry.name is not None for entry in tree_objects):
+        optional.append(NATIVE_NAME_CAPABILITY)
 
     metadata_blocks: list[dict] = []
     report = list(fidelity)

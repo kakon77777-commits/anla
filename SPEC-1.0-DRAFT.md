@@ -98,8 +98,10 @@ Three things, and they are worth naming rather than leaving as a feeling:
    so no fidelity report. It now covers files, directories, symbolic links, recorded
    metadata and appending, and byte-identity is demonstrated over all of those —
    including a two-snapshot archive — but not over the parts still missing.
-3. **§10 still lists open questions**, including the object name model (whitepaper
-   Q4), which will change `object_id` when it is answered.
+3. **§10 still lists open questions.** The object name model (whitepaper Q4) is now
+   answered in §5.2.1.1 and does *not* change `object_id` for any object whose name
+   was already UTF-8 — that absence rule is why it could be answered at this stage
+   at all. What it changes is archives that could not previously be written.
 
 Freezing means promising not to change these bytes. The rule this draft set itself
 has been met; the judgement about whether the design is *right* has not been made,
@@ -120,7 +122,7 @@ and it is a different judgement.
 | The `anla1` command line, with `--json` and the whitepaper's exit codes | **implemented** — [`python/anla1/cli.py`](python/anla1/cli.py), 12 tests |
 | A streaming writer | **implemented** — `write_snapshot` puts records on disk as they are produced and memory-maps the existing archive, so the bound falls from *archive + largest file* to *largest file*. An append writes after the newest complete footer and patches the 64-byte header rather than rebuilding the file. Byte-identical to the in-memory path, which is the only property such a refactor is allowed to have. |
 | CDDL schemas | [`schemas/anla-1.0.cddl`](schemas/anla-1.0.cddl), shape only |
-| Object name model (whitepaper Q4) | one `path`, deliberately not settled |
+| Object name model (whitepaper Q4) | **implemented** — §5.2.1.1: `path` portable, `name` native and present only when it differs, so `object_id` is unchanged for every UTF-8 name. Both implementations enforce the derivation; [`tools/compare_names.py`](tools/compare_names.py) checks they agree over 386 names |
 | BLAKE3-256 | **implemented** — [`python/anla1/blake3.py`](python/anla1/blake3.py), a dependency-free reference plus the Rust fast path, 55 tests |
 | Chunking profile recorded and checked across snapshots | **implemented** |
 | Zstandard (§8) | **implemented** — [`python/anla1/codecs.py`](python/anla1/codecs.py), 12 tests |
@@ -450,12 +452,67 @@ that is present and breaks a rule above makes the object unsafe. The first says
 these bytes are damaged; the second says this archive is trying to escape. A caller
 acts on them differently.
 
-This is where whitepaper question 4 bites, and it is not answered here. Until the
-name model carries native and legacy forms alongside the portable one, a name that
-cannot survive the round trip is refused, because refusing is the only answer that
-does not quietly change what the archive contains. `design/q4-name-model.md` sets
-out the model that will answer it; the checks in this subsection are the part of it
-that is already true and already enforced.
+#### 5.2.1.1 Native names
+
+An object MAY carry a `name`: **the operating system's own bytes for it**, as a CBOR
+byte string. This is the answer to whitepaper question 4, and `design/q4-name-model.md`
+argues it.
+
+A POSIX filename is an arbitrary byte string and a Windows filename is a UTF-16
+sequence that may hold an unpaired surrogate. Neither is a UTF-8 string, so a single
+`path` cannot represent every real filename. Two fields, two jobs:
+
+| field | what it is | who uses it |
+|---|---|---|
+| `path` | portable, always present, always UTF-8, always §5.2.1-safe | display, search, restore onto a *different* platform |
+| `name` | the native bytes, present **only when they differ** | exact restore on the source platform |
+
+**`name` MUST be omitted when it equals `path` encoded as UTF-8**, and a reader MUST
+refuse an archive that includes it anyway. That is not a size rule. Because `name`
+is inside `object_id`, omitting the redundant case is what makes **`object_id`
+unchanged for every object whose name is already UTF-8** — so answering question 4
+invalidates no existing archive that did not have the question. Emitting `name`
+always would have changed every object id ever written, to fix a case most archives
+do not contain.
+
+**Derivation.** When the native bytes are not valid UTF-8, `path` is derived from
+them: decode as UTF-8, and write each byte that will not decode as `%XX`, uppercase
+hexadecimal. `path` MUST be exactly this derivation of `name`, and a reader MUST
+refuse an object where it is not.
+
+That relation is a safety rule, not a convenience. Without it an archive could carry
+a harmless `path` and a traversing `name`: a reader that prefers `name` writes
+outside the destination, a reader that falls back to `path` writes inside it, and
+every hash verifies for both. Two conforming readers disagreeing about *where a file
+goes* is worse than either behaviour on its own. Tying them together also means
+§5.2.1's existing check covers `name`, because the derivation escapes only
+undecodable bytes and never removes a `/` or a `.` — a traversing name derives a
+traversing path, and that path is already refused.
+
+The derivation is deliberately **not reversible**, and does not need to be. A file
+genuinely called `caf%E9.txt` derives what `caf<0xE9>.txt` derives. When `name` is
+present it is the identity, not `path`; a derived `path` is a label, and a label
+only has to be unique within the snapshot, which §5.2.1's duplicate-path rule
+already enforces — loudly, at write time, naming both. So no escape-the-escape rule
+is required.
+
+**Capability.** `anla:object:native-name:1`, and it is **optional**. A reader that
+ignores `name` restores the object under `path`: the content is intact, the archive
+still holds the true name, and what is lost is the ability to *apply* it — the same
+"stored but not applied" state §5.2.2 defines for metadata. Refusing a whole archive
+because one filename is unusual is a worse failure than restoring it under a
+portable name.
+
+**But it MUST say so.** A restore that wrote an object under `path` where `name` was
+available MUST report it. That belongs in the restore report and not in the archive,
+because only the reader knows it happened. A reader that silently writes the escaped
+label has told its caller the archive contained something it did not.
+
+What this does **not** settle is the rest of question 4: case-insensitive and
+normalization-folding target filesystems, where `A.txt` and `a.txt`, or NFC and NFD,
+collide on restore. That is handled elsewhere and already — §5.2.1's restore side
+refuses by device and inode when two archive paths land on one file. This subsection
+is about what a name *is*, not about what a filesystem will accept.
 
 `kind` MUST be `regular-file`, `directory` or `symbolic-link`. Devices, sockets and
 FIFOs are not representable in 1.0 and MUST NOT be approximated by something that is

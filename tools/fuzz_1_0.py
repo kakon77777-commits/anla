@@ -61,19 +61,22 @@ def build_seeds() -> list[tuple[str, bytes]]:
     small = cdc_chunker(CdcProfile(min_size=1024, avg_size=4096, max_size=16384))
 
     seeds: list[tuple[str, bytes]] = []
-    one = append_snapshot(b"", files=tree.files, directories=tree.directories,
-                          objects=tree.objects, created_unix_ns=FIXED_TIME,
+    one = append_snapshot(b"", **tree.as_source(), created_unix_ns=FIXED_TIME,
                           chunker=small, codec=CODEC_ZSTD, archive_id=FIXED_UUID)
     seeds.append(("corpus-zstd", one))
     seeds.append(("corpus-store", append_snapshot(
-        b"", files=tree.files, directories=tree.directories, objects=tree.objects,
+        b"", **tree.as_source(),
         created_unix_ns=FIXED_TIME, chunker=small, codec=CODEC_STORE,
         archive_id=FIXED_UUID)))
     # A second snapshot, so the footer chain and the lineage rules get mutated too.
     edited = [SourceEntry(path=e.path, read=(lambda r=e.read()[:100] + b"edited\n": r))
               if i == 0 else e for i, e in enumerate(tree.files)]
+    # `as_source()` then overridden, rather than listing the fields again: this is
+    # the site that would have silently dropped `native_names` had it kept spelling
+    # them out, and a seed archive missing a field the others have is a hole in the
+    # corpus nothing reports.
     seeds.append(("two-snapshots", append_snapshot(
-        one, files=edited, directories=tree.directories, objects=tree.objects,
+        one, **{**tree.as_source(), "files": edited},
         created_unix_ns=FIXED_TIME + 1, chunker=small, codec=CODEC_ZSTD)))
     # Something tiny, because most mutations of a big archive land in payload.
     seeds.append(("minimal", append_snapshot(

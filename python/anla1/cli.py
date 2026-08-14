@@ -167,8 +167,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
     # Streamed to disk rather than assembled in memory: the archive never exists as
     # one object, so a tree larger than RAM is packable.
     size = write_snapshot(
-        target, files=tree.files, directories=tree.directories,
-        objects=tree.objects, fidelity=tree.skipped,
+        target, **tree.as_source(),
         created_unix_ns=_created_ns(args.created_ns),
         chunker=_chunker(args.chunking, args.chunk_avg),
         codec=CODEC_ZSTD if args.codec == 'zstd' else CODEC_STORE,
@@ -210,8 +209,7 @@ def cmd_append(args: argparse.Namespace) -> int:
     # and patches the 64-byte header; it does not rewrite the archive to add a
     # manifest, which for a large one is the difference between seconds and hours.
     size = write_snapshot(
-        args.archive, files=tree.files, directories=tree.directories,
-        objects=tree.objects, fidelity=tree.skipped,
+        args.archive, **tree.as_source(),
         created_unix_ns=_created_ns(args.created_ns),
         chunker=_chunker(args.chunking, args.chunk_avg),
         codec=CODEC_ZSTD if args.codec == 'zstd' else CODEC_STORE,

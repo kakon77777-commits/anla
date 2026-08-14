@@ -40,6 +40,7 @@ __all__ = [
     "METADATA_NAMESPACES", "FIDELITY_REASONS",
     "ObjectEntry", "ChunkEntry", "Roots",
     "object_id_for", "object_leaf", "chunk_leaf", "check_object_path", "sorted_by_path",
+    "derive_path", "check_native_name", "native_name_for", "NATIVE_NAME_CAPABILITY",
     "check_metadata", "check_fidelity", "fidelity_of",
     "compute_roots", "build_manifest", "verify_manifest", "without_auxiliary",
 ]
@@ -61,6 +62,86 @@ METADATA_NAMESPACES = ("common", "posix", "fidelity")
 #: Free text would make the report unsummarisable, which is most of what a report
 #: is for.
 FIDELITY_REASONS = ("kind-not-representable", "read-failed", "excluded-by-policy")
+
+
+#: A native name is an *optional* capability. A reader that ignores it restores
+#: the object under `path` — the content is intact, the archive still holds the
+#: true name, and what is lost is the ability to *apply* it. That is the same
+#: "stored but not applied" state metadata namespaces are in, and for the same
+#: reason: requiring it would refuse an archive this reader could restore
+#: perfectly. See design/q4-name-model.md decision 3.
+NATIVE_NAME_CAPABILITY = "anla:object:native-name:1"
+
+
+def derive_path(name: bytes) -> str:
+    """The portable rendering of a name that may not be UTF-8.
+
+    Decode as UTF-8; write each byte that will not decode as `%XX`, uppercase.
+
+    The obvious objection is ambiguity — a file genuinely called `caf%E9.txt`
+    derives what `caf<0xE9>.txt` derives. It does not matter, and the reason is
+    worth stating rather than escaping around: **when `name` is present, `path` is
+    not the object's identity.** `name` is. A derived `path` is a label, and a label
+    only has to be unique within the snapshot, which §5.2.1's duplicate-path rule
+    already enforces — loudly, at write time, naming both. So this needs no
+    escape-the-escape rule; it needs a uniqueness check, and that check already
+    exists and is already tested.
+    """
+    if not isinstance(name, (bytes, bytearray)):
+        raise InvalidInput("a native name is bytes", got=type(name).__name__)
+    # `surrogateescape` puts each undecodable byte at U+DC00+byte, which is exactly
+    # the set this then rewrites — so the round trip is byte-exact by construction
+    # rather than by a table someone has to keep in step.
+    return "".join(
+        f"%{ord(ch) - 0xDC00:02X}" if 0xDC80 <= ord(ch) <= 0xDCFF else ch
+        for ch in bytes(name).decode("utf-8", "surrogateescape"))
+
+
+def check_native_name(name: object, *, path: str) -> bytes:
+    """`name` is legal only if `path` is what it derives.
+
+    That relation is the whole safety argument, and without it the two-field model
+    is worse than one field. A reader that prefers `name` and a reader that falls
+    back to `path` must place the object in the *same* location; if the two were
+    independent, an archive could carry a harmless `path` and a traversing `name`
+    and the two conforming readers would disagree about where the file goes — with
+    every hash verifying. Tying them together also means `path`'s safety check
+    covers `name`, because the derivation escapes only undecodable bytes and never
+    removes a `/` or a `.`: a traversing name derives a traversing path, and that
+    path is refused.
+
+    A `name` equal to `path` encoded is refused as well. It carries nothing, and a
+    manifest with two ways to say the same thing has two encodings of one archive.
+    """
+    if not isinstance(name, (bytes, bytearray)):
+        raise ManifestInvalid("a native name must be a byte string", path=path,
+                              got=type(name).__name__)
+    name = bytes(name)
+    if not name:
+        raise UnsafeObject("a native name must not be empty", path=path)
+    if name == path.encode("utf-8"):
+        raise ManifestInvalid(
+            "a native name equal to the path carries nothing and is omitted",
+            path=path)
+    derived = derive_path(name)
+    if derived != path:
+        raise ManifestInvalid("the path is not this name's derivation",
+                              path=path, derived=derived)
+    return name
+
+
+def native_name_for(name: bytes) -> tuple[str, bytes | None]:
+    """Split a native name into the pair an object carries.
+
+    Returns `(path, name_or_None)`. **`None` whenever the name is already UTF-8**,
+    which is not a size optimisation: it means `object_id` is unchanged for every
+    object whose name needed no answer to question 4, so answering it invalidates
+    no existing archive that did not have the problem. Always emitting `name` would
+    have changed every object id ever written, to fix a case most archives do not
+    have.
+    """
+    path = derive_path(name)
+    return path, None if path.encode("utf-8") == bytes(name) else bytes(name)
 
 
 def check_object_path(path: object) -> str:
@@ -186,14 +267,24 @@ def fidelity_of(manifest: dict) -> list[dict]:
 class ObjectEntry:
     """One filesystem object.
 
-    `path` is the portable UTF-8 name and is the only name form this draft carries.
-    Open question 4 will add the native and legacy forms, and doing so *will* change
-    `object_id` — which is why nothing in the container depends on an object id
-    being stable across draft revisions.
+    Two fields, two jobs. `path` is the portable name: always present, always valid
+    UTF-8, always §5.2.1-safe, and what a reader displays, a person greps for, and a
+    restore onto a *different* platform uses. `name` is the native bytes, and it is
+    what an exact restore on the source platform uses.
+
+    Neither can do the other's job, which is why one field was never enough: a UTF-8
+    string cannot represent a name that is not UTF-8, and a byte string can but makes
+    every path in every manifest unreadable to pay for a case most archives do not
+    have. `name` is therefore **absent whenever it would be redundant**, so
+    `object_id` is unchanged for every object whose name is already UTF-8.
     """
 
     kind: str
     path: str
+    #: The native bytes, present only when they differ from `path` encoded as UTF-8.
+    #: `path` must be `derive_path(name)` — see `check_native_name` for why that
+    #: relation is the safety argument and not merely a convention.
+    name: bytes | None = None
     size: int = 0
     content_hash: bytes = b""
     chunks: tuple[bytes, ...] = ()
@@ -214,6 +305,8 @@ class ObjectEntry:
         # guard is not a check.
         check_object_path(self.path)
         body: dict[str, Any] = {"kind": self.kind, "path": self.path}
+        if self.name is not None:
+            body["name"] = check_native_name(self.name, path=self.path)
         if self.kind == "regular-file":
             body["size"] = self.size
             body["content_hash"] = self.content_hash
@@ -434,6 +527,8 @@ def verify_manifest(manifest: dict, hasher: Hasher) -> Roots:
         # filesystem path into a 1.0 archive, so nothing had yet needed to say what
         # a legal one is — an omission, not a decision.
         path = check_object_path(entry["path"])
+        if "name" in entry:
+            check_native_name(entry["name"], path=path)
         if entry.get("kind") not in OBJECT_KINDS:
             raise ManifestInvalid("unsupported object kind", kind=entry.get("kind"),
                                   path=path, supported=list(OBJECT_KINDS))

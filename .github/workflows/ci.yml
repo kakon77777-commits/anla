@@ -291,6 +291,17 @@ jobs:
         # library the bytes match too, and the run says which case it saw.
         run: python tools/compare_writers.py test_demo
 
+      - name: The two implementations derive one path from one native name
+        # Only the *reader* is compared here, and deliberately: the Rust writer does
+        # not emit native names, so there is nothing to compare byte for byte. What
+        # can be compared is the rule — Python writes an archive whose paths are its
+        # names' derivations, Rust recomputes each one and refuses any that differs.
+        # The two arrive by different routes (surrogate decoding against a byte
+        # walk), which is what makes agreement mean the rule is written tightly
+        # enough for two people to implement. The run ends with a forged archive
+        # Rust must refuse, so a pass cannot be vacuous.
+        run: python tools/compare_names.py
+
       - name: Differential fuzzing, python against rust
         # The tool that found the missing section 4.3 check within three hundred
         # mutants. Seeded from the run number so the space keeps being searched

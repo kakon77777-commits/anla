@@ -90,8 +90,7 @@ def check_corpus(corpus: Path, *, keep: Path | None = None) -> Report:
         raise SystemExit(f"{corpus} holds no files to test")
 
     data = append_snapshot(
-        b"", files=tree.files, directories=tree.directories,
-        objects=tree.objects, fidelity=tree.skipped,
+        b"", **tree.as_source(),
         created_unix_ns=FIXED_TIME, chunker=cdc_chunker(),
         archive_id=FIXED_UUID)
 

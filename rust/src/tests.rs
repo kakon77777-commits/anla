@@ -174,3 +174,49 @@ fn object_paths_that_would_have_to_be_rewritten_are_refused() {
         assert!(check_object_path(bad).is_err(), "accepted {bad}");
     }
 }
+
+
+#[test]
+fn a_native_name_derives_the_path_the_specification_says() {
+    use crate::archive::derive_path;
+
+    // The same table as `python/tests/test_native_names_1_0.py`, deliberately
+    // duplicated rather than shared: two implementations agreeing because they read
+    // one file is not two implementations agreeing. `tools/compare_names.py` then
+    // checks the pair over four hundred names neither table thought of.
+    let cases: &[(&[u8], &str)] = &[
+        (b"hello.txt", "hello.txt"),
+        ("café.txt".as_bytes(), "café.txt"),
+        ("中文.txt".as_bytes(), "中文.txt"),
+        (b"caf\xe9.txt", "caf%E9.txt"),
+        (b"\xff\xfe.bin", "%FF%FE.bin"),
+        (b"a\x80b\x81c", "a%80b%81c"),
+        (b"dir/caf\xe9.txt", "dir/caf%E9.txt"),
+        // A lead byte with nothing following it: the window search must not run off
+        // the end, and must escape the lead byte alone rather than consuming what
+        // is not there.
+        (b"\xc3", "%C3"),
+        (b"\xc3\x28", "%C3("),
+        // A surrogate encoded as UTF-8, which `from_utf8` rejects byte by byte.
+        (b"\xed\xa0\x80", "%ED%A0%80"),
+        // An overlong NUL: two bytes, neither valid, both escaped.
+        (b"\xc0\x80", "%C0%80"),
+    ];
+    for (native, expected) in cases {
+        assert_eq!(&derive_path(native), expected, "for {native:?}");
+    }
+}
+
+#[test]
+fn the_derivation_never_loses_a_valid_prefix() {
+    use crate::archive::derive_path;
+
+    // The failure mode a byte-walking implementation has and a decoding one does
+    // not: consuming one byte at a time would turn a perfectly good multi-byte
+    // character into three escapes. Every valid character here must survive whole,
+    // with only the trailing rubbish escaped.
+    let mut name = "中文-漢字".as_bytes().to_vec();
+    name.extend_from_slice(b"\xe9\xff");
+    name.extend_from_slice("🌏".as_bytes());
+    assert_eq!(derive_path(&name), "中文-漢字%E9%FF🌏");
+}

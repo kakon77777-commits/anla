@@ -51,7 +51,8 @@ from typing import Iterable
 from anla.errors import FidelityDegraded, InvalidInput, UnsafeObject
 from anla.globs import matches_any
 
-from .manifest import ObjectEntry, check_object_path, sorted_by_path
+from .manifest import (ObjectEntry, check_object_path, native_name_for,
+                       sorted_by_path)
 from .snapshot import Snapshot, SourceEntry, extract_snapshot
 
 __all__ = ["SourceTree", "RestoreReport", "scan_tree", "restore_tree"]
@@ -68,7 +69,26 @@ class SourceTree:
     #: entry the writer could not keep. Goes *into the archive*, not just into a
     #: terminal — an operator told once, on the day, is not a record.
     skipped: list[dict] = field(default_factory=list)
+    #: Archive path → the operating system's bytes, for the objects whose name is
+    #: not already UTF-8. Empty on almost every tree, which is the point: an
+    #: object's id is unchanged unless its name actually needed the answer to
+    #: whitepaper question 4.
+    native_names: dict[str, bytes] = field(default_factory=dict)
     total_bytes: int = 0
+
+    def as_source(self) -> dict:
+        """Everything `append_snapshot` needs from a scan, as one value.
+
+        Five call sites used to spell this out field by field, which made adding
+        `native_names` five chances to forget one — and a forgotten native name is
+        *invisible*: the archive verifies, the file restores, it simply restores
+        under the escaped label with nothing saying a better name was available. A
+        defect with no symptom is the kind that survives. Handing the scan over
+        whole means the next field reaches every caller without touching any.
+        """
+        return {"files": self.files, "directories": self.directories,
+                "objects": self.objects, "fidelity": self.skipped,
+                "native_names": self.native_names}
 
 
 def _archive_path(entry: Path, root: Path) -> str:
@@ -78,7 +98,28 @@ def _archive_path(entry: Path, root: Path) -> str:
     the reader cannot disagree about what a legal path is — and it refuses a name it
     would have to change rather than storing the changed version.
     """
-    return check_object_path(PurePosixPath(entry.relative_to(root).as_posix()).as_posix())
+    return _archive_name(entry, root)[0]
+
+
+def _archive_name(entry: Path, root: Path) -> tuple[str, bytes | None]:
+    """The `(path, native bytes or None)` pair for an on-disk entry.
+
+    The bytes come from `os.fsencode`, which is the operating system's own answer
+    rather than this module's guess. On POSIX it recovers exactly what `os.listdir`
+    was given, because Python surfaced the undecodable bytes as surrogates and
+    `fsencode` puts them back. On Windows, where a name is UTF-16 and may hold an
+    unpaired surrogate with no UTF-8 form at all, it yields the WTF-8 encoding of
+    that surrogate — bytes `os.fsdecode` turns back into the same name. Either way
+    the pair round-trips on the platform that wrote it, which is the property a
+    native name exists to provide.
+
+    `None` whenever the bytes are already `path` encoded, which is almost always,
+    and which is what leaves `object_id` untouched for every object that never had
+    this problem.
+    """
+    relative = PurePosixPath(entry.relative_to(root).as_posix()).as_posix()
+    path, native = native_name_for(os.fsencode(relative))
+    return check_object_path(path), native
 
 
 def _describe(entry: Path) -> str:
@@ -192,10 +233,12 @@ def scan_tree(root: str | os.PathLike[str], *,
         here = Path(dirpath)
         for name in list(dirnames):
             entry = here / name
-            archive_path = _archive_path(entry, root_path)
+            archive_path, native = _archive_name(entry, root_path)
             if matches_any(archive_path, patterns):
                 dirnames.remove(name)
                 continue
+            if native is not None:
+                tree.native_names[archive_path] = native
             if entry.is_symlink():
                 # A link to a directory is a link, not a directory. Walking into it
                 # would put the target's contents in the archive under this name.
@@ -207,9 +250,11 @@ def scan_tree(root: str | os.PathLike[str], *,
             tree.directories.append(archive_path)
         for name in filenames:
             entry = here / name
-            archive_path = _archive_path(entry, root_path)
+            archive_path, native = _archive_name(entry, root_path)
             if matches_any(archive_path, patterns):
                 continue
+            if native is not None:
+                tree.native_names[archive_path] = native
             if entry.is_symlink():
                 claim(archive_path, entry)
                 tree.objects.append(_link_entry(entry, archive_path, preserve_mtime))
@@ -248,6 +293,14 @@ class RestoreReport:
     #: reader can know. "Not stored" is a loss; "stored, not applied" is a limit of
     #: this machine, and conflating them throws away whether the data still exists.
     metadata_not_applied: dict[str, int] = field(default_factory=dict)
+    #: Objects whose archive held a native name this run could not use, so they were
+    #: written under the portable `path` instead. Same distinction as above and for
+    #: the same reason: the true name is still in the archive, and a machine that can
+    #: represent it will restore it exactly. What is lost is *this* restore's
+    #: fidelity, which only this run knows — so it belongs in the report and not in
+    #: the archive. Required by design/q4-name-model.md decision 3: a reader may
+    #: decline to apply a native name, but it may not do so quietly.
+    names_not_applied: list[dict] = field(default_factory=list)
 
 
 def _note_unapplied(entry: dict, report: RestoreReport, *, applied: set[str]) -> None:
@@ -322,21 +375,55 @@ def restore_tree(data: bytes, snapshot: Snapshot,
     # otherwise let one file silently become the other.
     written: dict[tuple[int, int], str] = {}
 
-    def target_for(path: str) -> Path:
+    def target_for(entry_or_path) -> Path:
+        """Where an object goes: its native name if this machine can write it.
+
+        The safety check runs on `path`, and it is `path` that is checked even when
+        the native name is used — which is sound only because the manifest requires
+        `derive_path(name) == path`, so a traversing name cannot hide behind a
+        harmless path. Without that relation this function would have to re-derive
+        and re-check, and two readers could disagree about where a file goes.
+
+        Falling back is not a failure. The content is intact and the archive still
+        holds the true name; what a reader owes in exchange is to say so, which is
+        what `names_not_applied` is for.
+        """
+        entry = entry_or_path if isinstance(entry_or_path, dict) else None
+        path = entry["path"] if entry else entry_or_path
         resolved = (root / check_object_path(path)).resolve()
         if resolved != root and root not in resolved.parents:
             raise UnsafeObject("object path escapes the destination", path=path)
-        return resolved
+        native = entry.get("name") if entry else None
+        if native is None:
+            return resolved
+        try:
+            # `os.fsdecode` is the inverse of what the scan used, and on a platform
+            # that cannot represent these bytes it is where that shows — so the
+            # attempt is the test. Guessing from `sys.platform` would be a claim
+            # about the filesystem made by something that never touched it.
+            local = os.fsdecode(native)
+            candidate = (root / PurePosixPath(local)).resolve()
+        except (UnicodeError, ValueError, OSError) as exc:
+            report.names_not_applied.append(
+                {"path": path, "reason": "not-representable", "detail": str(exc)[:80]})
+            return resolved
+        if candidate != root and root not in candidate.parents:
+            # The relation above makes this unreachable for a manifest that verified,
+            # and it stays because "unreachable" is a claim about code that has been
+            # wrong before. Falling back is the safe answer, not an exception.
+            report.names_not_applied.append({"path": path, "reason": "escapes-destination"})
+            return resolved
+        return candidate
 
     for entry in snapshot.manifest["objects"]:
         if entry["kind"] != "directory":
             continue
-        target_for(entry["path"]).mkdir(parents=True, exist_ok=True)
+        target_for(entry).mkdir(parents=True, exist_ok=True)
         report.directories += 1
 
     for entry in sorted(snapshot.manifest["objects"], key=lambda e: e["path"]):
         if entry["kind"] == "symbolic-link":
-            _restore_link(entry, target_for(entry["path"]), root,
+            _restore_link(entry, target_for(entry), root,
                           overwrite=overwrite,
                           allow_external=allow_external_links)
             report.links += 1
@@ -345,7 +432,7 @@ def restore_tree(data: bytes, snapshot: Snapshot,
         if entry["kind"] != "regular-file":
             continue
         path = entry["path"]
-        target = target_for(path)
+        target = target_for(entry)
         if target.exists():
             stat = target.stat()
             collided = written.get((stat.st_dev, stat.st_ino))

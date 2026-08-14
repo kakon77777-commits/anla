@@ -1,9 +1,22 @@
 # Whitepaper Q4 — the object name model
 
-Status: **planned, not started.** The last question in `SPEC-1.0-DRAFT.md` §10 that
-changes bytes, and the only one left that can change `object_id`. Written before the
-code, like Milestones 2 and 3, because the answer has to be argued rather than
-discovered.
+Status: **implemented**, in `SPEC-1.0-DRAFT.md` §5.2.1.1, both implementations, on
+2026-08-14. Written before the code, like Milestones 2 and 3, because the answer had
+to be argued rather than discovered.
+
+**All four decisions below survived contact with the code.** One was found
+incomplete: decision 1 gives `path` and `name` two jobs but never says how they are
+related, and unrelated they are *worse than one field* — an archive could carry a
+harmless `path` and a traversing `name`, and a reader that prefers `name` would
+write outside the destination while one that falls back would not, with every hash
+verifying for both. The rule that closes it is **`path` MUST be `derive_path(name)`**,
+which decision 2 had already described as a derivation without ever requiring it.
+Requiring it also makes §5.2.1's existing path check cover `name`, so the native name
+needs no traversal rule of its own.
+
+The Rust reader accepted all four hostile cases until it was told the rule. That is
+the second clause of the freeze rule doing exactly what it is for, and it is the
+reason step 5 below was written as a step rather than an afterthought.
 
 ## What is broken, precisely
 
@@ -130,15 +143,30 @@ other decision here were rejected, a crash where a refusal is owed is still a de
    no random mutation ever reached the parser. See
    [`hostile-writer-fuzzing.md`](hostile-writer-fuzzing.md). Steps 2–6 below now
    have an instrument that can actually grade them.
-2. `name` in the object model, absent when redundant, with the proof that
-   `object_id` is unchanged for every UTF-8 name.
-3. The derivation, and the collision refusal.
-4. Restore: prefer `name`, fall back to `path`, report the fallback.
-5. Both implementations, and the byte comparison — which is the only thing that will
-   confirm the derivation is defined tightly enough for two people to implement it
-   the same way. That is the whole reason the freeze rule wanted two.
-6. Re-measure. A milestone with no measurement is not finished; this one should move
-   no compression number and should let the corpus hold a name it could not before.
+2. ~~`name` in the object model, absent when redundant, with the proof that
+   `object_id` is unchanged for every UTF-8 name.~~ **Done**, and the proof is an
+   equality in `test_native_names_1_0.py` rather than an argument.
+3. ~~The derivation, and the collision refusal.~~ **Done.** The collision refusal
+   needed no new code — two native names deriving one path is the duplicate-path
+   rule, which already existed and already named both offenders.
+4. ~~Restore: prefer `name`, fall back to `path`, report the fallback.~~ **Done.**
+   Which branch runs is a property of the filesystem, not of the archive: POSIX
+   recovers the byte through a surrogate and writes the true name, Windows cannot
+   and writes the escaped label. So the test asserts the invariant that holds on
+   both — **applied, or reported; never neither** — because asserting either outcome
+   would fail on one platform for a reason that is not a defect.
+5. ~~Both implementations, and the byte comparison.~~ **Done, and it earned its
+   place.** Rust accepted every hostile name — a traversing `name` behind a harmless
+   `path`, a redundant one, a text one — until it was taught the rule. The byte
+   comparison could not have found this, because the Rust *writer* emits no native
+   names: what compares is the rule, via `tools/compare_names.py`, which writes 386
+   awkward names from Python and has Rust re-derive every one. Its control forges an
+   archive Rust must refuse, so a pass cannot be vacuous — the first version checked
+   that *Python* refuses a mismatch, which is true and says nothing about Rust.
+6. ~~Re-measure.~~ **Done, and the prediction held exactly**: on the four benchmark
+   scenarios whose inputs are fixed, not one of 79 size values moved. The two that
+   moved pack the live repository, whose contents this work changed — a property of
+   the instrument now recorded on the rows themselves.
 
 ## What this does not settle
 

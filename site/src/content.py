@@ -110,7 +110,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "Reference implementations",
         "fact_impl_v": "2, cross-verified",
         "fact_tests": "Conformance tests",
-        "fact_tests_v": "668 + fuzzing",
+        "fact_tests_v": "700 + fuzzing",
         "strip_1_t": "Local-first",
         "strip_1_d": "The workbench runs entirely in your tab: your files are read "
                      "into memory and never sent anywhere. The page makes no requests "
@@ -155,8 +155,10 @@ STRINGS: dict[str, dict[str, str]] = {
                    "two: a shared misreading reproduces rather than being caught. "
                    "That is not hypothetical — an archive whose header and manifest "
                    "disagreed passed both readers, and only the byte comparison "
-                   "caught it. The object name model is also still open, and "
-                   "answering it changes every object id.",
+                   "caught it. What having two is good at is the opposite case: the "
+                   "object name model landed this month, and the Rust reader accepted "
+                   "a filename crafted to restore outside the destination until it "
+                   "was taught the rule the Python one already had.",
         "two_cta": "Read the draft specification",
         "why_kicker": "Control-plane transition",
         "why_h2": "Not another interface over ZIP.",
@@ -499,7 +501,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "參考實作",
         "fact_impl_v": "2 套，互相驗證",
         "fact_tests": "一致性測試",
-        "fact_tests_v": "668 項 + 模糊測試",
+        "fact_tests_v": "700 項 + 模糊測試",
         "strip_1_t": "本機優先",
         "strip_1_d": "工作台完全在你的分頁裡執行：檔案只讀進記憶體，不會被送到任何"
                      "地方。頁面本身不發出任何請求，其內容安全政策也禁止對外連線。",
@@ -541,7 +543,10 @@ STRINGS: dict[str, dict[str, str]] = {
                    "共同的誤讀會重現而不是被抓到。"
                    "而這不是假設——一個 header 跟 manifest 不一致的封裝"
                    "通過了兩套 reader，只有逐位元比較抓到它。"
-                   "物件名稱模型也還沒有定案，而回答它會改變每一個 object id。",
+                   "但「有兩套」擅長的是反過來的情況："
+                   "物件名稱模型這個月完成，而 Rust reader 一直接受"
+                   "一個被設計成會還原到目標目錄外面的檔名，"
+                   "直到它也學會 Python 那邊早就有的那條規則。",
         "two_cta": "讀草案規格",
         "why_kicker": "控制平面轉移",
         "why_h2": "不是再做一個 ZIP 介面。",

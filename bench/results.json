@@ -1,6 +1,6 @@
 {
-  "generated_at_unix_ns": 1786695030120831200,
-  "revision": "65e8b09",
+  "generated_at_unix_ns": 1786696074202778300,
+  "revision": "cd4e6a0",
   "profile": "ANLA 1.0 (draft)",
   "codecs": [
     "store",
@@ -18,38 +18,38 @@
       "headline": "One snapshot of this repository's python/ directory",
       "note": "This row used to be the argument for Zstandard, stated as a measurement: with only `store` a single snapshot was larger than the tree and both compressors beat it comfortably. The codec landed, so the row now answers its own question — and the `store` line is kept beside it, because a benchmark that quietly drops the case it used to lose is not reporting, it is marketing. **This row's input is the live repository, so its absolute byte counts are not comparable between commits** — adding four test files moved every size on it, including every competitor's. Only the ratios within one run mean anything across time, and a regression small enough to hide inside a few new files would not be visible here at all. The four scenarios with fixed inputs are where a regression would show, and they are exact: on the run that added this note, not one byte moved on any of them.",
       "inputs": {
-        "logical_bytes": 1703028,
-        "files": 100
+        "logical_bytes": 1765159,
+        "files": 102
       },
       "sizes": {
-        "anla_1_0": 629696,
-        "anla_1_0_store_only": 1758648,
-        "zip_deflate9": 596708,
-        "targz": 527429,
-        "anla_mvp_deflate": 689648
+        "anla_1_0": 652864,
+        "anla_1_0_store_only": 1821896,
+        "zip_deflate9": 619389,
+        "targz": 547881,
+        "anla_mvp_deflate": 714342
       },
       "detail": {
         "snapshots": 1,
-        "unique_chunks": 100,
-        "chunk_bytes": 574061,
-        "logical_bytes": 1703028,
-        "files_round_tripped": 100,
+        "unique_chunks": 102,
+        "chunk_bytes": 596117,
+        "logical_bytes": 1765159,
+        "files_round_tripped": 102,
         "composition": [
           {
             "snapshot": 1,
-            "new_chunk_bytes": 589728,
-            "metadata_bytes": 39904
+            "new_chunk_bytes": 612112,
+            "metadata_bytes": 40688
           }
         ]
       },
       "ratios": {
-        "anla_1_0_vs_input": 0.3698,
-        "anla_1_0_vs_anla_1_0_store_only": 0.3581,
-        "anla_1_0_vs_zip_deflate9": 1.0553,
-        "anla_1_0_vs_targz": 1.1939,
-        "anla_1_0_vs_anla_mvp_deflate": 0.9131
+        "anla_1_0_vs_input": 0.3699,
+        "anla_1_0_vs_anla_1_0_store_only": 0.3583,
+        "anla_1_0_vs_zip_deflate9": 1.054,
+        "anla_1_0_vs_targz": 1.1916,
+        "anla_1_0_vs_anla_mvp_deflate": 0.9139
       },
-      "seconds": 0.71
+      "seconds": 1.16
     },
     {
       "scenario": "metadata-cost",
@@ -78,7 +78,7 @@
         "anla_1_0_vs_times_only": 1.2163,
         "anla_1_0_vs_times_and_mode": 1.1842
       },
-      "seconds": 0.75
+      "seconds": 0.83
     },
     {
       "scenario": "git-history",
@@ -172,7 +172,7 @@
         "anla_1_0_vs_zip_deflate9_per_version": 0.3954,
         "anla_1_0_vs_targz_all_versions": 0.4767
       },
-      "seconds": 5.01
+      "seconds": 8.46
     },
     {
       "scenario": "duplicate-tree",
@@ -232,7 +232,7 @@
         "anla_1_0_vs_input": 0.2292,
         "anla_1_0_vs_zip_deflate9_per_copy": 0.5469
       },
-      "seconds": 0.16
+      "seconds": 0.27
     },
     {
       "scenario": "incompressible",
@@ -276,7 +276,7 @@
         "anla_1_0_vs_zip_deflate9_per_copy": 0.5017,
         "anla_1_0_vs_targz_both": 0.5017
       },
-      "seconds": 1.44
+      "seconds": 1.63
     },
     {
       "scenario": "shifted-insert",
@@ -315,7 +315,7 @@
         "anla_1_0_vs_input": 0.5489,
         "anla_1_0_vs_anla_1_0_fixed_chunking": 0.5486
       },
-      "seconds": 1.9
+      "seconds": 2.1
     }
   ]
 }
