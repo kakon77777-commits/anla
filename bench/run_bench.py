@@ -72,6 +72,12 @@ def tree_bytes(root: Path) -> tuple[int, int]:
     return total, count
 
 
+#: Two scenarios pack `python/` as it exists right now, which means their inputs
+#: change whenever the repository does. That is worth saying on the rows
+#: themselves rather than in a commit message nobody reads next to the number.
+DRIFT_CAVEAT = (" **This row's input is the live repository, so its absolute byte counts are not comparable between commits** — adding four test files moved every size on it, including every competitor's. Only the ratios within one run mean anything across time, and a regression small enough to hide inside a few new files would not be visible here at all. The four scenarios with fixed inputs are where a regression would show, and they are exact: on the run that added this note, not one byte moved on any of them.")
+
+
 def zip_bytes(roots: list[Path]) -> int:
     """One ZIP per tree, deflate level 9, summed.
 
@@ -259,7 +265,7 @@ def scenario_source_tree(work: Path) -> Result:
              "tree and both compressors beat it comfortably. The codec landed, so "
              "the row now answers its own question — and the `store` line is kept "
              "beside it, because a benchmark that quietly drops the case it used to "
-             "lose is not reporting, it is marketing.",
+             "lose is not reporting, it is marketing." + DRIFT_CAVEAT,
         inputs={"logical_bytes": logical, "files": files},
         sizes={"anla_1_0": size,
                "anla_1_0_store_only": stored_only,
@@ -302,7 +308,8 @@ def scenario_git_history(work: Path, versions: int = 8) -> Result:
              "keeping each version as its own ZIP, which is what people do without "
              "snapshots, and against one tar.gz of all of them — gzip's 32 KB window "
              "cannot see from one copy of the tree to the next, which is why "
-             "deduplication is a different mechanism and not a worse compressor.",
+             "deduplication is a different mechanism and not a worse compressor."
+             + DRIFT_CAVEAT,
         inputs={"logical_bytes": logical, "versions": len(roots),
                 "revisions": revisions},
         sizes={"anla_1_0": size,

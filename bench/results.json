@@ -1,6 +1,6 @@
 {
-  "generated_at_unix_ns": 1786691730846921200,
-  "revision": "6017599",
+  "generated_at_unix_ns": 1786695030120831200,
+  "revision": "65e8b09",
   "profile": "ANLA 1.0 (draft)",
   "codecs": [
     "store",
@@ -16,40 +16,40 @@
     {
       "scenario": "source-tree",
       "headline": "One snapshot of this repository's python/ directory",
-      "note": "This row used to be the argument for Zstandard, stated as a measurement: with only `store` a single snapshot was larger than the tree and both compressors beat it comfortably. The codec landed, so the row now answers its own question — and the `store` line is kept beside it, because a benchmark that quietly drops the case it used to lose is not reporting, it is marketing.",
+      "note": "This row used to be the argument for Zstandard, stated as a measurement: with only `store` a single snapshot was larger than the tree and both compressors beat it comfortably. The codec landed, so the row now answers its own question — and the `store` line is kept beside it, because a benchmark that quietly drops the case it used to lose is not reporting, it is marketing. **This row's input is the live repository, so its absolute byte counts are not comparable between commits** — adding four test files moved every size on it, including every competitor's. Only the ratios within one run mean anything across time, and a regression small enough to hide inside a few new files would not be visible here at all. The four scenarios with fixed inputs are where a regression would show, and they are exact: on the run that added this note, not one byte moved on any of them.",
       "inputs": {
-        "logical_bytes": 1656617,
-        "files": 96
+        "logical_bytes": 1703028,
+        "files": 100
       },
       "sizes": {
-        "anla_1_0": 607712,
-        "anla_1_0_store_only": 1710024,
-        "zip_deflate9": 576238,
-        "targz": 510874,
-        "anla_mvp_deflate": 665778
+        "anla_1_0": 629696,
+        "anla_1_0_store_only": 1758648,
+        "zip_deflate9": 596708,
+        "targz": 527429,
+        "anla_mvp_deflate": 689648
       },
       "detail": {
         "snapshots": 1,
-        "unique_chunks": 96,
-        "chunk_bytes": 554293,
-        "logical_bytes": 1656617,
-        "files_round_tripped": 96,
+        "unique_chunks": 100,
+        "chunk_bytes": 574061,
+        "logical_bytes": 1703028,
+        "files_round_tripped": 100,
         "composition": [
           {
             "snapshot": 1,
-            "new_chunk_bytes": 569312,
-            "metadata_bytes": 38336
+            "new_chunk_bytes": 589728,
+            "metadata_bytes": 39904
           }
         ]
       },
       "ratios": {
-        "anla_1_0_vs_input": 0.3668,
-        "anla_1_0_vs_anla_1_0_store_only": 0.3554,
-        "anla_1_0_vs_zip_deflate9": 1.0546,
-        "anla_1_0_vs_targz": 1.1896,
-        "anla_1_0_vs_anla_mvp_deflate": 0.9128
+        "anla_1_0_vs_input": 0.3698,
+        "anla_1_0_vs_anla_1_0_store_only": 0.3581,
+        "anla_1_0_vs_zip_deflate9": 1.0553,
+        "anla_1_0_vs_targz": 1.1939,
+        "anla_1_0_vs_anla_mvp_deflate": 0.9131
       },
-      "seconds": 0.65
+      "seconds": 0.71
     },
     {
       "scenario": "metadata-cost",
@@ -78,101 +78,101 @@
         "anla_1_0_vs_times_only": 1.2163,
         "anla_1_0_vs_times_and_mode": 1.1842
       },
-      "seconds": 0.7
+      "seconds": 0.75
     },
     {
       "scenario": "git-history",
       "headline": "8 successive commits of python/, one snapshot each",
-      "note": "Every version is recoverable, byte for byte. The comparison is against keeping each version as its own ZIP, which is what people do without snapshots, and against one tar.gz of all of them — gzip's 32 KB window cannot see from one copy of the tree to the next, which is why deduplication is a different mechanism and not a worse compressor.",
+      "note": "Every version is recoverable, byte for byte. The comparison is against keeping each version as its own ZIP, which is what people do without snapshots, and against one tar.gz of all of them — gzip's 32 KB window cannot see from one copy of the tree to the next, which is why deduplication is a different mechanism and not a worse compressor. **This row's input is the live repository, so its absolute byte counts are not comparable between commits** — adding four test files moved every size on it, including every competitor's. Only the ratios within one run mean anything across time, and a regression small enough to hide inside a few new files would not be visible here at all. The four scenarios with fixed inputs are where a regression would show, and they are exact: on the run that added this note, not one byte moved on any of them.",
       "inputs": {
-        "logical_bytes": 3485902,
+        "logical_bytes": 3585254,
         "versions": 8,
         "revisions": [
-          "ef9d860",
           "c0ad581",
           "cd2fd1d",
           "d12cfb4",
           "63cc9f6",
           "8cafce4",
           "18cdf3e",
-          "6017599"
+          "6017599",
+          "65e8b09"
         ]
       },
       "sizes": {
-        "anla_1_0": 455752,
-        "anla_1_0_store_only": 1176384,
-        "zip_deflate9_per_version": 1137898,
-        "targz_all_versions": 942645
+        "anla_1_0": 463656,
+        "anla_1_0_store_only": 1190560,
+        "zip_deflate9_per_version": 1172547,
+        "targz_all_versions": 972661
       },
       "detail": {
         "snapshots": 8,
-        "unique_chunks": 70,
-        "chunk_bytes": 314898,
-        "logical_bytes": 3485902,
-        "files_round_tripped": 324,
+        "unique_chunks": 69,
+        "chunk_bytes": 320742,
+        "logical_bytes": 3585254,
+        "files_round_tripped": 330,
         "composition": [
           {
             "snapshot": 1,
-            "new_chunk_bytes": 127736,
-            "metadata_bytes": 15232
+            "new_chunk_bytes": 137472,
+            "metadata_bytes": 15600
           },
           {
             "snapshot": 2,
-            "new_chunk_bytes": 53024,
-            "metadata_bytes": 15696
+            "new_chunk_bytes": 15832,
+            "metadata_bytes": 15680
           },
           {
             "snapshot": 3,
-            "new_chunk_bytes": 15832,
-            "metadata_bytes": 15696
+            "new_chunk_bytes": 23560,
+            "metadata_bytes": 16056
           },
           {
             "snapshot": 4,
-            "new_chunk_bytes": 23560,
-            "metadata_bytes": 16064
-          },
-          {
-            "snapshot": 5,
             "new_chunk_bytes": 39024,
             "metadata_bytes": 16792
           },
           {
-            "snapshot": 6,
+            "snapshot": 5,
             "new_chunk_bytes": 22256,
             "metadata_bytes": 16792
           },
           {
-            "snapshot": 7,
+            "snapshot": 6,
             "new_chunk_bytes": 17616,
             "metadata_bytes": 16792
           },
           {
-            "snapshot": 8,
+            "snapshot": 7,
             "new_chunk_bytes": 26784,
             "metadata_bytes": 16792
+          },
+          {
+            "snapshot": 8,
+            "new_chunk_bytes": 49000,
+            "metadata_bytes": 17544
           }
         ],
         "after_each_snapshot": [
-          143032,
-          211752,
-          243280,
-          282904,
-          338720,
-          377768,
-          412176,
-          455752
+          153136,
+          184648,
+          224264,
+          280080,
+          319128,
+          353536,
+          397112,
+          463656
         ],
-        "first_snapshot_bytes": 143032,
-        "later_snapshots_bytes": 312720,
-        "mean_later_snapshot_bytes": 44674
+        "first_snapshot_bytes": 153136,
+        "later_snapshots_bytes": 310520,
+        "mean_later_snapshot_bytes": 44360
       },
       "ratios": {
-        "anla_1_0_vs_input": 0.1307,
-        "anla_1_0_vs_anla_1_0_store_only": 0.3874,
-        "anla_1_0_vs_zip_deflate9_per_version": 0.4005,
-        "anla_1_0_vs_targz_all_versions": 0.4835
+        "anla_1_0_vs_input": 0.1293,
+        "anla_1_0_vs_anla_1_0_store_only": 0.3894,
+        "anla_1_0_vs_zip_deflate9_per_version": 0.3954,
+        "anla_1_0_vs_targz_all_versions": 0.4767
       },
-      "seconds": 5.03
+      "seconds": 5.01
     },
     {
       "scenario": "duplicate-tree",
@@ -232,7 +232,7 @@
         "anla_1_0_vs_input": 0.2292,
         "anla_1_0_vs_zip_deflate9_per_copy": 0.5469
       },
-      "seconds": 0.15
+      "seconds": 0.16
     },
     {
       "scenario": "incompressible",
@@ -276,7 +276,7 @@
         "anla_1_0_vs_zip_deflate9_per_copy": 0.5017,
         "anla_1_0_vs_targz_both": 0.5017
       },
-      "seconds": 1.45
+      "seconds": 1.44
     },
     {
       "scenario": "shifted-insert",
@@ -315,7 +315,7 @@
         "anla_1_0_vs_input": 0.5489,
         "anla_1_0_vs_anla_1_0_fixed_chunking": 0.5486
       },
-      "seconds": 1.84
+      "seconds": 1.9
     }
   ]
 }

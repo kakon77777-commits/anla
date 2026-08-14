@@ -110,7 +110,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "Reference implementations",
         "fact_impl_v": "2, cross-verified",
         "fact_tests": "Conformance tests",
-        "fact_tests_v": "650 + fuzzing",
+        "fact_tests_v": "668 + fuzzing",
         "strip_1_t": "Local-first",
         "strip_1_d": "The workbench runs entirely in your tab: your files are read "
                      "into memory and never sent anywhere. The page makes no requests "
@@ -142,9 +142,14 @@ STRINGS: dict[str, dict[str, str]] = {
                    "operating systems.",
         "two_b_h": "No verdict divergence",
         "two_b_p": "Sixteen thousand mutated archives across four seeds, each shown "
-                   "to both readers: zero disagreements. It found four real defects "
-                   "getting there, including a rule three separate implementations "
-                   "had skipped.",
+                   "to both readers: zero disagreements, and four real defects found "
+                   "getting there. Then a measurement of the fuzzer itself showed it "
+                   "had never reached the parser at all — a record's hash is checked "
+                   "before its payload is read, so every mutation was stopped one "
+                   "layer early. A strategy that repairs the hash over what it "
+                   "mutates — a lying writer rather than a corrupt disk — found three "
+                   "more defects in its first five hundred archives. Three thousand "
+                   "more since, clean.",
         "two_c_h": "Still a draft, and here is why",
         "two_c_p": "Two implementations by one author are weaker evidence than two by "
                    "two: a shared misreading reproduces rather than being caught. "
@@ -494,7 +499,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "參考實作",
         "fact_impl_v": "2 套，互相驗證",
         "fact_tests": "一致性測試",
-        "fact_tests_v": "650 項 + 模糊測試",
+        "fact_tests_v": "668 項 + 模糊測試",
         "strip_1_t": "本機優先",
         "strip_1_d": "工作台完全在你的分頁裡執行：檔案只讀進記憶體，不會被送到任何"
                      "地方。頁面本身不發出任何請求，其內容安全政策也禁止對外連線。",
@@ -523,9 +528,14 @@ STRINGS: dict[str, dict[str, str]] = {
                    "產生的雙 snapshot 封裝。六組比較，三個作業系統。",
         "two_b_h": "找不到判決分歧",
         "two_b_p": "四個 seed、一萬六千個被突變的封裝，"
-                   "每一個都給兩套 reader 看：零個不一致。"
-                   "在走到這裡之前它找出了四個真實缺陷，"
-                   "包括一條被三套獨立實作都跳過的規則。",
+                   "每一個都給兩套 reader 看：零個不一致，"
+                   "走到這裡之前找出了四個真實缺陷。"
+                   "然後我們量了 fuzzer 自己——發現它從來沒有真的碰到 parser："
+                   "record 的 hash 在 payload 被讀取之前就先檢查，"
+                   "所以每一個突變都在前一層就被擋下來了。"
+                   "改成「突變之後把 hash 補回去」——"
+                   "模擬的不是壞掉的磁碟，而是一個說謊的 writer——"
+                   "它在最初的五百個封裝裡就找出三個新缺陷。之後再跑三千個，全部乾淨。",
         "two_c_h": "仍然是草案，而且這是理由",
         "two_c_p": "同一個作者寫的兩套實作，證據力弱於兩個作者寫的："
                    "共同的誤讀會重現而不是被抓到。"
