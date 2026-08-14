@@ -60,9 +60,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
+from .embedding import INCOMPARABLE, EmbeddingIdentity, comparable
+
 __all__ = [
     "PERSISTENCE", "Candidate", "Resonance", "classify_persistence",
-    "resonant_domain", "CHANNELS",
+    "resonant_domain", "CHANNELS", "EmbeddingIdentity", "INCOMPARABLE",
 ]
 
 #: Paper 06 §1.2, with the timescale each class is *allowed* to be weighted on.
@@ -201,6 +203,8 @@ def resonant_domain(candidates: Sequence[Candidate], query: str = "",
                     moment: Iterable[str] = (), threshold: float = 0.18,
                     limit: int = 20, asking_scale: float = 30 * 86_400,
                     query_vector: Sequence[float] | None = None,
+                    query_identity: EmbeddingIdentity | None = None,
+                    corpus_identity: EmbeddingIdentity | None = None,
                     ) -> tuple[list[Resonance], dict]:
     """𝓔^(τ): the memories that belong in this moment, and why.
 
@@ -218,6 +222,18 @@ def resonant_domain(candidates: Sequence[Candidate], query: str = "",
     from being un-superseded and of an ordinary persistence class alone — so 𝓔 was
     the whole history rather than a small subset of it.
     """
+    # Identity before similarity. Two vectors of one width can come from different
+    # models, different revisions, or different preprocessing, and cosine returns a
+    # confident number for all of them. Width is not identity, so a mismatch is
+    # INCOMPARABLE and the semantic channel switches itself off rather than
+    # contributing a meaningless term. ICNS: a comparison must be allowed to fail.
+    incomparable = ""
+    if query_vector is not None and query_identity and corpus_identity:
+        ok, reason = comparable(query_identity, corpus_identity)
+        if not ok:
+            incomparable = reason
+            query_vector = None
+
     # Centre the vectors on this corpus before comparing anything. See `_centre`
     # for the measurement; without it the top real match ranked below the 95th
     # percentile of random pairs.
@@ -297,7 +313,9 @@ def resonant_domain(candidates: Sequence[Candidate], query: str = "",
     domain = [r for r in scored if r.score >= threshold][:limit]
     embedded = sum(1 for c in candidates if c.vector is not None)
     channels = dict(CHANNELS)
-    if query_vector is not None and embedded:
+    if incomparable:
+        channels["semantic"] = f"semantic vectors — ABSENT, {incomparable}"
+    elif query_vector is not None and embedded:
         channels["semantic"] = (f"semantic vectors — PRESENT, {embedded} of "
                                 f"{len(candidates)} memories carry one")
     return domain, {
@@ -307,6 +325,8 @@ def resonant_domain(candidates: Sequence[Candidate], query: str = "",
         "considered": len(scored),
         "in_domain": len(domain),
         "share_of_history": (round(len(domain) / len(scored), 4) if scored else None),
+        "incomparable": incomparable or None,
+        "embedding_identity": (corpus_identity.as_dict() if corpus_identity else None),
         "channels": channels,
         "absent": [k for k, v in channels.items() if "ABSENT" in v],
         # Paper 07. Stated in the output because the output is what gets read.

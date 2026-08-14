@@ -176,13 +176,32 @@ else:
 
 print("\ncontext: an agent capturing its own")
 ctx = str(WORK / "ctx.anla")
-captured = call("context_capture", archive=ctx, max_mib=4)
+
+# A limit that would drop the front must refuse rather than return a partial
+# capture that reports itself like a whole one. Drilled first, with a limit small
+# enough that any real session exceeds it, so this asserts the refusal rather than
+# hoping for it.
+refused = call("context_capture", archive=str(WORK / "trunc.anla"), max_mib=1)
+show("truncation refused", refused)
+expect("error" in refused and "would not be lossless" in refused.get("error", ""),
+       "a capture that would silently drop the front of a transcript is refused")
+
+partial = call("context_capture", archive=str(WORK / "trunc.anla"), max_mib=1,
+               allow_truncation=True)
+show("truncation declared", partial, ["complete", "transcript_bytes", "omitted_bytes"])
+expect(partial.get("complete") is False and partial.get("omitted_bytes", 0) > 0
+       and partial.get("omitted_range", {}).get("end_byte") == partial["omitted_bytes"],
+       "a deliberate truncation names the byte range it dropped")
+
+captured = call("context_capture", archive=ctx)
 if "error" in captured:
     print(f"  skipped: {captured['error'][:90]}")
 else:
     show("capture", captured, ["turns", "context_bytes", "archive_bytes",
-                               "deduplicated_turns"])
+                               "deduplicated_turns", "complete", "omitted_bytes"])
     expect(captured.get("turns", 0) > 0, "a transcript was found and turned into turns")
+    expect(captured.get("complete") is True and captured.get("omitted_bytes") == 0,
+           "the default capture states that it is lossless, and it is")
 
     projected = call("context_project", archive=ctx, level="L1", budget_bytes=8000)
     show("project", projected, ["preserved", "bytes_shown", "share_shown", "expandable"])
@@ -225,6 +244,52 @@ else:
     expect(nothing.get("in_domain") == []
            and "clears the threshold" in nothing.get("disclosure", ""),
            "nothing clearing the threshold says so rather than returning a bare zero")
+
+    print("\nsemantic addressing: index, address, expand to exact bytes")
+    indexed = call("context_segment", archive=ctx, scheme="structural-v1")
+    show("segment", indexed, ["segments", "coverage", "preservation_unchanged",
+                              "median_segment_bytes"])
+    expect(indexed.get("preservation_unchanged") is True,
+           "indexing the record did not change one byte of it")
+    expect(indexed.get("coverage") == 1.0 and not indexed.get("turns_not_fully_reachable"),
+           "every byte of every turn is reachable through some segment")
+    expect(indexed.get("segments", 0) > indexed.get("turns", 0),
+           "the index is finer than the turn it indexes")
+
+    # A second family over the same memory. σ₁ and σ₂ coexist; neither is a
+    # migration, and the first index must still be readable afterwards.
+    second = call("context_segment", archive=ctx, scheme="sized-900-v1")
+    expect(second.get("preservation_unchanged") is True
+           and second.get("segments") != indexed.get("segments"),
+           "a second scheme adds a second index rather than replacing the first")
+
+    # Address it. No vectors are attached here, so this must use the lexical
+    # channel *and say so* — the point of the assertion is the naming, not the hit.
+    needle = "preservation plane"
+    addressed = call("context_address", archive=ctx, scheme="structural-v1",
+                     query=needle, limit=3)
+    show("address", addressed, ["channel", "expanded_exactly", "segments_searched"])
+    expect("lexical" in addressed.get("channel", ""),
+           "with no vectors attached the weak channel is named, not blended in")
+    hits = addressed.get("hits", [])
+    expect(bool(hits) and all(h["digest_verified"] for h in hits),
+           "every hit's turn digest matches what the index was built against")
+    expect(all(needle in h["text"].lower() for h in hits),
+           "the addressed bytes really contain what was asked for")
+
+    # Expand exactly: go from the address back to the record through a *different*
+    # tool, and check the byte range against the turn that context_expand returns.
+    top = hits[0]
+    restored = call("context_expand", archive=ctx, paths=[top["source_turn"]])
+    body = (restored.get("restored") or {}).get(top["source_turn"], "")
+    expect(bool(body), "the addressed turn came back from the record")
+    expect(0 <= top["start_byte"] < top["end_byte"] <= len(body.encode("utf-8")),
+           "the address is a byte range inside the turn as the record stores it")
+
+    refused = call("context_address", archive=ctx, scheme="structural-v1",
+                   query=needle, query_vector=[0.1] * 8)
+    expect("REFUSED" in refused.get("channel", ""),
+           "a query vector with no corpus vectors is refused rather than ignored")
 
 print("\nerrors an agent can act on")
 absent = call("anla_verify", archive=str(WORK / "nope.anla"))

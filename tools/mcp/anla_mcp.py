@@ -28,9 +28,12 @@ Two design rules, both learned the hard way in this repository:
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
+import math
 import os
 import pathlib
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -65,9 +68,14 @@ from anla1.fs import restore_tree, scan_tree  # noqa: E402
 from anla1.context import (  # noqa: E402
     expand, project, projection_manifest, read_jsonl, turn_entries,
 )
+from anla1.embedding import EmbeddingIdentity, comparable  # noqa: E402
 from anla1.resonance import (  # noqa: E402
     Candidate, classify_persistence, resonant_domain,
 )
+from anla1.segment import (  # noqa: E402
+    SCHEMES, SegmentIndex, build_index, digest_of, project_segment,
+)
+from anla1.vectors import have_numpy, read_vectors, write_vectors  # noqa: E402
 from anla1.snapshot import (  # noqa: E402
     CODEC_STORE, CODEC_ZSTD, cdc_chunker, diff as snapshot_diff, extract_snapshot,
     list_snapshots, single_chunk, verify_archive, write_snapshot,
@@ -634,7 +642,8 @@ def _sessions(root: str = "") -> list[pathlib.Path]:
 @mcp.tool()
 @_guard
 def context_capture(archive: str, transcript: str = "", session_root: str = "",
-                    max_mib: int = 64, chunk_avg: int = 16384) -> dict:
+                    max_mib: int = 0, chunk_avg: int = 16384,
+                    allow_truncation: bool = False) -> dict:
     """Store a conversation transcript losslessly, one object per turn.
 
     With no `transcript`, takes the most recently modified session on this machine —
@@ -655,13 +664,30 @@ def context_capture(archive: str, transcript: str = "", session_root: str = "",
     if source is None or not source.is_file():
         raise ValueError(f"no transcript found (looked in {session_root or '~/.claude/projects'})")
 
-    data = source.read_bytes()
-    if len(data) > max_mib * 1024 ** 2:
-        # From the end: the recent part of a context is the part a projection is
-        # about, and truncating from the front keeps the turn indices meaningful
-        # relative to the tail rather than silently renumbering everything.
-        data = data[-max_mib * 1024 ** 2:]
+    whole = source.read_bytes()
+    limit = max_mib * 1024 ** 2 if max_mib else 0
+    truncated = bool(limit and len(whole) > limit)
+
+    # A capture that quietly drops the front of a transcript and then reports itself
+    # the way a complete one does is the worst defect this system can have: every
+    # downstream claim — the projection's share, the omission manifest, "expand any
+    # turn" — is then stated over a record the caller believes is whole. So a limit
+    # must be asked for and reported, or refused.
+    if truncated and not allow_truncation:
+        raise ValueError(
+            f"{source.name} is {len(whole):,} bytes and max_mib={max_mib} would drop "
+            f"the first {len(whole) - limit:,}. That capture would not be lossless "
+            f"and would not say so. Pass allow_truncation=true to take the tail "
+            f"deliberately — the result is then reported as partial — or raise "
+            f"max_mib, or leave it 0 for the whole transcript.")
+
+    if truncated:
+        # From the end: the recent part is what a projection is usually about.
+        data = whole[-limit:]
         data = data[data.find(b"\n") + 1:]
+    else:
+        data = whole
+    omitted_bytes = len(whole) - len(data)
 
     turns = read_jsonl(data)
     if not turns:
@@ -684,6 +710,15 @@ def context_capture(archive: str, transcript: str = "", session_root: str = "",
     return {
         "archive": str(target),
         "transcript": str(source),
+        # Stated on every capture, not only the truncated ones — a field that
+        # appears only when something is wrong is a field nobody checks for.
+        "complete": not truncated,
+        "capture": "partial — the front of the transcript was dropped" if truncated
+                   else "lossless — every byte of the transcript is in the archive",
+        "transcript_bytes": len(whole),
+        "omitted_bytes": omitted_bytes,
+        "omitted_range": {"start_byte": 0, "end_byte": omitted_bytes} if truncated
+                         else None,
         "turns": len(turns),
         "context_bytes": len(data),
         "archive_bytes": size,
@@ -878,7 +913,8 @@ def context_export_for_embedding(archive: str, out: str = "", limit: int = 0,
 
 @mcp.tool()
 @_guard
-def context_attach_vectors(archive: str, vectors: str, model: str = "") -> dict:
+def context_attach_vectors(archive: str, vectors: str, model: str = "",
+                           scheme: str = "", revision: str = "unstated") -> dict:
     """Attach supplied vectors to an archive's turns.
 
     They go into the **auxiliary** plane, which is exactly where they belong:
@@ -901,6 +937,11 @@ def context_attach_vectors(archive: str, vectors: str, model: str = "") -> dict:
 
     `model` here overrides whatever the file says; the file's own value is used
     when this is left empty.
+
+    With `scheme`, the keys are segment ids from that index rather than turn paths,
+    and the stored identity records the projection version and the scheme as well as
+    the model — because a vector is `E_θ(π_σ(m))`, and two schemes over one memory
+    produce two different vectors that cosine will happily compare.
     """
     target = _archive(archive)
     loaded = json.loads(pathlib.Path(vectors).expanduser().read_text(encoding="utf-8"))
@@ -925,29 +966,327 @@ def context_attach_vectors(archive: str, vectors: str, model: str = "") -> dict:
                          f"come from one model, and comparing them would be a "
                          f"confident number from an incoherent comparison")
 
-    data = target.read_bytes()
-    snapshot = list_snapshots(data)[-1]
-    known = {o["path"] for o in snapshot.manifest["objects"]}
+    projection_version = "unstated"
+    if scheme:
+        index_file = _segment_sidecar(target, scheme)
+        if not index_file.exists():
+            raise ValueError(f"no index for {scheme!r}; call context_segment first")
+        index = SegmentIndex.of(json.loads(index_file.read_text(encoding="utf-8")))
+        projection_version = index.projection_version
+        known = {s.segment_id for s in index.segments}
+        noun, sidecar = "segments", target.with_suffix(f".vectors-{scheme}.anlavec")
+    else:
+        data = target.read_bytes()
+        snapshot = list_snapshots(data)[-1]
+        known = {o["path"] for o in snapshot.manifest["objects"]}
+        noun, sidecar = "turns", target.with_suffix(".vectors.json")
+
     unknown = sorted(set(cleaned) - known)
     if unknown:
-        raise ValueError(f"{len(unknown)} keys are not turns in this archive, "
+        raise ValueError(f"{len(unknown)} keys are not {noun} in this archive, "
                          f"e.g. {unknown[:3]}")
 
-    sidecar = target.with_suffix(".vectors.json")
-    sidecar.write_text(json.dumps(
-        {"model": model or "unstated", "width": widths.pop(),
-         "vectors": cleaned}, ensure_ascii=False), encoding="utf-8")
+    width = widths.pop()
+    identity = EmbeddingIdentity(model=model or "unstated", dimensions=width,
+                                 revision=revision,
+                                 projection_version=projection_version,
+                                 segmentation_scheme=scheme or "unstated")
+    # float32 rows behind a JSON header, not a JSON array of decimals. The same
+    # 61,149×768 corpus is 939 MB as JSON and 188 MB here, and it loads by
+    # `frombuffer` rather than by parsing nine hundred megabytes of text.
+    written = write_vectors(sidecar, cleaned.items(), identity.as_dict(),
+                            extra={"model": model or "unstated"})
     return {
         "archive": str(target),
         "sidecar": str(sidecar),
+        "sidecar_bytes": written["bytes"],
         "attached": len(cleaned),
-        "turns_in_archive": len(known),
+        "scope": noun,
+        f"{noun}_in_archive": len(known),
         "coverage": round(len(cleaned) / len(known), 4) if known else None,
         "model": model or "unstated",
+        "identity": identity.as_dict(),
+        "identity_fingerprint": identity.fingerprint,
+        "search_backend": "numpy" if have_numpy() else
+                          "pure python — refuses above 8,000 vectors rather than "
+                          "taking an hour per query; install numpy for more",
         "plane": "auxiliary — disposable and regenerable; the record does not "
                  "depend on these and `strip` may remove them",
         "note": "context_find will use the semantic channel when a query vector is "
                 "given too, and will say so in its channel report",
+    }
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    if len(a) != len(b):
+        raise ValueError(f"width {len(a)} against {len(b)} — not one vector space")
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _preserved(archive: str) -> tuple[pathlib.Path, dict[str, bytes]]:
+    target = _archive(archive)
+    data = target.read_bytes()
+    return target, extract_snapshot(data, list_snapshots(data)[-1])
+
+
+def _segment_sidecar(target: pathlib.Path, scheme: str) -> pathlib.Path:
+    return target.with_suffix(f".segments-{scheme}.json")
+
+
+@mcp.tool()
+@_guard
+def context_segment(archive: str, scheme: str = "changepoint-v1",
+                    out: str = "") -> dict:
+    """Build an index family σ over the turns. Writes nothing to the record.
+
+    From Neo's 同一性微積分, 切割 = 索引: a segment is a perspective on a preserved
+    turn, never a newly preserved fragment. So this produces `(source_turn, ranges)`
+    — raw byte offsets — in the **auxiliary** plane, and the archive is byte-identical
+    before and after. That is checked here rather than asserted, because it is the
+    property the whole design rests on and it would fail silently.
+
+    Several schemes coexist over one memory. Running this again with a different
+    `scheme` adds a second index; it does not migrate the first, and it cannot,
+    because neither one owns the bytes.
+    """
+    target, preserved = _preserved(archive)
+    before = hashlib.blake2b(target.read_bytes(), digest_size=16).hexdigest()
+    index = build_index(sorted(preserved.items()), scheme)
+    after = hashlib.blake2b(target.read_bytes(), digest_size=16).hexdigest()
+
+    # Coverage, measured. A byte no segment covers is a memory that cannot be
+    # retrieved by any embedder, and nothing downstream would report it missing.
+    covered, uncovered = 0, []
+    by_turn: dict[str, list] = {}
+    for segment in index.segments:
+        by_turn.setdefault(segment.source_turn, []).append(segment)
+    for path, raw in preserved.items():
+        spans = sorted(r for s in by_turn.get(path, []) for r in s.ranges)
+        reach, position = 0, 0
+        for start, end in spans:
+            reach += max(0, end - max(start, position))
+            position = max(position, end)
+        covered += reach
+        if reach != len(raw):
+            uncovered.append({"turn": path, "bytes": len(raw), "reachable": reach})
+
+    sidecar = pathlib.Path(out).expanduser() if out else _segment_sidecar(target, scheme)
+    sidecar.write_text(json.dumps(index.as_dict(), ensure_ascii=False),
+                       encoding="utf-8")
+    total = sum(len(r) for r in preserved.values())
+    return {
+        "archive": str(target),
+        "sidecar": str(sidecar),
+        "scheme": scheme,
+        "available_schemes": sorted(SCHEMES),
+        "turns": len(preserved),
+        "segments": len(index.segments),
+        "median_segment_bytes": (statistics.median(s.byte_length
+                                                   for s in index.segments)
+                                 if index.segments else None),
+        "coverage": round(covered / total, 6) if total else None,
+        "turns_not_fully_reachable": uncovered[:5],
+        "preservation_digest": before,
+        "preservation_unchanged": before == after,
+        "plane": "auxiliary — 切割 = 索引; the record was read, not rewritten",
+        "next": "context_segment_export → embed → context_attach_vectors(scheme=...) "
+                "→ context_address",
+    }
+
+
+@mcp.tool()
+@_guard
+def context_segment_export(archive: str, scheme: str = "changepoint-v1",
+                           out: str = "", limit: int = 0, chars: int = 6000,
+                           min_bytes: int = 40, sample: str = "spread") -> dict:
+    """Write out the segment views π_σ(m) to be embedded, with their identity.
+
+    The unit matters and was measured: embedding whole turns put the best real match
+    below the 95th percentile of random pairs — the same model over segments answers
+    the same questions. So what leaves here is `E_θ(π_σ(m))`, not `E_θ(m)`.
+
+    The identity block must come back with the vectors. A vector whose projection
+    version or scheme is unknown cannot honestly be compared with a query vector,
+    and cosine will not say so on its own.
+
+    `limit` is where this tool nearly told a lie. Taking the first N segments of a
+    60,000-segment conversation exports the first eight per cent of it, and a later
+    search then answers every question out of the opening hour and reports itself
+    exactly as a complete search would — the nearest hit inside a corpus that could
+    not contain the answer. So `sample="spread"` is the default: an even stride
+    across the whole record. `"head"` and `"tail"` remain available and are named in
+    the result, and the turn range covered is reported for all three.
+    """
+    target, preserved = _preserved(archive)
+    sidecar = _segment_sidecar(target, scheme)
+    if not sidecar.exists():
+        raise ValueError(f"no index for {scheme!r}; call context_segment first")
+    index = SegmentIndex.of(json.loads(sidecar.read_text(encoding="utf-8")))
+
+    rows = []
+    for segment in index.segments:
+        raw = preserved.get(segment.source_turn)
+        if raw is None:
+            continue
+        text = project_segment(segment, raw)
+        if len(text) >= min_bytes:
+            rows.append({"key": segment.segment_id, "text": text[:chars]})
+
+    eligible = len(rows)
+    if limit and eligible > limit:
+        if sample == "head":
+            rows = rows[:limit]
+        elif sample == "tail":
+            rows = rows[-limit:]
+        elif sample == "spread":
+            # Deterministic even stride, so re-running gives the same corpus and two
+            # measurements are of the same thing.
+            step = eligible / limit
+            rows = [rows[min(eligible - 1, int(i * step))] for i in range(limit)]
+        else:
+            raise ValueError(f"sample must be 'spread', 'head' or 'tail', not "
+                             f"{sample!r}")
+
+    turns_covered = {r["key"].split("#")[0] for r in rows}
+    where = pathlib.Path(out).expanduser() if out else (
+        target.with_suffix(f".to-embed-{scheme}.json"))
+    where.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {
+        "file": str(where),
+        "segments": len(rows),
+        "eligible_segments": eligible,
+        "skipped_too_short": len(index.segments) - eligible,
+        "characters": sum(len(r["text"]) for r in rows),
+        # Stated on every export, because a corpus that covers part of the record
+        # returns the nearest hit inside that part and looks like a whole search.
+        "sample": sample if limit and eligible > limit else "all eligible segments",
+        "share_of_index": round(len(rows) / len(index.segments), 4)
+                          if index.segments else None,
+        "turns_covered": len(turns_covered),
+        "turns_in_archive": len(preserved),
+        "turn_span": [min(turns_covered), max(turns_covered)] if turns_covered else [],
+        "identity": {"projection_version": index.projection_version,
+                     "segmentation_scheme": scheme},
+        "next": "embed each `text`; return {model, dimensions, revision, vectors:"
+                "[{key, vector}]} to context_attach_vectors(scheme=...). The same "
+                "model must produce the query vector later, or the comparison is "
+                "between two vector spaces and cosine will not mention it",
+    }
+
+
+@mcp.tool()
+@_guard
+def context_address(archive: str, query: str = "", scheme: str = "changepoint-v1",
+                    query_vector: list[float] | None = None, limit: int = 5,
+                    model: str = "", revision: str = "unstated") -> dict:
+    """Semantic address → the exact bytes of the authoritative turn.
+
+    This is the whole of S1 in one call: **Remember → Index → Retrieve → Expand
+    exactly.** Each hit comes back as a byte range in a named turn, with the turn's
+    digest re-checked against what the index was built from — so what is returned is
+    the record itself, not the retriever's copy of it. A retriever that found the
+    right passage but could not return the record verbatim would be a search engine
+    over a lossy copy, and this system would have no reason to exist.
+
+    With `query_vector` the semantic channel is used; with only `query` it falls back
+    to lexical matching over the same segments and says so. The fallback is named in
+    the response rather than blended in, because a weak channel that looks like a
+    strong one is the failure that has no symptom.
+    """
+    target, preserved = _preserved(archive)
+    sidecar = _segment_sidecar(target, scheme)
+    if not sidecar.exists():
+        raise ValueError(f"no index for {scheme!r}; call context_segment first")
+    index = SegmentIndex.of(json.loads(sidecar.read_text(encoding="utf-8")))
+    segments = {s.segment_id: s for s in index.segments}
+
+    vectors_file = target.with_suffix(f".vectors-{scheme}.anlavec")
+    corpus = read_vectors(vectors_file) if vectors_file.exists() else None
+
+    channel, incomparable = "lexical — no vectors attached for this scheme", None
+    ranked: list[tuple[str, float]] = []
+    if query_vector and corpus:
+        asked = EmbeddingIdentity(
+            model=model or str(corpus.header.get("model") or "unstated"),
+            dimensions=len(query_vector), revision=revision,
+            projection_version=index.projection_version, segmentation_scheme=scheme)
+        held = EmbeddingIdentity.of(corpus.identity)
+        ok, reason = comparable(asked, held)
+        if not ok:
+            incomparable, channel = reason, f"semantic — refused, {reason}"
+        else:
+            # Centred on this corpus before comparing. Measured, not assumed: without
+            # centring the 95th percentile of random pairs sat at +0.453 and the real
+            # matches were inside it.
+            ranked = [(k, s) for k, s in corpus.search(query_vector, limit=limit)
+                      if k in segments]
+            channel = (f"semantic — {len(corpus):,} segments carry a vector, "
+                       f"{'numpy' if have_numpy() else 'pure python'} backend")
+    elif query_vector and not corpus:
+        channel = ("semantic — REFUSED, a query vector was given but no segment "
+                   "vectors are attached for this scheme")
+
+    if not ranked:
+        needle = query.lower()
+        scores = []
+        for segment_id, segment in segments.items():
+            raw = preserved.get(segment.source_turn)
+            if raw is None:
+                continue
+            text = project_segment(segment, raw)
+            if needle and needle in text.lower():
+                scores.append((segment_id, len(needle) / max(len(text), 1)))
+        ranked = sorted(scores, key=lambda kv: -kv[1])[:limit]
+
+    hits = []
+    for segment_id, score in ranked:
+        segment = segments[segment_id]
+        raw = preserved[segment.source_turn]
+        verified = digest_of(raw) == segment.source_digest
+        start, end = segment.ranges[0]
+        hits.append({
+            "segment_id": segment_id,
+            "score": round(float(score), 4),
+            # The address. Everything else in this row is derived from it.
+            "source_turn": segment.source_turn,
+            "start_byte": start,
+            "end_byte": end,
+            "digest_verified": verified,
+            "expand": "exact — read out of the preserved turn's own bytes" if verified
+                      else "REFUSED — this turn is not the one the index was built "
+                           "against; the offsets no longer mean what they meant",
+            "text": project_segment(segment, raw),
+        })
+
+    semantic = bool(corpus) and channel.startswith("semantic —") and not incomparable
+    searched = len(corpus) if semantic else len(segments)
+    turns_reachable = (len({segments[k].source_turn for k in corpus.keys
+                            if k in segments}) if corpus else None)
+    return {
+        "archive": str(target),
+        "scheme": scheme,
+        "segments_in_index": len(segments),
+        "segments_searched": searched,
+        # What the semantic channel could *not* see. A vectorised corpus covering
+        # part of the record still returns its nearest hit, and that answer is
+        # indistinguishable from a complete search unless the share is stated.
+        "semantic_corpus_share": (round(len(corpus) / len(segments), 4)
+                                  if segments and corpus else 0.0),
+        "search_backend": "numpy" if have_numpy() else "pure python",
+        "turns_reachable_semantically": turns_reachable,
+        "turns_in_archive": len(preserved),
+        "channel": channel,
+        "incomparable": incomparable,
+        "hits": hits,
+        "expanded_exactly": sum(1 for h in hits if h["digest_verified"]),
+        "boundary": "Recall is not Care (paper 07): this returns what resonates "
+                    "with the query, which is not the same as what matters. "
+                    "`expanded_exactly` measures the expansion, never the relevance "
+                    "— a hit from a partial corpus expands just as exactly as a "
+                    "right one",
     }
 
 
