@@ -888,15 +888,30 @@ def context_attach_vectors(archive: str, vectors: str, model: str = "") -> dict:
     plane stays byte-identical, which is a property this package can check rather
     than assert.
 
-    `vectors` is a path to JSON of `[{key, vector}]`. `model` is recorded because a
-    vector without the model that produced it cannot be compared with anything
-    later, and two widths silently compared would be a confident number from an
-    incoherent comparison.
+    `vectors` is a path to JSON in either shape:
+
+        {"model": "...", "dimensions": 768, "vectors": [{"key": ..., "vector": [...]}]}
+        [{"key": ..., "vector": [...]}]
+
+    The first is preferred and is what `PROMPT-embeddings.md` asks for, because it
+    carries the model — and a vector without the model that produced it cannot be
+    compared with anything later. Both are accepted because the prompt and this
+    tool disagreed about the shape on the first end-to-end run, which would have
+    produced a file the tool rejected after a model had spent real work on it.
+
+    `model` here overrides whatever the file says; the file's own value is used
+    when this is left empty.
     """
     target = _archive(archive)
-    rows = json.loads(pathlib.Path(vectors).expanduser().read_text(encoding="utf-8"))
+    loaded = json.loads(pathlib.Path(vectors).expanduser().read_text(encoding="utf-8"))
+    if isinstance(loaded, dict):
+        rows = loaded.get("vectors")
+        model = model or str(loaded.get("model") or "")
+    else:
+        rows = loaded
     if not isinstance(rows, list) or not rows:
-        raise ValueError("expected a non-empty JSON list of {key, vector}")
+        raise ValueError("expected {\"vectors\": [{key, vector}, ...]} or a "
+                         "non-empty list of {key, vector}")
 
     widths, cleaned = set(), {}
     for row in rows:
