@@ -95,7 +95,7 @@ and it is a different judgement.
 | Append-only snapshots and cross-snapshot deduplication (§6) | **implemented** — [`python/anla1/snapshot.py`](python/anla1/snapshot.py), 28 tests |
 | Filesystem layer: scan a directory, restore a snapshot (§5.2.1) | **implemented** — [`python/anla1/fs.py`](python/anla1/fs.py), 14 tests |
 | The `anla1` command line, with `--json` and the whitepaper's exit codes | **implemented** — [`python/anla1/cli.py`](python/anla1/cli.py), 12 tests |
-| A streaming writer | **not done** — a file is read one at a time, but the archive is still assembled in memory |
+| A streaming writer | **not done**, and the bound is exact rather than vague: peak memory is at least *archive + largest file*, both live at once, because the writer accumulates every record in one buffer and reads each file whole. A tree larger than RAM cannot be packed. |
 | CDDL schemas | [`schemas/anla-1.0.cddl`](schemas/anla-1.0.cddl), shape only |
 | Object name model (whitepaper Q4) | one `path`, deliberately not settled |
 | BLAKE3-256 | **implemented** — [`python/anla1/blake3.py`](python/anla1/blake3.py), a dependency-free reference plus the Rust fast path, 55 tests |
