@@ -750,7 +750,8 @@ def context_expand(archive: str, paths: list[str]) -> dict:
 @mcp.tool()
 @_guard
 def context_find(archive: str, query: str = "", moment: str = "", limit: int = 12,
-                 threshold: float = 0.18) -> dict:
+                 threshold: float = 0.18,
+                 query_vector: list[float] | None = None) -> dict:
     """Which of this shared history belongs in the present moment.
 
     Not a search. Paper 05 of Neo's 符號記憶判定耦合系列 defines
@@ -788,9 +789,17 @@ def context_find(archive: str, query: str = "", moment: str = "", limit: int = 1
     if not turns:
         raise ValueError("this archive holds no turns")
 
+    # Vectors, when something outside supplied them. Auxiliary plane: their absence
+    # costs the semantic channel and nothing else.
+    sidecar = _archive(archive).with_suffix(".vectors.json")
+    supplied, model = {}, ""
+    if sidecar.exists():
+        loaded = json.loads(sidecar.read_text(encoding="utf-8"))
+        supplied, model = loaded.get("vectors", {}), loaded.get("model", "")
+
     total = len(turns)
     candidates = [
-        Candidate(key=turn.path,
+        Candidate(vector=supplied.get(turn.path), key=turn.path,
                   text=(turn.text or turn.raw.decode("utf-8", "replace"))[:4000],
                   position=index, total=total,
                   persistence=classify_persistence(turn.text or ""))
@@ -800,7 +809,8 @@ def context_find(archive: str, query: str = "", moment: str = "", limit: int = 1
     # what an agent asking mid-session actually has in front of it.
     here = [moment] if moment else [t.text or "" for t in turns[-6:]]
     domain, report = resonant_domain(candidates, query=query, moment=here,
-                                     threshold=threshold, limit=limit)
+                                     threshold=threshold, limit=limit,
+                                     query_vector=query_vector)
 
     by_path = {t.path: t for t in turns}
     return {
@@ -817,6 +827,8 @@ def context_find(archive: str, query: str = "", moment: str = "", limit: int = 1
         "threshold": report["threshold"],
         "channels": report["channels"],
         "absent": report["absent"],
+        "embedding_model": model or None,
+        "turns_with_vectors": report["embedded"],
         "boundary": report["boundary"],
         "disclosure": (
             "nothing in this history clears the threshold for this moment"
@@ -825,6 +837,102 @@ def context_find(archive: str, query: str = "", moment: str = "", limit: int = 1
             "answer a question like this are absent"
             if all(r.terms.get("R", 0) < 0.05 for r in domain) else
             "content relevance contributed"),
+    }
+
+
+@mcp.tool()
+@_guard
+def context_export_for_embedding(archive: str, out: str = "", limit: int = 0,
+                                 chars: int = 1200) -> dict:
+    """Write out the turns to be embedded, for a model that can embed them.
+
+    Nothing here computes embeddings and nothing here is going to. The model
+    holding the conversation is the one with an embedder, and UTF-8X states the
+    division this follows: 「AI 負責策略生成，解碼由確定性、版本化、可雜湊驗證的
+    轉換器完成 —— AI 不參與解碼」. The vectors are the AI's contribution; the
+    resonance computation over them is deterministic and local.
+
+    Produces JSON of `{key, text}`. Hand it to whatever can embed, and bring the
+    result back through `context_attach_vectors`.
+    """
+    data = _archive(archive).read_bytes()
+    snapshot = list_snapshots(data)[-1]
+    turns = _turns_of(data, snapshot)
+    if limit:
+        turns = turns[-limit:]
+    rows = [{"key": turn.path,
+             "text": " ".join((turn.text or
+                               turn.raw.decode("utf-8", "replace")).split())[:chars]}
+            for turn in turns]
+    rows = [row for row in rows if row["text"]]
+
+    target = pathlib.Path(out).expanduser() if out else (
+        _archive(archive).with_suffix(".to-embed.json"))
+    target.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"file": str(target), "turns": len(rows),
+            "characters": sum(len(r["text"]) for r in rows),
+            "next": "embed each `text`, then call context_attach_vectors with "
+                    "[{key, vector}] — same model for all of them, and for the "
+                    "query later, or the comparison is between two vector spaces"}
+
+
+@mcp.tool()
+@_guard
+def context_attach_vectors(archive: str, vectors: str, model: str = "") -> dict:
+    """Attach supplied vectors to an archive's turns.
+
+    They go into the **auxiliary** plane, which is exactly where they belong:
+    `D(P, I) = D(P, ∅)` — dropping the intelligence plane changes nothing a decoder
+    extracts, and an embedding is derived, disposable and regenerable. `strip`
+    removing them must cost nothing but the semantic channel, and the preservation
+    plane stays byte-identical, which is a property this package can check rather
+    than assert.
+
+    `vectors` is a path to JSON of `[{key, vector}]`. `model` is recorded because a
+    vector without the model that produced it cannot be compared with anything
+    later, and two widths silently compared would be a confident number from an
+    incoherent comparison.
+    """
+    target = _archive(archive)
+    rows = json.loads(pathlib.Path(vectors).expanduser().read_text(encoding="utf-8"))
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("expected a non-empty JSON list of {key, vector}")
+
+    widths, cleaned = set(), {}
+    for row in rows:
+        key, vector = row.get("key"), row.get("vector")
+        if not key or not isinstance(vector, list) or not vector:
+            raise ValueError(f"every row needs a key and a non-empty vector: {str(row)[:80]}")
+        widths.add(len(vector))
+        cleaned[key] = [float(x) for x in vector]
+    if len(widths) > 1:
+        raise ValueError(f"vectors of mixed width {sorted(widths)} — these did not "
+                         f"come from one model, and comparing them would be a "
+                         f"confident number from an incoherent comparison")
+
+    data = target.read_bytes()
+    snapshot = list_snapshots(data)[-1]
+    known = {o["path"] for o in snapshot.manifest["objects"]}
+    unknown = sorted(set(cleaned) - known)
+    if unknown:
+        raise ValueError(f"{len(unknown)} keys are not turns in this archive, "
+                         f"e.g. {unknown[:3]}")
+
+    sidecar = target.with_suffix(".vectors.json")
+    sidecar.write_text(json.dumps(
+        {"model": model or "unstated", "width": widths.pop(),
+         "vectors": cleaned}, ensure_ascii=False), encoding="utf-8")
+    return {
+        "archive": str(target),
+        "sidecar": str(sidecar),
+        "attached": len(cleaned),
+        "turns_in_archive": len(known),
+        "coverage": round(len(cleaned) / len(known), 4) if known else None,
+        "model": model or "unstated",
+        "plane": "auxiliary — disposable and regenerable; the record does not "
+                 "depend on these and `strip` may remove them",
+        "note": "context_find will use the semantic channel when a query vector is "
+                "given too, and will say so in its channel report",
     }
 
 

@@ -87,8 +87,8 @@ CHANNELS = {
     "S": "relational salience — absent, needs a relation graph",
     "D": "current judgement domain — absent, needs the task stated",
     "I": "intrusion risk — absent, and not approximable from text",
-    "semantic": "semantic vectors — ABSENT, no embedding model here",
-    "phase": "phase / resonance — ABSENT, the mechanism this is a stand-in for",
+    "semantic": "semantic vectors — present when supplied, ABSENT otherwise",
+    "phase": "phase / resonance — ABSENT, and deliberately not invented",
 }
 
 _WORD = re.compile(r"[\w一-鿿]+", re.UNICODE)
@@ -117,6 +117,11 @@ class Candidate:
     age_seconds: float = 0.0
     persistence: str = "C"
     superseded_by: str | None = None
+    #: A semantic vector, when something outside supplied one. Nothing here
+    #: computes embeddings — the model that can is the one holding the
+    #: conversation, and UTF-8X's rule applies: the AI produces the strategy, the
+    #: deterministic side consumes it. So this arrives, it is not derived.
+    vector: Sequence[float] | None = None
 
 
 @dataclass
@@ -153,9 +158,26 @@ def classify_persistence(text: str) -> str:
     return "C"
 
 
+def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    """Cosine similarity, refusing rather than guessing on a length mismatch.
+
+    Two embeddings of different width did not come from the same model, and
+    silently comparing their overlapping prefix would produce a confident number
+    from an incoherent comparison — ICNS's point that a comparison must be allowed
+    to fail rather than be rounded to an answer.
+    """
+    if len(a) != len(b):
+        raise ValueError(f"vectors of different width: {len(a)} and {len(b)}")
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
 def resonant_domain(candidates: Sequence[Candidate], query: str = "",
                     moment: Iterable[str] = (), threshold: float = 0.18,
                     limit: int = 20, asking_scale: float = 30 * 86_400,
+                    query_vector: Sequence[float] | None = None,
                     ) -> tuple[list[Resonance], dict]:
     """𝓔^(τ): the memories that belong in this moment, and why.
 
@@ -166,6 +188,12 @@ def resonant_domain(candidates: Sequence[Candidate], query: str = "",
     Returns the domain and a report of which channels contributed. The report is
     not decoration: with `semantic` and `phase` absent, this is a stand-in whose
     limits a caller has to be able to see.
+
+    Ψ is **evidence × modulation**, not a weighted sum of everything. R, C and
+    semantic are evidence that this memory belongs here; H, P and O scale it. The
+    first version added all six, which gave an irrelevant memory a score of 0.30
+    from being un-superseded and of an ordinary persistence class alone — so 𝓔 was
+    the whole history rather than a small subset of it.
     """
     wanted = _words(query)
     present = set()
@@ -202,8 +230,30 @@ def resonant_domain(candidates: Sequence[Candidate], query: str = "",
         # O — superseded. Still in 𝔐, no longer in 𝓔.
         terms["O"] = 0.0 if candidate.superseded_by else 1.0
 
-        score = (0.40 * terms["R"] + 0.25 * terms["C"] + 0.10 * terms["H"]
-                 + 0.15 * terms["P"] + 0.10 * terms["O"])
+        # Evidence and modulation are different kinds of term, and adding them
+        # together was a defect a test caught immediately: H, P and O each give
+        # about 1.0 to a *completely irrelevant* memory, so every memory cleared
+        # the threshold and 𝓔 was the whole history up to the limit rather than
+        # paper 05's 極小子集.
+        #
+        # "Nothing later replaced it" is not a reason to surface something. It is a
+        # condition on surfacing it. So R, C and semantic are evidence, H, P and O
+        # scale it, and a memory with no evidence scores ~0 however well-preserved
+        # and un-superseded it is.
+        if query_vector is not None and candidate.vector is not None:
+            terms["semantic"] = max(0.0, _cosine(query_vector, candidate.vector))
+            evidence = (0.55 * terms["semantic"] + 0.20 * terms["R"]
+                        + 0.25 * terms["C"])
+        else:
+            evidence = 0.65 * terms["R"] + 0.35 * terms["C"]
+
+        # H nudges rather than decides: position in the shared history says a
+        # memory is the kind of place things get established, not that this one is
+        # relevant.
+        modulation = (0.75 + 0.25 * terms["H"]) * terms["P"] * terms["O"]
+        score = evidence * modulation
+        terms["evidence"] = evidence
+        terms["modulation"] = modulation
 
         why = _why(terms, candidate)
         scored.append(Resonance(key=candidate.key, score=score, terms=terms,
@@ -211,13 +261,19 @@ def resonant_domain(candidates: Sequence[Candidate], query: str = "",
 
     scored.sort(key=lambda r: -r.score)
     domain = [r for r in scored if r.score >= threshold][:limit]
+    embedded = sum(1 for c in candidates if c.vector is not None)
+    channels = dict(CHANNELS)
+    if query_vector is not None and embedded:
+        channels["semantic"] = (f"semantic vectors — PRESENT, {embedded} of "
+                                f"{len(candidates)} memories carry one")
     return domain, {
+        "embedded": embedded,
         "threshold": threshold,
         "considered": len(scored),
         "in_domain": len(domain),
         "share_of_history": (round(len(domain) / len(scored), 4) if scored else None),
-        "channels": CHANNELS,
-        "absent": [k for k, v in CHANNELS.items() if "ABSENT" in v or "absent" in v],
+        "channels": channels,
+        "absent": [k for k, v in channels.items() if "ABSENT" in v],
         # Paper 07. Stated in the output because the output is what gets read.
         "boundary": "Recall ≠ Care. This ranks what is appropriate to surface, "
                     "and nothing about a relationship follows from it.",
@@ -229,7 +285,8 @@ def _why(terms: dict[str, float], candidate: Candidate) -> str:
     if candidate.superseded_by:
         return f"superseded by {candidate.superseded_by}, so it is history not present"
     ranked = sorted(terms.items(), key=lambda kv: -kv[1])
-    names = {"R": "the words match", "C": "it matches what is in front of us now",
+    names = {"R": "the words match", "semantic": "it means the same thing",
+             "C": "it matches what is in front of us now",
              "H": "it sits where things were established",
              "P": f"it reads as {PERSISTENCE[candidate.persistence][0]}",
              "O": "nothing later replaced it"}
