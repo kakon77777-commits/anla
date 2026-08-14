@@ -498,7 +498,8 @@ def _bench_document() -> dict:
             cwd=REPO, capture_output=True, text=True, check=True).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         behind = "?"
-    note = "current" if behind == "0" else f"{behind} commits behind HEAD"
+    plural = "" if behind == "1" else "s"
+    note = "current" if behind == "0" else f"{behind} commit{plural} behind HEAD"
     print(f"  benchmark: {len(document['results'])} scenarios measured at "
           f"{document['revision']} ({note})")
     return document
