@@ -312,6 +312,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The build prints how many commits behind HEAD the published benchmark
+          # numbers are. A shallow clone cannot compute that and it degrades to "?"
+          # — silently, in exactly the environment where the indicator is most
+          # useful, which is the failure mode the indicator was built to avoid.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
