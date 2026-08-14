@@ -206,17 +206,25 @@ else:
                "every omitted turn asked for came back")
 
     hunted = call("context_find", archive=ctx, query="the")
-    expect("disclosure" in hunted and hunted.get("channels_absent"),
-           "search discloses its confidence and which channels it does not have")
+    expect("boundary" in hunted and "Recall" in hunted.get("boundary", ""),
+           "retrieval carries paper 07's boundary: Recall is not Care")
+    expect(any("ABSENT" in v for v in hunted.get("channels", {}).values()),
+           "the semantic and phase channels are declared absent, not approximated")
+    expect(0 < (hunted.get("share_of_history") or 1) < 0.2,
+           "the resonant domain is a small subset of the shared history")
+    expect(all(h.get("terms") and h.get("why") for h in hunted.get("in_domain", [])),
+           "every memory says which terms of psi put it there")
     # Generated, not written down. A literal sentinel string appears in this file,
     # this file's edits appear in the transcript, and the archive is *of* the
     # transcript — so a hardcoded "matches nothing" query matched the turn where it
     # was typed. Now that search reads the raw record rather than extracted text,
     # a corpus that contains its own test is a real hazard rather than a joke.
     absent_query = "nomatch-" + uuid.uuid4().hex
-    nothing = call("context_find", archive=ctx, query=absent_query)
-    expect(nothing.get("hits") == [] and "no turn matched" in nothing.get("disclosure", ""),
-           "a query matching nothing says so rather than returning a bare zero")
+    nothing = call("context_find", archive=ctx, query=absent_query, moment=absent_query,
+                   threshold=0.9)
+    expect(nothing.get("in_domain") == []
+           and "clears the threshold" in nothing.get("disclosure", ""),
+           "nothing clearing the threshold says so rather than returning a bare zero")
 
 print("\nerrors an agent can act on")
 absent = call("anla_verify", archive=str(WORK / "nope.anla"))

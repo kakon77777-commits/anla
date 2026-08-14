@@ -65,6 +65,9 @@ from anla1.fs import restore_tree, scan_tree  # noqa: E402
 from anla1.context import (  # noqa: E402
     expand, project, projection_manifest, read_jsonl, turn_entries,
 )
+from anla1.resonance import (  # noqa: E402
+    Candidate, classify_persistence, resonant_domain,
+)
 from anla1.snapshot import (  # noqa: E402
     CODEC_STORE, CODEC_ZSTD, cdc_chunker, diff as snapshot_diff, extract_snapshot,
     list_snapshots, single_chunk, verify_archive, write_snapshot,
@@ -746,85 +749,82 @@ def context_expand(archive: str, paths: list[str]) -> dict:
 
 @mcp.tool()
 @_guard
-def context_find(archive: str, query: str, limit: int = 12) -> dict:
-    """Locate turns, so you know what is worth expanding.
+def context_find(archive: str, query: str = "", moment: str = "", limit: int = 12,
+                 threshold: float = 0.18) -> dict:
+    """Which of this shared history belongs in the present moment.
 
-    Expansion is useless without this — you cannot restore what you cannot find.
+    Not a search. Paper 05 of Neo's 符號記憶判定耦合系列 defines
 
-    Deliberately a placeholder for DRVS, and built in its discipline rather than as
-    a stopgap that contradicts it: **every hit says what matched** rather than
-    carrying an opaque score, results land in fixed tiers rather than being ranked
-    by a number, and a query that matches nothing confidently says so instead of
-    returning a bare zero or dressing a weak match as a strong one.
+        𝓔_AB^(τ) = { m ∈ 𝔐_AB : Ψ_τ(m) ≥ θ_τ }
 
-    Two channels only, both exact about what they are: `phrase` (the query appears)
-    and `terms` (some of its words do). DRVS's dictionary, relation and semantic
-    channels are not here, and their absence degrades this structurally — it finds
-    less, and never invents.
+    — the shared history is 𝔐, what belongs in the shared *present* is the small
+    subset 𝓔 whose appropriateness clears a threshold. 「還在記憶庫裡」不等於
+    「仍在共同現在」.
 
-    **Hits come back in conversation order, and that is DRVS's first principle
-    rather than a default.** 「你的清單原地不動，順序也不變。查詢只改變每一列的可見
-    度。」 The first version sorted by recency inside a tier, and using it on a long
-    session showed exactly why that is wrong: every query about something decided
-    hours ago returned the most recent *echo* of it instead of the turn where it was
-    decided. A query changes what is visible; it does not get to reorder history.
+    This replaced an ordering. The first version ranked by recency and returned the
+    latest echo of a thing rather than where it was decided; the second ranked
+    chronologically, which is a better sort and still the wrong axis. Time is one
+    of Ψ's eight terms and enters through an item's own **persistence class**
+    (paper 06: instantaneous state / active context / persistent method / long-term
+    trajectory), because recency distortion is w(m|t) failing to match
+    τ_persistence(m), not recent outweighing old.
 
-    **Searched against the turn's raw bytes, not its extracted text.** The record is
-    the record. The extractor understands prose and tool results and does not
-    understand everything — a phrase living in a file body it could not parse was
-    still in the archive and still missing from the index, which is an index that
-    disagrees with the thing it indexes.
+    `moment` is what is in front of us now, and it carries its own term. Passing it
+    is the difference between "what mentions this" and "what belongs here".
+
+    **The two channels that matter most are absent and say so.** Semantic vectors
+    and phase are the mechanism this stands in for — 共感 is resonance and
+    resonance is a phase phenomenon — and there is no embedding model here, so they
+    are reported missing rather than approximated by word overlap wearing their
+    name. Every hit carries the terms that produced it, so a retrieval carried by
+    weak channels is visible instead of confident.
+
+    Paper 07's boundary holds over the whole thing: Recall ≠ Care. This says a
+    memory is appropriate to surface. Nothing about a relationship follows.
     """
     data = _archive(archive).read_bytes()
     snapshot = list_snapshots(data)[-1]
     turns = _turns_of(data, snapshot)
-    needle = query.strip().lower()
-    if not needle:
-        raise ValueError("an empty query has no honest answer")
-    words = [w for w in needle.split() if len(w) > 2]
+    if not turns:
+        raise ValueError("this archive holds no turns")
 
-    hits = []
-    for turn in turns:
-        # Both: the extracted text is what a hint is drawn from, the raw bytes are
-        # what the archive actually holds, and searching only the former means a
-        # query can miss something the archive definitely has.
-        haystack = (f"{turn.text or ''}\n"
-                    f"{turn.raw.decode('utf-8', 'replace')}").lower()
-        if needle in haystack:
-            tier, why = "A", "the phrase appears in this turn"
-        elif words and all(w in haystack for w in words):
-            tier, why = "B", "every word of the query appears, not as a phrase"
-        elif words and sum(w in haystack for w in words) >= max(1, len(words) // 2):
-            tier, why = "C", "some words of the query appear"
-        else:
-            continue
-        hits.append({"path": turn.path, "index": turn.index, "role": turn.role,
-                     "tier": tier, "why": why, "bytes": len(turn.raw),
-                     "hint": _around(haystack, turn, needle)})
+    total = len(turns)
+    candidates = [
+        Candidate(key=turn.path,
+                  text=(turn.text or turn.raw.decode("utf-8", "replace"))[:4000],
+                  position=index, total=total,
+                  persistence=classify_persistence(turn.text or ""))
+        for index, turn in enumerate(turns)]
 
-    hits.sort(key=lambda h: (h["tier"], h["index"]))
-    best = hits[0]["tier"] if hits else None
-    spread = ({"first": hits[0]["index"], "last": hits[-1]["index"]}
-              if hits else None)
+    # With no moment given, the tail of the conversation is the moment — which is
+    # what an agent asking mid-session actually has in front of it.
+    here = [moment] if moment else [t.text or "" for t in turns[-6:]]
+    domain, report = resonant_domain(candidates, query=query, moment=here,
+                                     threshold=threshold, limit=limit)
+
+    by_path = {t.path: t for t in turns}
     return {
         "query": query,
-        "hits": hits[:limit],
-        "total": len(hits),
-        # Never a bare zero, and never a weak match dressed as a confident one.
+        "in_domain": [{
+            **r.as_dict(),
+            "path": r.key,
+            "index": by_path[r.key].index,
+            "role": by_path[r.key].role,
+            "hint": " ".join((by_path[r.key].text or "").split())[:160],
+        } for r in domain],
+        "considered": report["considered"],
+        "share_of_history": report["share_of_history"],
+        "threshold": report["threshold"],
+        "channels": report["channels"],
+        "absent": report["absent"],
+        "boundary": report["boundary"],
         "disclosure": (
-            "no turn matched even weakly; the archive may not hold this, or the "
-            "wording differs" if not hits else
-            "only weak matches — some query words appear, the phrase does not"
-            if best == "C" else
-            "matches are on words rather than the phrase" if best == "B" else
-            "the phrase itself appears"),
-        "channels_present": ["phrase", "terms"],
-        "channels_absent": ["dictionary", "relation", "semantic"],
-        # Chronological, so `hits[0]` is where the thing first appears rather than
-        # where it was last mentioned — and the span says whether it was a passing
-        # remark or something the conversation kept returning to.
-        "order": "conversation order, earliest first",
-        "span": spread,
+            "nothing in this history clears the threshold for this moment"
+            if not domain else
+            "carried by weak channels — the semantic and phase channels that would "
+            "answer a question like this are absent"
+            if all(r.terms.get("R", 0) < 0.05 for r in domain) else
+            "content relevance contributed"),
     }
 
 
