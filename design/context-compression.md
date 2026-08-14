@@ -98,6 +98,61 @@ in itself.
 
 ---
 
+### DRVS — how you get back to the right part
+
+> "Your list stays exactly where it is, in its own order. A query only changes how
+> visible each row is."
+
+The same shape again, on the retrieval side. A query does not *replace* the context
+with results; it changes what is visible. Weak matches dim, misses fade to a **ghost
+state** rather than disappearing — which is the omission manifest, expressed as a UI
+contract. Five channels, fixed confidence tiers rather than scores, and every hit
+carries a label naming *what* matched. "Every optional channel degrades structurally":
+a missing channel silently does less, never fabricates.
+
+This is the second half Neo named — reconstruction and 顯影 — and it is deferred, but
+it constrains the first half: a projection must leave behind something a query can
+still see and re-develop, not a gap.
+
+### MS3E and UTF-8X — the two that changed the design
+
+Not on the `/related/` page, found on the GitHub dashboard, and both load-bearing.
+
+**MS3E** — 「把線性媒體編譯成可定址的結構化狀態，而不是把整段影片當成一條只能前後尋址
+的時間軸」: compile linear media into *addressable structured state* rather than a
+timeline you can only seek along. **A transcript is linear media you can only seek
+along.** That is the object-model gap named in §5.2, and there is already a theory for
+it.
+
+**UTF-8X** — and this one is startling:
+
+> 「以 UTF-8 為語義錨點，在不同計算區域生成可逆、任務特化的物理表示。**AI 負責策略生成，
+> 解碼由確定性、版本化、可雜湊驗證的轉換器完成 —— AI 不參與解碼。**」
+
+*AI generates the strategy; decoding is done by a deterministic, versioned,
+hash-verifiable transformer — AI does not participate in decoding.*
+
+**That is ANLA's invariant, word for word in spirit, arrived at independently in
+another project.** ANLA says it about containers; UTF-8X says it about
+representations. Two separate projects converging on the same rule is the strongest
+evidence available that the rule is the right one — and it means UTF-8X is not a
+component to integrate but the same principle one layer down.
+
+### The realisation that unblocks the build
+
+§5 listed addressable partial extraction as load-bearing and `INDX` as the way to get
+it. Working through MS3E's framing shows that is only true *below* the object level.
+
+**A turn stored as its own ANLA object is already addressable.** It has its own path,
+its own `object_id`, its own chunk list; `extract` can produce it alone. Identical
+tool results across turns deduplicate by content, which is exactly where a transcript
+is repetitive. So turn-level expansion — pull back one omitted turn, byte for byte —
+needs **no new format work at all**.
+
+`INDX` is still wanted, for seeking *within* a very large single object, and for
+avoiding a full manifest read on an enormous archive. It is no longer what stands
+between this project and a working context store.
+
 ## 3. What ANLA already provides
 
 Not by coincidence. The invariant was chosen for preservation and preservation is
