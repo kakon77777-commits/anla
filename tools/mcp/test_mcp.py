@@ -20,6 +20,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import uuid
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SERVER = ROOT / "tools" / "mcp" / "anla_mcp.py"
@@ -207,8 +208,13 @@ else:
     hunted = call("context_find", archive=ctx, query="the")
     expect("disclosure" in hunted and hunted.get("channels_absent"),
            "search discloses its confidence and which channels it does not have")
-    nothing = call("context_find", archive=ctx,
-                   query="zzzzz-nothing-matches-this-zzzzz")
+    # Generated, not written down. A literal sentinel string appears in this file,
+    # this file's edits appear in the transcript, and the archive is *of* the
+    # transcript — so a hardcoded "matches nothing" query matched the turn where it
+    # was typed. Now that search reads the raw record rather than extracted text,
+    # a corpus that contains its own test is a real hazard rather than a joke.
+    absent_query = "nomatch-" + uuid.uuid4().hex
+    nothing = call("context_find", archive=ctx, query=absent_query)
     expect(nothing.get("hits") == [] and "no turn matched" in nothing.get("disclosure", ""),
            "a query matching nothing says so rather than returning a bare zero")
 
