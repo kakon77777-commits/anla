@@ -761,6 +761,19 @@ def context_find(archive: str, query: str, limit: int = 12) -> dict:
     and `terms` (some of its words do). DRVS's dictionary, relation and semantic
     channels are not here, and their absence degrades this structurally — it finds
     less, and never invents.
+
+    **Hits come back in conversation order, and that is DRVS's first principle
+    rather than a default.** 「你的清單原地不動，順序也不變。查詢只改變每一列的可見
+    度。」 The first version sorted by recency inside a tier, and using it on a long
+    session showed exactly why that is wrong: every query about something decided
+    hours ago returned the most recent *echo* of it instead of the turn where it was
+    decided. A query changes what is visible; it does not get to reorder history.
+
+    **Searched against the turn's raw bytes, not its extracted text.** The record is
+    the record. The extractor understands prose and tool results and does not
+    understand everything — a phrase living in a file body it could not parse was
+    still in the archive and still missing from the index, which is an index that
+    disagrees with the thing it indexes.
     """
     data = _archive(archive).read_bytes()
     snapshot = list_snapshots(data)[-1]
@@ -772,7 +785,11 @@ def context_find(archive: str, query: str, limit: int = 12) -> dict:
 
     hits = []
     for turn in turns:
-        haystack = (turn.text or "").lower()
+        # Both: the extracted text is what a hint is drawn from, the raw bytes are
+        # what the archive actually holds, and searching only the former means a
+        # query can miss something the archive definitely has.
+        haystack = (f"{turn.text or ''}\n"
+                    f"{turn.raw.decode('utf-8', 'replace')}").lower()
         if needle in haystack:
             tier, why = "A", "the phrase appears in this turn"
         elif words and all(w in haystack for w in words):
@@ -783,10 +800,12 @@ def context_find(archive: str, query: str, limit: int = 12) -> dict:
             continue
         hits.append({"path": turn.path, "index": turn.index, "role": turn.role,
                      "tier": tier, "why": why, "bytes": len(turn.raw),
-                     "hint": (turn.text or "").strip().replace("\n", " ")[:160]})
+                     "hint": _around(haystack, turn, needle)})
 
-    hits.sort(key=lambda h: (h["tier"], -h["index"]))
+    hits.sort(key=lambda h: (h["tier"], h["index"]))
     best = hits[0]["tier"] if hits else None
+    spread = ({"first": hits[0]["index"], "last": hits[-1]["index"]}
+              if hits else None)
     return {
         "query": query,
         "hits": hits[:limit],
@@ -801,6 +820,11 @@ def context_find(archive: str, query: str, limit: int = 12) -> dict:
             "the phrase itself appears"),
         "channels_present": ["phrase", "terms"],
         "channels_absent": ["dictionary", "relation", "semantic"],
+        # Chronological, so `hits[0]` is where the thing first appears rather than
+        # where it was last mentioned — and the span says whether it was a passing
+        # remark or something the conversation kept returning to.
+        "order": "conversation order, earliest first",
+        "span": spread,
     }
 
 
@@ -826,6 +850,24 @@ def context_status(archive: str) -> dict:
         "unique_chunks": len(latest.manifest["chunks"]),
         "roles": dict(sorted(roles.items(), key=lambda kv: -kv[1])[:10]),
     }
+
+
+def _around(haystack: str, turn, needle: str) -> str:
+    """A window around where the match actually is.
+
+    Drawn from `text` when there is text and from the matched region otherwise —
+    because searching the raw record while hinting from the extracted text produced
+    a *blank hint* on exactly the hits the extractor could not see, which is the
+    subset the raw search was added to reach. A hit an agent cannot judge is a hit
+    it cannot use.
+    """
+    where = haystack.find(needle)
+    if where < 0:
+        source, where = (turn.text or turn.raw.decode("utf-8", "replace")), 0
+    else:
+        source = haystack
+    start = max(0, where - 60)
+    return " ".join(source[start:start + 180].split())
 
 
 def _turns_of(data: bytes, snapshot) -> list:
