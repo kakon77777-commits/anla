@@ -375,77 +375,117 @@ def restore_tree(data: bytes, snapshot: Snapshot,
     # otherwise let one file silently become the other.
     written: dict[tuple[int, int], str] = {}
 
-    def target_for(entry_or_path) -> Path:
-        """Where an object goes: its native name if this machine can write it.
-
-        The safety check runs on `path`, and it is `path` that is checked even when
-        the native name is used — which is sound only because the manifest requires
-        `derive_path(name) == path`, so a traversing name cannot hide behind a
-        harmless path. Without that relation this function would have to re-derive
-        and re-check, and two readers could disagree about where a file goes.
-
-        Falling back is not a failure. The content is intact and the archive still
-        holds the true name; what a reader owes in exchange is to say so, which is
-        what `names_not_applied` is for.
-        """
-        entry = entry_or_path if isinstance(entry_or_path, dict) else None
-        path = entry["path"] if entry else entry_or_path
+    def target_for(path: str) -> Path:
+        """Where the portable name goes, checked against the destination."""
         resolved = (root / check_object_path(path)).resolve()
         if resolved != root and root not in resolved.parents:
             raise UnsafeObject("object path escapes the destination", path=path)
-        native = entry.get("name") if entry else None
+        return resolved
+
+    def native_target(entry: dict) -> Path | None:
+        """Where the *native* name would go, or `None` with the reason recorded.
+
+        The safety check runs on `path` even when the native name is used, which is
+        sound only because the manifest requires `derive_path(name) == path` — a
+        traversing name cannot hide behind a harmless one. Without that relation
+        this would have to re-derive and re-check, and two readers could disagree
+        about where a file goes.
+        """
+        native = entry.get("name")
         if native is None:
-            return resolved
+            return None
         try:
-            # `os.fsdecode` is the inverse of what the scan used, and on a platform
-            # that cannot represent these bytes it is where that shows — so the
-            # attempt is the test. Guessing from `sys.platform` would be a claim
-            # about the filesystem made by something that never touched it.
-            local = os.fsdecode(native)
-            candidate = (root / PurePosixPath(local)).resolve()
+            candidate = (root / PurePosixPath(os.fsdecode(native))).resolve()
         except (UnicodeError, ValueError, OSError) as exc:
             report.names_not_applied.append(
-                {"path": path, "reason": "not-representable", "detail": str(exc)[:80]})
-            return resolved
+                {"path": entry["path"], "reason": "not-representable",
+                 "detail": str(exc)[:80]})
+            return None
         if candidate != root and root not in candidate.parents:
-            # The relation above makes this unreachable for a manifest that verified,
-            # and it stays because "unreachable" is a claim about code that has been
-            # wrong before. Falling back is the safe answer, not an exception.
-            report.names_not_applied.append({"path": path, "reason": "escapes-destination"})
-            return resolved
+            # The derivation rule makes this unreachable for a manifest that
+            # verified, and it stays because "unreachable" is a claim about code
+            # that has been wrong before. Falling back is safe; raising is not
+            # required when a correct place to put the object exists.
+            report.names_not_applied.append(
+                {"path": entry["path"], "reason": "escapes-destination"})
+            return None
         return candidate
+
+    def place(entry: dict, make) -> Path:
+        """Create an object under its native name if the filesystem accepts it.
+
+        **Whether a machine can represent a name is not a question `os.fsdecode`
+        can answer**, and an earlier version of this asked it there. macOS decodes
+        `b"caf\\xe9.txt"` happily through a surrogate and then APFS refuses the
+        write with `errno 92`, so the decode succeeded, the file was never created,
+        and nothing was reported — the one outcome the report exists to make
+        impossible. Windows fails at the decode and Linux at neither, so a local run
+        on either would have called this finished.
+
+        The filesystem operation is the test, and only performing it asks the
+        question. `make` is passed a target and does the creating; if it raises
+        `OSError` the fallback runs against the portable path and the report says
+        which name the object actually got.
+        """
+        native = native_target(entry)
+        if native is not None:
+            try:
+                make(native)
+                return native
+            except (OSError, FidelityDegraded) as exc:
+                # `FidelityDegraded` is included because `_restore_link` has already
+                # turned an `OSError` into one by the time it gets here, under the
+                # message "this system will not create symbolic links" — which would
+                # be the wrong diagnosis for a system that makes links happily and
+                # only refused *that name*. Retrying is what tells the two apart: if
+                # the cause really is the absence of links, the portable name fails
+                # in exactly the same way and the error propagates from there with
+                # its meaning intact.
+                report.names_not_applied.append(
+                    {"path": entry["path"], "reason": "rejected-by-filesystem",
+                     "detail": str(exc)[:80]})
+        target = target_for(entry["path"])
+        make(target)
+        return target
 
     for entry in snapshot.manifest["objects"]:
         if entry["kind"] != "directory":
             continue
-        target_for(entry).mkdir(parents=True, exist_ok=True)
+        place(entry, lambda target: target.mkdir(parents=True, exist_ok=True))
         report.directories += 1
 
     for entry in sorted(snapshot.manifest["objects"], key=lambda e: e["path"]):
         if entry["kind"] == "symbolic-link":
-            _restore_link(entry, target_for(entry), root,
-                          overwrite=overwrite,
-                          allow_external=allow_external_links)
+            place(entry, lambda target, e=entry: _restore_link(
+                e, target, root, overwrite=overwrite,
+                allow_external=allow_external_links))
             report.links += 1
             _note_unapplied(entry, report, applied={"common"})
             continue
         if entry["kind"] != "regular-file":
             continue
         path = entry["path"]
-        target = target_for(entry)
-        if target.exists():
-            stat = target.stat()
-            collided = written.get((stat.st_dev, stat.st_ino))
-            if collided is not None:
-                raise FidelityDegraded(
-                    "two distinct archive paths collide on the target filesystem",
-                    paths=[collided, path], target=str(target),
-                    reason="the destination cannot represent both names distinctly")
-            if not overwrite:
-                raise UnsafeObject("destination file already exists", path=path)
-        target.parent.mkdir(parents=True, exist_ok=True)
         content = restored[path]
-        target.write_bytes(content)
+
+        def write(target: Path, path=path, content=content) -> None:
+            # The collision and overwrite refusals raise `AnlaError`, not `OSError`,
+            # so `place` lets them through rather than treating them as "this
+            # filesystem cannot manage that name" and quietly trying the other one.
+            # Only the OS saying no is a reason to fall back.
+            if target.exists():
+                stat = target.stat()
+                collided = written.get((stat.st_dev, stat.st_ino))
+                if collided is not None:
+                    raise FidelityDegraded(
+                        "two distinct archive paths collide on the target filesystem",
+                        paths=[collided, path], target=str(target),
+                        reason="the destination cannot represent both names distinctly")
+                if not overwrite:
+                    raise UnsafeObject("destination file already exists", path=path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+
+        target = place(entry, write)
         stat = target.stat()
         written[(stat.st_dev, stat.st_ino)] = path
         applied = set()

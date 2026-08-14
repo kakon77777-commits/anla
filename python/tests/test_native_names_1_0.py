@@ -11,7 +11,6 @@ the question.
 from __future__ import annotations
 
 import os
-import sys
 
 import pytest
 
@@ -212,15 +211,32 @@ def test_restore_either_applies_the_native_name_or_reports_that_it_did_not(tmp_p
         assert on_disk == {b"caf%E9.txt"}, "the fallback writes the portable label"
 
 
-@pytest.mark.skipif(sys.platform == "win32",
-                    reason="a Windows filename is UTF-16; there is no way to create "
-                           "one whose bytes are not valid UTF-8")
+def can_create_a_non_utf_8_filename(where) -> bool:
+    """Ask the filesystem, rather than guessing from `sys.platform`.
+
+    This began as `skipif(sys.platform == "win32")` and was wrong on macOS, where
+    `os.fsdecode` succeeds through a surrogate and then APFS refuses the write with
+    `errno 92`. Two platforms refuse such a name for two different reasons at two
+    different layers, and a third accepts it — which is more variety than a platform
+    name can express. The probe costs one file.
+    """
+    try:
+        probe = where / os.fsdecode(b"probe-\xe9")
+        probe.write_bytes(b"")
+        probe.unlink()
+        return True
+    except (OSError, UnicodeError, ValueError):
+        return False
+
+
 def test_a_tree_containing_a_non_utf_8_filename_packs_and_round_trips(tmp_path):
     """The case that used to kill the pack with a traceback, end to end."""
     from anla1.fs import scan_tree
 
     source = tmp_path / "src"
     source.mkdir()
+    if not can_create_a_non_utf_8_filename(source):
+        pytest.skip("this filesystem will not hold a name that is not valid UTF-8")
     (source / os.fsdecode(b"caf\xe9.txt")).write_bytes(b"contents")
     (source / "plain.txt").write_bytes(b"other")
 
