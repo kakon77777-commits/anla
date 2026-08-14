@@ -140,13 +140,44 @@ fn pack_command(command: &str, path: &str, args: &[String])
                         normalization: 2,
                     });
                 }
+                // Both of these used to accept *anything* and quietly pick a
+                // default for what they did not recognise, while the Python CLI
+                // refuses an unknown value outright — `choices=("none", "cdc")`.
+                // So `--chunking anla-cdc-1`, using the profile's own name, got you
+                // fixed chunking and a manifest with no `packing_plan`, with no
+                // error and no warning. A local inspector found it on its first run
+                // by packing one tree with both writers and getting archives 320
+                // bytes apart.
+                //
+                // The plan is what makes a later append refuse to cut at different
+                // boundaries — without it, deduplication silently does nothing
+                // while every check still passes. Losing it to a typo is the whole
+                // "a rule checked on one side and assumed on the other" shape
+                // again, and the fix is that an option this writer does not
+                // understand is an error rather than a preference.
                 "--chunking" => {
-                    if next_arg(&mut rest, flag)? == "cdc" {
-                        options.profile = Some(writer::CdcProfile::default());
+                    options.profile = match next_arg(&mut rest, flag)?.as_str() {
+                        "cdc" => Some(writer::CdcProfile::default()),
+                        "none" => None,
+                        other => {
+                            return Err(Error::new(
+                                Kind::InvalidInput,
+                                format!("--chunking must be 'cdc' or 'none', not {other:?}"),
+                            ))
+                        }
                     }
                 }
                 "--codec" => {
-                    options.codec = if next_arg(&mut rest, flag)? == "zstd" { 1 } else { 0 }
+                    options.codec = match next_arg(&mut rest, flag)?.as_str() {
+                        "zstd" => 1,
+                        "store" => 0,
+                        other => {
+                            return Err(Error::new(
+                                Kind::InvalidInput,
+                                format!("--codec must be 'store' or 'zstd', not {other:?}"),
+                            ))
+                        }
+                    }
                 }
                 "--level" => {
                     options.level = next_arg(&mut rest, flag)?

@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>ANLA Inspector</title>
+<style>
+:root{
+  --paper:#f6f4f0; --paper-2:#fffefc; --paper-3:#ece8e1;
+  --ink:#16181c; --ink-2:#3f444d; --ink-3:#6b7280;
+  --rule:#d9d4cb; --rule-2:#c6c0b5;
+  --accent:#12557d; --accent-2:#0d3f5e; --accent-wash:#e7eff5;
+  --ok:#1c6b4a; --warn:#8a5a10; --bad:#a02525;
+  --mono:ui-monospace,"Cascadia Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans:"Inter","Segoe UI",system-ui,-apple-system,"Noto Sans TC",sans-serif;
+  --radius:10px;
+  --shadow:0 1px 2px rgba(20,24,30,.06), 0 8px 24px -12px rgba(20,24,30,.18);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#14161a; --paper-2:#1b1e24; --paper-3:#22262d;
+    --ink:#e9e6e1; --ink-2:#c2c7cf; --ink-3:#8b929c;
+    --rule:#2c3138; --rule-2:#3a4048;
+    --accent:#6fb3dc; --accent-2:#9ccdec; --accent-wash:#1c2a35;
+    --ok:#5fc79a; --warn:#d6a349; --bad:#e0736b;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 var(--sans);}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 22px 80px}
+header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+h1{font-size:21px;margin:0;letter-spacing:-.01em}
+.sub{color:var(--ink-3);font-size:13px}
+.local{margin-left:auto;font:12px var(--mono);color:var(--ink-3);
+  border:1px solid var(--rule);border-radius:999px;padding:3px 10px;background:var(--paper-2)}
+.lede{color:var(--ink-2);font-size:13.5px;max-width:74ch;margin:10px 0 22px}
+
+.panel{background:var(--paper-2);border:1px solid var(--rule);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:18px 20px;margin-bottom:18px}
+.panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink-3);
+  margin:0 0 14px;font-weight:600}
+
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+label{display:block;font-size:12px;color:var(--ink-3);margin-bottom:4px}
+input[type=text],select{font:13px var(--mono);padding:8px 10px;border:1px solid var(--rule-2);
+  border-radius:7px;background:var(--paper);color:var(--ink);min-width:120px}
+input[type=text]{min-width:min(520px,100%);flex:1}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}
+
+button{font:600 13px var(--sans);padding:9px 15px;border-radius:7px;cursor:pointer;
+  border:1px solid var(--accent);background:var(--accent);color:#fff}
+button.ghost{background:transparent;color:var(--accent);border-color:var(--rule-2)}
+button:disabled{opacity:.45;cursor:progress}
+button:hover:not(:disabled){background:var(--accent-2);border-color:var(--accent-2)}
+button.ghost:hover:not(:disabled){background:var(--accent-wash);color:var(--accent)}
+.quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.quick button{font:12px var(--mono);padding:4px 9px;background:var(--paper-3);
+  color:var(--ink-2);border-color:var(--rule)}
+
+.steps{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:10px}
+.card{background:var(--paper);border:1px solid var(--rule);border-radius:8px;padding:11px 13px}
+.card .k{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em}
+.card .v{font:600 19px/1.25 var(--mono);margin-top:3px;word-break:break-all}
+.card.good .v{color:var(--ok)} .card.bad .v{color:var(--bad)} .card.warn .v{color:var(--warn)}
+
+table{width:100%;border-collapse:collapse;font:12.5px var(--mono)}
+th,td{text-align:left;padding:5px 9px;border-bottom:1px solid var(--rule)}
+th{color:var(--ink-3);font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.06em}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.scroll{max-height:340px;overflow:auto;border:1px solid var(--rule);border-radius:8px}
+
+.bar{height:7px;background:var(--paper-3);border-radius:99px;overflow:hidden;margin-top:6px}
+.bar>i{display:block;height:100%;background:var(--accent)}
+.hint{font-size:12px;color:var(--ink-3);margin-top:9px}
+.err{background:#fdf0ef;border:1px solid var(--bad);color:var(--bad);
+  border-radius:8px;padding:11px 13px;font:12.5px var(--mono);white-space:pre-wrap;
+  max-height:230px;overflow:auto}
+@media (prefers-color-scheme:dark){.err{background:#2a1a1a}}
+.hidden{display:none}
+.roots{font:11.5px var(--mono);color:var(--ink-2)}
+.roots div{padding:3px 0;border-bottom:1px solid var(--rule);word-break:break-all}
+.roots b{color:var(--ink-3);font-weight:600;display:inline-block;min-width:158px}
+.tabs{display:flex;gap:4px;margin-bottom:10px}
+.tabs button{background:transparent;border:1px solid transparent;color:var(--ink-3);
+  font:600 12px var(--sans);padding:5px 11px}
+.tabs button[aria-selected=true]{background:var(--accent-wash);color:var(--accent);
+  border-color:var(--rule)}
+.spin{display:inline-block;width:11px;height:11px;border:2px solid var(--accent-wash);
+  border-top-color:var(--accent);border-radius:50%;animation:s .7s linear infinite;
+  vertical-align:-1px;margin-right:6px}
+@keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>ANLA Inspector</h1>
+  <span class="sub">ANLA 1.0 (draft) · 本機</span>
+  <span class="local" id="engines">…</span>
+</header>
+<p class="lede">
+  這裡沒有任何模擬。打包會實際執行 <code>anla1</code>（Python，在伺服器行程內）或
+  <code>anla1-rs</code>（Rust，子行程），對象是你這台機器上真正的目錄，而頁面顯示的每一個數字
+  都是那一次執行量到的。還原之後會<b>逐位元組</b>跟原始檔案比對 —— 因為 verify 只能證明封裝
+  內部自洽，證明不了裡面的 bytes 就是當初放進去的那些。
+</p>
+
+<section class="panel">
+  <h2>來源</h2>
+  <div class="row">
+    <div style="flex:1;min-width:min(520px,100%)">
+      <label for="source">要打包的目錄（這台機器上的絕對路徑）</label>
+      <input type="text" id="source" spellcheck="false" placeholder="D:\Ai\work together\ANLA\test_demo">
+    </div>
+  </div>
+  <div class="quick" id="quick"></div>
+
+  <div class="row" style="margin-top:16px">
+    <div><label for="engine">實作</label><select id="engine">
+      <option value="python">Python（參考實作）</option>
+      <option value="rust">Rust（快的那個）</option>
+    </select></div>
+    <div><label for="chunking">切塊</label><select id="chunking">
+      <option value="anla-cdc-1">anla-cdc-1（預設，會去重）</option>
+      <option value="fixed">固定（一檔一塊）</option>
+    </select></div>
+    <div><label for="codec">編碼器</label><select id="codec">
+      <option value="zstd">zstd</option>
+      <option value="store">store（不壓縮）</option>
+    </select></div>
+    <div><label for="avg">平均塊大小</label><select id="avg">
+      <option value="262144">256 KiB</option>
+      <option value="65536">64 KiB</option>
+      <option value="16384">16 KiB</option>
+      <option value="4096">4 KiB（文稿與原始碼最佳）</option>
+    </select></div>
+    <button id="run">打包</button>
+    <button class="ghost" id="both">兩套實作比對</button>
+  </div>
+  <p class="hint" id="engine-hint"></p>
+</section>
+
+<div id="error" class="panel err hidden"></div>
+
+<section class="panel hidden" id="results">
+  <h2>打包結果</h2>
+  <div class="cards" id="pack-cards"></div>
+  <div class="steps" style="margin-top:16px">
+    <button class="ghost" id="verify">驗證</button>
+    <button class="ghost" id="extract">還原</button>
+    <button class="ghost" id="compare">逐位元組比對</button>
+    <button class="ghost" id="append">再拍一次快照（看去重）</button>
+    <button class="ghost" id="manifest">看 manifest</button>
+  </div>
+  <div id="step-out" style="margin-top:16px"></div>
+</section>
+
+<section class="panel hidden" id="manifest-panel">
+  <h2>Manifest</h2>
+  <div class="roots" id="roots"></div>
+  <div class="tabs" style="margin-top:14px">
+    <button aria-selected="true" data-tab="objects">物件</button>
+    <button aria-selected="false" data-tab="chunks">chunks</button>
+    <button aria-selected="false" data-tab="caps">capabilities / plan</button>
+  </div>
+  <div id="tab-body"></div>
+</section>
+
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const bytes = (n) => n == null ? "—" :
+  n < 1024 ? n + " B" :
+  n < 1048576 ? (n/1024).toFixed(1) + " KiB" :
+  n < 1073741824 ? (n/1048576).toFixed(1) + " MiB" : (n/1073741824).toFixed(2) + " GiB";
+const num = (n) => n == null ? "—" : n.toLocaleString();
+
+let busy = false;
+async function call(action, body) {
+  if (busy) return null;
+  busy = true;
+  document.querySelectorAll("button").forEach(b => b.disabled = true);
+  $("error").classList.add("hidden");
+  try {
+    const res = await fetch("/api/" + action, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      $("error").textContent =
+        (data.code ? data.code + "\n" : "") + (data.error || "") +
+        (data.traceback ? "\n\n" + data.traceback : "");
+      $("error").classList.remove("hidden");
+      return null;
+    }
+    return data;
+  } catch (e) {
+    $("error").textContent = String(e);
+    $("error").classList.remove("hidden");
+    return null;
+  } finally {
+    busy = false;
+    document.querySelectorAll("button").forEach(b => b.disabled = false);
+  }
+}
+
+function cards(into, items) {
+  into.innerHTML = items.map(([k, v, cls]) =>
+    `<div class="card ${cls || ""}"><div class="k">${k}</div><div class="v">${v}</div></div>`
+  ).join("");
+}
+
+const source = () => $("source").value.trim();
+const options = () => ({
+  source: source(), engine: $("engine").value, chunking: $("chunking").value,
+  codec: $("codec").value, chunk_avg: Number($("avg").value)
+});
+
+$("run").onclick = async () => {
+  if (!source()) { $("source").focus(); return; }
+  $("step-out").innerHTML = '<span class="spin"></span>打包中…';
+  $("results").classList.remove("hidden");
+  $("manifest-panel").classList.add("hidden");
+  const r = await call("pack", options());
+  if (!r) { $("step-out").innerHTML = ""; return; }
+  cards($("pack-cards"), [
+    ["輸入", bytes(r.logical_bytes) + " · " + num(r.files) + " 檔"],
+    ["封裝", bytes(r.archive_bytes)],
+    ["比例", r.ratio == null ? "—" : (r.ratio * 100).toFixed(1) + "%",
+      r.ratio != null && r.ratio < 1 ? "good" : "warn"],
+    ["耗時", r.seconds + " s"],
+    ["吞吐", r.mib_per_second == null ? "—" : r.mib_per_second + " MiB/s",
+      r.mib_per_second != null && r.mib_per_second < 20 ? "warn" : "good"],
+    ["chunks", num(r.chunks)],
+    ["物件", num(r.objects)],
+    ["實作", r.engine === "rust" ? "Rust" : "Python"],
+  ]);
+  $("step-out").innerHTML = "";
+};
+
+$("both").onclick = async () => {
+  if (!source()) { $("source").focus(); return; }
+  $("results").classList.remove("hidden");
+  $("pack-cards").innerHTML = "";
+  $("step-out").innerHTML = '<span class="spin"></span>兩套 writer 各打包一次…';
+  const r = await call("both", options());
+  if (!r) { $("step-out").innerHTML = ""; return; }
+  $("step-out").innerHTML =
+    `<div class="cards">
+       <div class="card ${r.identical ? "good" : "bad"}"><div class="k">結果</div>
+         <div class="v" style="font-size:15px">${r.identical ? "逐位元完全相同" : "不一樣"}</div></div>
+       <div class="card"><div class="k">Python</div><div class="v">${bytes(r.python.bytes)}</div></div>
+       <div class="card"><div class="k">Rust</div><div class="v">${bytes(r.rust.bytes)}</div></div>
+       <div class="card"><div class="k">Python 吞吐</div><div class="v">${r.python.mib_per_second} MiB/s</div></div>
+       <div class="card"><div class="k">Rust 吞吐</div><div class="v">${r.rust.mib_per_second} MiB/s</div></div>
+       ${r.speedup && r.ratio_is_meaningful
+           ? `<div class="card"><div class="k">Rust ÷ Python</div><div class="v">${r.speedup}×</div></div>`
+           : ""}
+     </div>` +
+    (r.identical
+      ? `<p class="hint">${r.ratio_is_meaningful ? "" :
+           "（樹太小，沒有列速度比：Rust 是子行程、Python 在本行程內，" +
+           "16 MiB 以下這個比值量到的主要是 CreateProcess，不是 writer。）<br>"}兩套實作在 <code>blake3</code> 跟 <code>zstd</code> 之下不共用任何程式碼，
+         而同一棵樹進去、出來的 bytes 一模一樣。這就是凍結規則的第一個子句。
+         用 <code>store</code> 比較 —— §8 說壓縮輸出取決於壓縮器，兩邊的 libzstd 不保證同一版。</p>`
+      : `<p class="hint">相差 ${r.size_difference} bytes，第一個不同的位元組在 ${
+           r.first_differing_byte}。檔案留在：<br>${r.python.path}<br>${r.rust.path}</p>`);
+};
+
+$("verify").onclick = async () => {
+  $("step-out").innerHTML = '<span class="spin"></span>驗證中…';
+  const r = await call("verify", {});
+  if (!r) { $("step-out").innerHTML = ""; return; }
+  const both = r.rust_agrees === undefined ? "（Rust 未建置）"
+    : r.rust_agrees ? "兩套 reader 都接受" : "Rust 不同意！";
+  $("step-out").innerHTML =
+    `<div class="cards">
+       <div class="card good"><div class="k">Python verify</div><div class="v">ok</div></div>
+       <div class="card"><div class="k">耗時</div><div class="v">${r.seconds} s</div></div>
+       <div class="card"><div class="k">吞吐</div><div class="v">${r.mib_per_second} MiB/s</div></div>
+       <div class="card ${r.rust_agrees === false ? "bad" : "good"}">
+         <div class="k">第二套實作</div><div class="v" style="font-size:14px">${both}</div></div>
+     </div>
+     <p class="hint">verify 只證明封裝內部自洽 —— 每個 hash 跟其他 hash 一致。
+     它證明不了那些 bytes 就是當初放進去的；那要靠下面的「逐位元組比對」。</p>`;
+};
+
+$("extract").onclick = async () => {
+  $("step-out").innerHTML = '<span class="spin"></span>還原中…';
+  const r = await call("extract", {});
+  if (!r) { $("step-out").innerHTML = ""; return; }
+  const notes = (r.names_not_applied || []).length;
+  $("step-out").innerHTML =
+    `<div class="cards">
+       <div class="card"><div class="k">還原到</div><div class="v" style="font-size:12px">${r.destination}</div></div>
+       <div class="card"><div class="k">檔案</div><div class="v">${num(r.files)}</div></div>
+       <div class="card"><div class="k">寫入</div><div class="v">${bytes(r.bytes_written)}</div></div>
+       <div class="card"><div class="k">耗時</div><div class="v">${r.seconds} s</div></div>
+       ${notes ? `<div class="card warn"><div class="k">原生名稱未套用</div><div class="v">${notes}</div></div>` : ""}
+     </div>` +
+    (notes ? `<p class="hint">這台機器無法表示 ${notes} 個檔名，所以用可攜標籤寫出來了 ——
+      而且它有講。封裝裡仍然存著真正的名字。</p>` : "");
+};
+
+$("compare").onclick = async () => {
+  $("step-out").innerHTML = '<span class="spin"></span>比對中…';
+  const r = await call("compare", {source: source()});
+  if (!r) { $("step-out").innerHTML = ""; return; }
+  $("step-out").innerHTML =
+    `<div class="cards">
+       <div class="card ${r.identical ? "good" : "bad"}">
+         <div class="k">結果</div><div class="v" style="font-size:15px">${
+           r.identical ? "每個 byte 都一樣" : "有出入"}</div></div>
+       <div class="card"><div class="k">比對檔數</div><div class="v">${num(r.checked)}</div></div>
+     </div>` +
+    (r.identical ? "" :
+      `<p class="hint">不同：${(r.mismatched||[]).join(", ") || "—"}
+        ｜缺少：${(r.missing||[]).join(", ") || "—"}</p>`);
+};
+
+$("append").onclick = async () => {
+  $("step-out").innerHTML = '<span class="spin"></span>附加第二個快照…';
+  const r = await call("append", options());
+  if (!r) { $("step-out").innerHTML = ""; return; }
+  const share = r.share_of_input == null ? "—" : (r.share_of_input * 100).toFixed(3) + "%";
+  $("step-out").innerHTML =
+    `<div class="cards">
+       <div class="card"><div class="k">封裝 之前</div><div class="v">${bytes(r.archive_before)}</div></div>
+       <div class="card"><div class="k">封裝 之後</div><div class="v">${bytes(r.archive_after)}</div></div>
+       <div class="card good"><div class="k">第二個快照多花</div><div class="v">${bytes(r.added)}</div></div>
+       <div class="card good"><div class="k">佔輸入</div><div class="v">${share}</div></div>
+       <div class="card"><div class="k">快照數</div><div class="v">${r.snapshots}</div></div>
+     </div>
+     <p class="hint">同一棵樹拍第二次。多出來的幾乎只有描述它的 manifest ——
+     內容一個 chunk 都沒有重存，而每一個版本都還是能單獨完整還原。</p>`;
+};
+
+let manifestData = null;
+$("manifest").onclick = async () => {
+  $("step-out").innerHTML = '<span class="spin"></span>讀取 manifest…';
+  const r = await call("manifest", {});
+  $("step-out").innerHTML = "";
+  if (!r) return;
+  manifestData = r;
+  $("manifest-panel").classList.remove("hidden");
+  $("roots").innerHTML =
+    `<div><b>archive_uuid</b>${r.archive_uuid}</div>` +
+    Object.entries(r.roots).map(([k, v]) => `<div><b>${k}</b>${v}</div>`).join("");
+  drawTab("objects");
+  $("manifest-panel").scrollIntoView({behavior: "smooth", block: "start"});
+};
+
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach(o =>
+    o.setAttribute("aria-selected", String(o === b)));
+  drawTab(b.dataset.tab);
+});
+
+function drawTab(which) {
+  const r = manifestData;
+  if (!r) return;
+  const body = $("tab-body");
+  if (which === "objects") {
+    body.innerHTML = `<div class="scroll"><table><thead><tr>
+      <th>種類</th><th>路徑</th><th style="text-align:right">大小</th>
+      <th style="text-align:right">chunks</th><th>object_id</th></tr></thead><tbody>` +
+      r.objects_list.map(o => `<tr><td>${o.kind}</td><td>${esc(o.path)}</td>
+        <td class="num">${bytes(o.size)}</td><td class="num">${o.chunks}</td>
+        <td title="${o.object_id}">${o.object_id.slice(0, 16)}…</td></tr>`).join("") +
+      `</tbody></table></div><p class="hint">${num(r.object_total)} 個物件，顯示前 ${
+        Math.min(400, r.object_total)} 個。</p>`;
+  } else if (which === "chunks") {
+    body.innerHTML = `<div class="scroll"><table><thead><tr>
+      <th>chunk_id</th><th style="text-align:right">原始</th>
+      <th style="text-align:right">存放</th><th>codec</th>
+      <th style="text-align:right">offset</th></tr></thead><tbody>` +
+      r.chunks_list.map(c => `<tr><td title="${c.chunk_id}">${c.chunk_id.slice(0,16)}…</td>
+        <td class="num">${bytes(c.raw_size)}</td><td class="num">${bytes(c.stored)}</td>
+        <td>${c.codec}</td><td class="num">${num(c.offset)}</td></tr>`).join("") +
+      `</tbody></table></div><p class="hint">${num(r.chunk_total)} 個 chunk，顯示前 ${
+        Math.min(400, r.chunk_total)} 個。chunk id 是<b>原始</b> bytes 的 hash，
+        payload hash 是<b>存放</b> bytes 的 —— 前者抓「解碼出別的東西」，後者抓磁碟損壞。</p>`;
+  } else {
+    body.innerHTML = `<div class="roots">
+      <div><b>required</b>${(r.required_capabilities||[]).join("<br>") || "—"}</div>
+      <div><b>optional</b>${(r.optional_capabilities||[]).join("<br>") || "—"}</div>
+      </div><pre style="font:12px var(--mono);background:var(--paper);padding:12px;
+        border:1px solid var(--rule);border-radius:8px;overflow:auto;margin-top:12px">${
+        esc(JSON.stringify(r.packing_plan, null, 2))}</pre>
+      <p class="hint">required 是「不懂就必須拒絕」；optional 是「不懂也還原得出每個 byte，
+      只是套用不了」。metadata 命名空間跟原生名稱都在 optional，理由一樣。</p>`;
+  }
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+
+// Quick picks and the engine banner, from the machine rather than guessed.
+(async () => {
+  const here = "D:\\Ai\\work together\\ANLA";
+  const picks = [["test_demo（標準語料）", here + "\\test_demo"],
+                 ["python/（原始碼樹）", here + "\\python"],
+                 ["papers/", here + "\\papers"],
+                 ["site/", here + "\\site"]];
+  $("quick").innerHTML = picks.map(([label, path]) =>
+    `<button class="ghost" data-path="${esc(path)}">${esc(label)}</button>`).join("");
+  $("quick").querySelectorAll("button").forEach(b =>
+    b.onclick = () => { $("source").value = b.dataset.path; });
+  $("source").value = picks[0][1];
+})();
+
+function hint() {
+  const slow = $("engine").value === "python" && $("chunking").value === "anla-cdc-1";
+  $("engine-hint").innerHTML = slow
+    ? "Python + anla-cdc-1 是<b>慢路徑</b>：實測 3.9 MiB/s，因為那個滾動雜湊是 CPython 的逐位元組迴圈。"
+      + "同樣的工作 Rust 跑 87.5 MiB/s，而且產生<b>逐位元完全相同</b>的封裝。大一點的樹請切到 Rust。"
+    : "";
+}
+$("engine").onchange = hint; $("chunking").onchange = hint; hint();
+
+$("engines").textContent = "127.0.0.1 · 只在本機";
+</script>
+</body>
+</html>
