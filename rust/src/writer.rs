@@ -400,7 +400,197 @@ fn native_relative_path(relative: &std::path::Path) -> Result<String> {
     Ok(parts.join("/"))
 }
 
+/// Somewhere for a snapshot's bytes to go, that also knows the current offset.
+///
+/// The writer needs `position()` as much as `write()`: every chunk descriptor
+/// records where its record landed, so the offset is part of the output and not
+/// merely bookkeeping. Behind this trait that is either a growing buffer or a file
+/// being written in place — the same code either way, which is what makes the byte
+/// comparison in `tools/compare_writers.py` a proof rather than a hope.
+///
+/// Before this, `pack` accumulated the entire archive in a `Vec<u8>` and handed it
+/// back for the caller to write. That is the *fast* implementation, and it could not
+/// pack a tree larger than memory while the Python one could — the two
+/// implementations' capabilities were inverted exactly where it mattered most.
+pub trait Sink {
+    fn write(&mut self, data: &[u8]) -> Result<()>;
+    fn position(&self) -> usize;
+    /// Patch the 64-byte header and finish. Returns the archive when the sink held
+    /// it in memory, and an empty vector when it is already on disk.
+    fn finish(&mut self, header: &[u8]) -> Result<Vec<u8>>;
+}
+
+pub struct MemorySink {
+    buffer: Vec<u8>,
+}
+
+impl MemorySink {
+    pub fn new(prefix: Vec<u8>) -> Self {
+        Self { buffer: prefix }
+    }
+}
+
+impl Sink for MemorySink {
+    fn write(&mut self, data: &[u8]) -> Result<()> {
+        self.buffer.extend_from_slice(data);
+        Ok(())
+    }
+
+    fn position(&self) -> usize {
+        self.buffer.len()
+    }
+
+    fn finish(&mut self, header: &[u8]) -> Result<Vec<u8>> {
+        self.buffer[..HEADER_SIZE].copy_from_slice(header);
+        Ok(std::mem::take(&mut self.buffer))
+    }
+}
+
+/// Writes in place, and does not rewrite what is already there.
+///
+/// An append seeks to the end of the newest complete snapshot, truncates whatever a
+/// torn write left after it, and writes only the new records — then patches the
+/// header. Rebuilding the file to add one manifest costs a copy of the whole
+/// archive, which for a large one is the difference between seconds and hours.
+pub struct FileSink {
+    handle: std::fs::File,
+    position: usize,
+}
+
+impl FileSink {
+    pub fn create(path: &Path, resume_at: usize, prefix: &[u8]) -> Result<Self> {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut handle = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(path)
+            .map_err(|e| Error::new(Kind::InvalidInput, format!("{}: {e}", path.display())))?;
+        // The prefix is written only when the file does not already hold it — a
+        // fresh archive needs its 64-byte header, an append already has everything
+        // up to `resume_at` and rewriting it would be the copy this exists to avoid.
+        let existing_len = handle
+            .metadata()
+            .map(|m| m.len())
+            .map_err(|e| Error::new(Kind::InvalidInput, e.to_string()))?;
+        if existing_len < resume_at as u64 {
+            handle
+                .write_all(prefix)
+                .map_err(|e| Error::new(Kind::InvalidInput, e.to_string()))?;
+        }
+        handle
+            .set_len(resume_at as u64)
+            .and_then(|_| handle.seek(SeekFrom::Start(resume_at as u64)))
+            .map_err(|e| Error::new(Kind::InvalidInput, e.to_string()))?;
+        Ok(Self { handle, position: resume_at })
+    }
+}
+
+impl Sink for FileSink {
+    fn write(&mut self, data: &[u8]) -> Result<()> {
+        use std::io::Write;
+        self.handle
+            .write_all(data)
+            .map_err(|e| Error::new(Kind::InvalidInput, e.to_string()))?;
+        self.position += data.len();
+        Ok(())
+    }
+
+    fn position(&self) -> usize {
+        self.position
+    }
+
+    fn finish(&mut self, header: &[u8]) -> Result<Vec<u8>> {
+        use std::io::{Seek, SeekFrom, Write};
+        // The hint lives in the header, and the header is 64 bytes at offset zero.
+        // Nothing else in the file moves, which is the entire point.
+        self.handle
+            .seek(SeekFrom::Start(0))
+            .and_then(|_| self.handle.write_all(header))
+            .and_then(|_| self.handle.flush())
+            .map_err(|e| Error::new(Kind::InvalidInput, e.to_string()))?;
+        Ok(Vec::new())
+    }
+}
+
+/// Pack into memory. Kept because the tests and the comparison tools want bytes.
 pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOptions)
+    -> Result<Vec<u8>>
+{
+    let mut sink = MemorySink::new(Vec::new());
+    pack_into(&mut sink, existing, root, exclude, options)
+}
+
+/// Pack straight into `path`, never holding the archive in memory.
+pub fn pack_to_file(path: &Path, existing: &[u8], root: &Path, exclude: &[String],
+                    options: &PackOptions) -> Result<u64>
+{
+    // `resume_at` is decided inside `pack_into`, which is the only place that knows
+    // where the newest complete footer ends. The sink is created there for the same
+    // reason: a sink positioned by a caller that guessed would silently overwrite a
+    // snapshot.
+    let mut sink = FileSinkPending { path: path.to_path_buf(), sink: None };
+    pack_into(&mut sink, existing, root, exclude, options)?;
+    std::fs::metadata(path)
+        .map(|m| m.len())
+        .map_err(|e| Error::new(Kind::InvalidInput, format!("{}: {e}", path.display())))
+}
+
+/// A `FileSink` that is opened on the first write, once `pack_into` has decided
+/// where the new records begin.
+struct FileSinkPending {
+    path: std::path::PathBuf,
+    sink: Option<FileSink>,
+}
+
+impl Sink for FileSinkPending {
+    fn write(&mut self, data: &[u8]) -> Result<()> {
+        self.sink
+            .as_mut()
+            .expect("the writer positions the sink before writing")
+            .write(data)
+    }
+
+    fn position(&self) -> usize {
+        self.sink.as_ref().map(|s| s.position()).unwrap_or(0)
+    }
+
+    fn finish(&mut self, header: &[u8]) -> Result<Vec<u8>> {
+        self.sink
+            .as_mut()
+            .expect("the writer positions the sink before finishing")
+            .finish(header)
+    }
+}
+
+impl Positioned for FileSinkPending {
+    fn open_at(&mut self, resume_at: usize, prefix: &[u8]) -> Result<()> {
+        self.sink = Some(FileSink::create(&self.path, resume_at, prefix)?);
+        Ok(())
+    }
+}
+
+impl Positioned for MemorySink {
+    fn open_at(&mut self, _resume_at: usize, prefix: &[u8]) -> Result<()> {
+        // The prefix has to go *in*, not be assumed present. A first draft made this
+        // a no-op on the reasoning that a memory sink "already knows where it is" —
+        // true of the offset and false of the bytes, so an append would have
+        // produced an archive missing everything before the newest footer.
+        self.buffer.clear();
+        self.buffer.extend_from_slice(prefix);
+        Ok(())
+    }
+}
+
+/// A sink that has to be told where the new records start before it can take them.
+/// A memory sink already knows; a file sink cannot open until the footer chain has
+/// been walked.
+pub trait Positioned: Sink {
+    fn open_at(&mut self, resume_at: usize, prefix: &[u8]) -> Result<()>;
+}
+
+fn pack_into<S: Positioned + ?Sized>(out: &mut S, existing: &[u8], root: &Path,
+                                     exclude: &[String], options: &PackOptions)
     -> Result<Vec<u8>>
 {
     let (entries, skipped) = scan(root, exclude, options.preserve_metadata,
@@ -420,7 +610,13 @@ pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOpti
     } else {
         crate::container::parse_header(existing)?.archive_uuid
     };
-    let (mut out, mut sequence, snapshot_sequence, parent, previous_footer) =
+    // `prefix` is what the archive already holds before the new records: a bare
+    // header for a fresh one, everything up to the newest complete footer for an
+    // append. A memory sink needs those bytes handed to it; a file sink already has
+    // them on disk and needs only the offset. Giving both the same pair is what
+    // keeps the streaming and in-memory paths one piece of code, and therefore what
+    // keeps their output identical.
+    let (prefix, mut sequence, snapshot_sequence, parent, previous_footer) =
         if existing.is_empty() {
             (build_header(&archive_id, 0), 1u64, 1u64, None, None)
         } else {
@@ -450,6 +646,7 @@ pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOpti
                 Some(latest.footer.record.offset as u64),
             )
         };
+    out.open_at(prefix.len(), &prefix)?;
 
     let mut fresh: BTreeMap<Vec<u8>, Value> = BTreeMap::new();
     let mut referenced: BTreeMap<Vec<u8>, Value> = BTreeMap::new();
@@ -503,7 +700,7 @@ pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOpti
                         used_zstd = true;
                     }
                     let payload_hash = hash(&stored)?;
-                    let offset = out.len();
+                    let offset = out.position();
                     let header = Value::Map(vec![
                         (Value::Text("chunk_id".into()), Value::Bytes(chunk_id.clone())),
                         (Value::Text("codec_id".into()), Value::Uint(codec)),
@@ -525,7 +722,7 @@ pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOpti
                             (Value::Text("payload_hash".into()), Value::Bytes(payload_hash)),
                         ]),
                     );
-                    out.extend_from_slice(&record);
+                    out.write(&record)?;
                     sequence += 1;
                 }
                 // A complete manifest: descriptors for chunks written now *and* for
@@ -662,7 +859,7 @@ pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOpti
 
     let manifest = Value::Map(manifest_entries);
     let payload = encode(&manifest);
-    let manifest_offset = out.len();
+    let manifest_offset = out.position();
     let manifest_record = build_record(
         "MANF",
         &Value::Map(vec![
@@ -672,7 +869,7 @@ pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOpti
         &payload,
         sequence,
     );
-    out.extend_from_slice(&manifest_record);
+    out.write(&manifest_record)?;
     sequence += 1;
 
     let mut footer_members = vec![
@@ -687,8 +884,8 @@ pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOpti
                              Value::Uint(offset)));
     }
     let footer_payload = encode(&Value::Map(footer_members));
-    let footer_offset = out.len();
-    out.extend_from_slice(&build_record(
+    let footer_offset = out.position();
+    out.write(&build_record(
         "FOOT",
         &Value::Map(vec![
             (Value::Text("hash_algorithm".into()), Value::Text(algorithm.to_string())),
@@ -696,11 +893,10 @@ pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOpti
         ]),
         &footer_payload,
         sequence,
-    ));
+    ))?;
 
     // The hint is written last and believed by nobody.
-    out[..HEADER_SIZE].copy_from_slice(&build_header(&archive_id, footer_offset as u64));
-    Ok(out)
+    out.finish(&build_header(&archive_id, footer_offset as u64))
 }
 
 fn codec_plan(options: &PackOptions) -> Result<Value> {

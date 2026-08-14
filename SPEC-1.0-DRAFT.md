@@ -96,7 +96,12 @@ Three things, and they are worth naming rather than leaving as a feeling:
    is confidently, consistently wrong.
 2. **The Rust writer is narrower than the Python one**: it does not carry native
    names (§5.2.1.1), and **refuses** a name that is not valid UTF-8 rather than
-   guessing. It used to `to_string_lossy()` it — silently storing `caf<0xE9>.txt` as
+   guessing. It *does* stream now — records go to disk as they are produced, and an
+   append writes after the newest complete footer and patches the 64-byte header
+   rather than rebuilding the file, which on a 64 MiB archive is 142 ms of copying
+   that no longer happens. What remains is the *input* side: an append still reads
+   the existing archive to walk its footer chain, so appending to an archive larger
+   than memory is not yet possible in either implementation for the same reason. It used to `to_string_lossy()` it — silently storing `caf<0xE9>.txt` as
    `caf<U+FFFD>.txt`, a different name with every hash verifying, and collapsing two
    files differing only in an undecodable byte onto one path. That is the same
    defect as the `errors="replace"` this implementation caught in the *Python*

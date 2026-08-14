@@ -183,13 +183,19 @@ fn pack_command(command: &str, path: &str, args: &[String])
             }
             (Vec::new(), path.to_string(), output.clone())
         };
-        let bytes = writer::pack(&existing, std::path::Path::new(&tree), &exclude, &options)?;
-        std::fs::write(&destination, &bytes)
-            .map_err(|e| Error::new(Kind::InvalidInput, format!("{destination}: {e}")))?;
+        // Streamed to the destination rather than assembled and then written. The
+        // archive never exists as one object, so a tree larger than memory is
+        // packable — which the Python writer could already do and this one could
+        // not, the two implementations' capabilities inverted exactly where it
+        // mattered. An append writes after the newest complete footer and patches
+        // the 64-byte header instead of rebuilding the file.
+        let bytes = writer::pack_to_file(
+            std::path::Path::new(&destination), &existing,
+            std::path::Path::new(&tree), &exclude, &options)?;
         Ok(format!(
             "{{\"archive\":\"{}\",\"bytes\":{}}}",
             json_escape(&destination),
-            bytes.len()
+            bytes
         ))
 }
 

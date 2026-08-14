@@ -220,3 +220,130 @@ fn the_derivation_never_loses_a_valid_prefix() {
     name.extend_from_slice("🌏".as_bytes());
     assert_eq!(derive_path(&name), "中文-漢字%E9%FF🌏");
 }
+
+
+/// A scratch directory that removes itself. No dev-dependency for two tests.
+struct Scratch(std::path::PathBuf);
+
+impl Scratch {
+    fn new(name: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("anla1-rs-{name}"));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).expect("scratch directory");
+        Self(path)
+    }
+
+    fn join(&self, name: &str) -> std::path::PathBuf {
+        self.0.join(name)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn pack_options(created_unix_ns: u64) -> crate::writer::PackOptions {
+    crate::writer::PackOptions {
+        archive_id: [7u8; 16],
+        created_unix_ns,
+        profile: None,
+        codec: 0,   // store; the codec is not what these tests are about
+        level: 3,
+        hash_algorithm: "blake3-256".to_string(),
+        // No recorded metadata: mtimes differ between the two packs otherwise, and
+        // the equality below would fail for a reason that is not the sink.
+        preserve_metadata: false,
+        allow_unsupported: false,
+    }
+}
+
+#[test]
+fn streaming_to_a_file_produces_what_packing_into_memory_produces() {
+    // The only property a streaming refactor is allowed to have. `pack` and
+    // `pack_to_file` are the same code behind two sinks, and this is what says the
+    // sink is not part of the output — the cross-implementation byte comparison
+    // then says the same thing against a completely separate writer.
+    let scratch = Scratch::new("stream-identity");
+    let tree = scratch.join("tree");
+    std::fs::create_dir_all(tree.join("sub")).unwrap();
+    std::fs::write(tree.join("a.txt"), vec![b'a'; 5000]).unwrap();
+    std::fs::write(tree.join("sub/b.bin"), vec![0xA5u8; 70_000]).unwrap();
+
+    let options = pack_options(1);
+    let in_memory = crate::writer::pack(&[], &tree, &[], &options).unwrap();
+
+    let target = scratch.join("streamed.anla");
+    let size = crate::writer::pack_to_file(&target, &[], &tree, &[], &options).unwrap();
+    let streamed = std::fs::read(&target).unwrap();
+
+    assert_eq!(size as usize, streamed.len());
+    assert_eq!(in_memory.len(), streamed.len(), "streamed archive is a different size");
+    assert_eq!(in_memory, streamed, "streamed archive differs from the in-memory one");
+}
+
+#[test]
+fn an_append_reclaims_what_a_torn_write_left_behind() {
+    // SPEC §4.4. A write that did not finish leaves the file at an arbitrary length,
+    // and resuming at the end of the *file* rather than the end of the newest
+    // complete footer puts every later record off its alignment — after which
+    // `find_latest_footer` scans past the new footer and the archive keeps reading
+    // as the older snapshot, with every hash correct and nothing erroring.
+    //
+    // The Python writer had a real bug here that the clean-append case could not
+    // show, because truncating to a file's existing length is a no-op that
+    // succeeds. Only a torn archive actually shrinks.
+    use std::io::Write;
+
+    let scratch = Scratch::new("torn-append");
+    let tree = scratch.join("tree");
+    std::fs::create_dir_all(&tree).unwrap();
+    std::fs::write(tree.join("a.txt"), vec![b'a'; 5000]).unwrap();
+
+    let options = pack_options(1);
+    let target = scratch.join("torn.anla");
+    crate::writer::pack_to_file(&target, &[], &tree, &[], &options).unwrap();
+    let clean_len = std::fs::metadata(&target).unwrap().len();
+
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&target)
+        .unwrap()
+        .write_all(&[0xDE; 1200])
+        .unwrap();
+    assert_eq!(std::fs::metadata(&target).unwrap().len(), clean_len + 1200);
+
+    let second = scratch.join("second");
+    std::fs::create_dir_all(&second).unwrap();
+    std::fs::write(second.join("b.txt"), b"second snapshot").unwrap();
+
+    // A clean copy of the same archive, to append to as well. Comparing the two
+    // results is the only unambiguous test: the first version of this asserted the
+    // torn archive ended up smaller than `clean + garbage`, which the new
+    // snapshot's own records make false whether the tail was reclaimed or not. The
+    // assertion was wrong, not the code — and it could only fail, never mislead,
+    // which is the good kind of broken test.
+    let control = scratch.join("control.anla");
+    crate::writer::pack_to_file(&control, &[], &tree, &[], &options).unwrap();
+
+    let appending = pack_options(2);
+    let after = {
+        let existing = std::fs::read(&target).unwrap();
+        crate::writer::pack_to_file(&target, &existing, &second, &[], &appending).unwrap()
+    };
+    let expected = {
+        let existing = std::fs::read(&control).unwrap();
+        crate::writer::pack_to_file(&control, &existing, &second, &[], &appending).unwrap()
+    };
+
+    let archive = std::fs::read(&target).unwrap();
+    assert_eq!(after as usize, archive.len());
+    assert_eq!(after, expected,
+               "appending onto a torn archive gave {after} where a clean one gave                 {expected} — the {} bytes of torn tail were kept", 1200);
+    assert_eq!(archive, std::fs::read(&control).unwrap(),
+               "the two archives differ despite being the same size");
+    assert_eq!(crate::archive::list_snapshots(&archive).unwrap().len(), 2,
+               "both snapshots must be readable");
+    let _ = clean_len;
+}

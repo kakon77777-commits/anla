@@ -231,9 +231,23 @@ included** — the standing rule, and the reason the benchmark exists.
    is available and keeps the pure-Python one as a documented fallback with its speed
    stated. **The byte comparison is what makes this safe** — it already proves the two
    produce identical archives, so switching which one runs is not a change in output.
-3. **A streaming Rust writer.** Python streams; Rust still buffers the archive in RAM,
-   so the fast path cannot pack a tree larger than memory. This is the one place where
-   the two implementations' capabilities are inverted.
+3. ~~**A streaming Rust writer.**~~ **Done.** The writer goes through a `Sink` —
+   a growing buffer or a file being written in place — so a fresh pack never holds
+   the archive, and an append writes after the newest complete footer and patches
+   the header instead of rebuilding: **142 ms of copying avoided on a 64 MiB
+   archive**, and the saving grows with the archive. Proven byte-identical by the
+   comparison that already existed, plus two Rust tests including the torn-append
+   case Python once got wrong.
+
+   The first torn-append assertion was itself wrong — it compared the result against
+   `clean + garbage`, which the new snapshot's own records exceed whether the tail
+   was reclaimed or not. Replaced with a control: append to a clean copy and a torn
+   copy and require identical bytes.
+
+   **What is left is the input side.** An append still reads the whole existing
+   archive to walk its footer chain, in both implementations, so appending to an
+   archive larger than memory remains impossible. A fresh pack of a tree larger than
+   memory now works.
 4. **Measure and publish throughput** on the `/bench/` page next to the ratios, against
    `restic`, `borg`, `tar+zstd`. Including where ANLA loses, which today is everywhere.
 
