@@ -46,7 +46,7 @@ five separate conditions, and the project currently meets one:
 | | condition | today |
 |---|---|---|
 | 1 | **Fast enough** that using it is not a decision | **no** — measured below |
-| 2 | **Installable** without cloning a repository | **no** — no package exists |
+| 2 | **Installable** without cloning a repository | **no** — packaged, never published |
 | 3 | **Safe enough** for data that matters — encryption, provenance | **no** |
 | 4 | **Complete enough** to replace what they use now | partly |
 | 5 | **Stable** — a format that will not change under them | **no** — DRAFT |
@@ -74,6 +74,21 @@ The cause is a per-byte rolling-hash loop in pure Python. Rust does the identica
 work sixteen times faster, which says the **format is fine and the implementation is
 not**. Verification is unaffected (400–500 MiB/s) because it hashes whole chunks.
 
+**And pure Python cannot close it — measured, not assumed.** I rewrote the loop to
+iterate the buffer directly instead of subscripting it and to compare against a
+precomputed threshold instead of shifting: **4.1 → 5.3 MiB/s, a 1.3× gain**, with the
+cuts proven identical to the committed implementation on eleven inputs including
+structured text, all-zeroes and a single repeated byte. That is the shape of the
+ceiling. Five operations per byte in CPython is five operations per byte, and no
+arrangement of them reaches 60 MiB/s.
+
+So the change was **reverted**. `anla/fastcdc.py` exists to be read — it is the
+executable half of the specification, and the file says so: *"this function's output
+is part of the format's identity, so it is the last place to be clever."* Trading
+that for 30% of a number that needs 1500% is a bad trade. The measurement is the
+useful output, and it turns "make the Python faster" from an open task into a closed
+question.
+
 This inverts the project's architecture. Python is currently the primary
 implementation and Rust is "the second one, for the freeze rule". For anything
 commercial it must be the other way round: **Rust is the product, Python is the
@@ -84,11 +99,27 @@ more as a specification companion than as a tool nobody can run at scale.
 Even 61.7 MiB/s is not a strong number. `restic` and `borg` are in the hundreds. That
 is a Phase 2 problem, not a Phase 1 one.
 
-### 3.2 Nobody can install it
+### 3.2 It is packaged and unpublished
 
-There is no `pyproject.toml`, no `setup.py`, no published crate. Installation is "clone
-the repository and set `PYTHONPATH`". Every other item in this document is downstream
-of that, because an artifact nobody can install has no users and therefore no feedback.
+**Correction to the first draft of this document, which said there was no packaging.**
+There is: `python/pyproject.toml` is complete, with optional `speed` and `zstd`
+extras, console scripts for both `anla` and `anla1`, and correct metadata. I looked
+for it in the repository root, did not find it, and wrote down the conclusion instead
+of the observation.
+
+It builds and it works. A wheel installed into a clean virtual environment gives a
+stranger `anla1 pack / verify / extract` and a byte-exact round trip, verified just
+now. So the real gap is smaller and different:
+
+- **Nothing is published.** `pypi.org/project/anla/` is 404; the crate is unpublished.
+  `pip install anla` fails today for everyone.
+- **CI builds no wheels**, so publishing is a manual step nobody has rehearsed.
+- **The Rust binary has no distribution at all** — no crate, no release artifacts —
+  and it is the *fast* implementation. What a user can install today is the 3.9 MiB/s
+  one.
+
+That last point is the one that matters: publishing the Python package alone would
+ship the slow path to everyone and make §3.1 the user's problem instead of ours.
 
 ### 3.3 The differentiator does not exist
 
@@ -165,8 +196,10 @@ included** — the standing rule, and the reason the benchmark exists.
 
 ### Phase 1 — Make it real (unblocks everything)
 
-1. **`pyproject.toml`, `pip install anla`, a published crate.** Console scripts for
-   `anla` and `anla1`. Wheels in CI on three platforms.
+1. **Publish what already exists.** The Python packaging is done and correct; it has
+   simply never been released. Build wheels and an sdist in CI, publish to PyPI, and
+   publish the Rust crate — but **not before step 2**, because releasing today would
+   ship the 3.9 MiB/s path to every user and turn §3.1 into their problem.
 2. **Make Rust the production path.** `anla1` gains a native backend when the binary
    is available and keeps the pure-Python one as a documented fallback with its speed
    stated. **The byte comparison is what makes this safe** — it already proves the two
@@ -230,9 +263,9 @@ violates the budget.*
 
 ## 7. The one thing to be honest about
 
-Three weeks of work produced a format that is very well verified and that nobody can
-install, that runs its own default mode at 3.9 MiB/s, and whose distinguishing feature
-is unimplemented. None of those is a criticism of the verification — the verification
+Three weeks of work produced a format that is very well verified, that is packaged
+and has never been released, that runs its own default mode at 3.9 MiB/s, and whose
+distinguishing feature is unimplemented. None of those is a criticism of the verification — the verification
 is why the next phase can move fast without breaking what exists. But the ratio of
 *proof* to *product* is currently extreme, and Phase 1 exists to correct it before any
 more proof is added.

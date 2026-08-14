@@ -20,3 +20,6 @@ conformance/.fuzz-work/
 repro-digest.txt
 test_demo/_out/
 rust/target/
+# `python -m build` output.
+python/build/
+python/dist/
