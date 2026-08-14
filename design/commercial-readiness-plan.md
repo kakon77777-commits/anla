@@ -61,9 +61,15 @@ five separate conditions, and the project currently meets one:
 
 | writer | chunking | throughput | 1 TB would take |
 |---|---|---|---|
-| Python | fixed | 358 MiB/s | 49 minutes |
-| **Python** | **`anla-cdc-1`** | **3.9 MiB/s** | **3 days** |
-| Rust | `anla-cdc-1` | 61.7 MiB/s | 4.6 hours |
+| Python | fixed | 59.6 MiB/s | 4.9 hours |
+| **Python** | **`anla-cdc-1`** | **3.9 MiB/s** | **3.1 days** |
+| Rust | `anla-cdc-1` | 87.5 MiB/s | 3.3 hours |
+
+*Both implementations scan the same directory off the same disk. The first version of
+this measurement fed Python in-memory buffers while Rust read 64 files, so Rust was
+doing strictly more work and came out a third low — 61.7 rather than 87.5, and the
+gap 16× rather than 22×. An unfair benchmark is worse than none, and that one
+flattered the implementation that is already losing.*
 
 `anla-cdc-1` is the **default**, and it has to be: fixed chunking makes cross-snapshot
 deduplication collapse — the measured difference is 280 KiB against 2.86 MiB for a
@@ -71,7 +77,7 @@ deduplication collapse — the measured difference is 280 KiB against 2.86 MiB f
 runs at 3.9 MiB/s.
 
 The cause is a per-byte rolling-hash loop in pure Python. Rust does the identical
-work sixteen times faster, which says the **format is fine and the implementation is
+work twenty-two times faster, which says the **format is fine and the implementation is
 not**. Verification is unaffected (400–500 MiB/s) because it hashes whole chunks.
 
 **And pure Python cannot close it — measured, not assumed.** I rewrote the loop to
@@ -96,8 +102,13 @@ reference and the conformance oracle.** That is also the better use of the Pytho
 one — a readable, dependency-free implementation that a stranger can audit is worth
 more as a specification companion than as a tool nobody can run at scale.
 
-Even 61.7 MiB/s is not a strong number. `restic` and `borg` are in the hundreds. That
-is a Phase 2 problem, not a Phase 1 one.
+Even 87.5 MiB/s is not a strong number — `restic` and `borg` are in the hundreds —
+but it is in the range where a person would use the tool, and 3.9 is not. Closing the
+rest is a Phase 2 problem.
+
+**This is now published**, as the `throughput` row on `/bench/`, in both languages,
+scaled per operation so the fastest writer does not render behind a verify rate it is
+not competing with. A project that measures only what it is good at is not measuring.
 
 ### 3.2 It is packaged and unpublished
 

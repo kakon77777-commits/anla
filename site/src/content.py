@@ -827,6 +827,15 @@ RUNTIME_KEYS = WORKBENCH_KEYS + demo_keys(WORKBENCH_KEYS)
 #: cover is a build error, not an English fallback — a page that silently switches
 #: language is a page nobody notices is incomplete.
 BENCH_ZH: dict[str, dict[str, str]] = {
+    "throughput": {
+        "headline": "64 MiB 不可壓縮資料，打包與驗證",
+        "note": "每秒多少 MiB，在跑這次量測的機器上。"
+                "內容定義切塊是預設值——因為固定切塊會讓去重整個垮掉——"
+                "而在 Python writer 裡它同時也是慢路徑，慢兩個數量級。"
+                "Rust writer 做的是完全一樣的工作，產生逐位元相同的封裝，"
+                "速度是二十二倍；所以這是實作的數字，不是格式的數字。"
+                "會publish 出來，是因為一個只量自己擅長的項目的專案，等於沒有在量。",
+    },
     "metadata-cost": {
         "headline": "500 個檔案：命名空間化的 metadata 跟 500 個 symlink 多花了多少",
         "note": "Milestone 2 不會移動任何一個壓縮數字，因為它本來就不是在談壓縮"

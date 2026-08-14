@@ -474,6 +474,10 @@ BENCH_ORDER = ("anla_1_0", "anla_1_0_fixed_chunking", "anla_mvp_deflate",
                "targz", "targz_all_versions", "targz_both")
 
 BENCH_LABELS = {
+    "python_pack_fixed": "Python writer, fixed chunking",
+    "python_pack_cdc": "Python writer, anla-cdc-1 (the default)",
+    "python_verify": "Python reader, verify",
+    "rust_pack_cdc": "Rust writer, anla-cdc-1",
     "anla_1_0": "ANLA 1.0 (zstd + anla-cdc-1)",
     "anla_1_0_store_only": "ANLA 1.0, codec turned off",
     "anla_1_0_fixed_chunking": "ANLA 1.0, fixed chunking",
@@ -590,6 +594,38 @@ def page_bench(lang: str) -> str:
             headline, note = result["headline"], result["note"]
 
         sizes = {k: v for k, v in result["sizes"].items() if v}
+        rates = result["detail"].get("mib_per_second")
+        if not sizes and rates:
+            # A scenario that measures rates rather than bytes. Bars are drawn
+            # against the *slowest* here, the opposite of the size rows, because
+            # for throughput more is better — and drawing it the other way round
+            # would make the losing implementation look like the winner.
+            hours = result["detail"].get("hours_to_pack_one_tib", {})
+            # Scaled within comparable operations, not across all of them. Reading an
+            # archive is several times faster than writing one, so a single scale put
+            # the *fastest writer* at 16% of the bar behind a verify rate it is not
+            # competing with — a chart that makes the winner look like the loser is
+            # worse than no chart.
+            def kind(name: str) -> str:
+                return "verify" if "verify" in name else "pack"
+
+            fastest = {group: max(v for k, v in rates.items() if kind(k) == group)
+                       for group in {kind(k) for k in rates}}
+            rows = "".join(
+                f'<div class="bench-row{" mine" if "rust" not in k else ""}">'
+                f'<span class="bench-name">{esc(BENCH_LABELS.get(k, k))}</span>'
+                f'<span class="bench-track"><span class="bench-fill" '
+                f'style="width:{round(100 * v / fastest[kind(k)], 1)}%"></span></span>'
+                f'<span class="bench-value">{v:,.1f} MiB/s'
+                + (f' · {hours[k]:g} h/TiB' if k in hours else "")
+                + '</span></div>'
+                for k, v in rates.items())
+            cards.append(
+                f'<article class="bench-card"><h2>{esc(headline)}</h2>'
+                f'<p class="bench-note">{esc(note)}</p>'
+                f'<div class="bench-bars" role="img" '
+                f'aria-label="MiB per second">{rows}</div></article>')
+            continue
         widest = max(sizes.values())
         order = [k for k in BENCH_ORDER if k in sizes]
         order += [k for k in sizes if k not in order]

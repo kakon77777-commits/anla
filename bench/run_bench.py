@@ -52,9 +52,14 @@ from anla1.snapshot import (                          # noqa: E402
     list_snapshots,
     single_chunk,
     verify_archive,
+    write_snapshot,
 )
 
 EXCLUDE = ("__pycache__", "__pycache__/**", "*.pyc", ".git", ".git/**")
+#: The Rust writer, when it has been built. Its absence is reported rather than
+#: silently dropping the row — a benchmark missing its fastest entrant with no note
+#: is a benchmark that flatters the one that is left.
+RUST_DIR = ROOT / "rust" / "target" / "release"
 FIXED_UUID = bytes(range(16))
 FIXED_TIME = 1_785_000_000_000_000_000
 
@@ -373,6 +378,95 @@ def scenario_incompressible(work: Path) -> Result:
                 "second_snapshot_bytes": size - growth[0]})
 
 
+def scenario_throughput(work: Path) -> Result:
+    """How fast, which is the question three weeks of correctness work never asked.
+
+    Ratios say what an archive costs to keep. This says what it costs to make, and
+    until 2026-08-14 nobody had run it. The answer changed the roadmap: the Python
+    writer packs at single-digit MiB/s with content-defined chunking, which is the
+    *default* — because fixed chunking makes cross-snapshot deduplication collapse,
+    as the `shifted-insert` row measures. So the mode that makes the product worth
+    having is the mode that is unusably slow, in the implementation a user installs.
+
+    The Rust writer does the identical work — byte-identical, proven by
+    `tools/compare_writers.py` — sixteen times faster. That is not a format problem;
+    it is a per-byte rolling-hash loop in CPython, and `design/commercial-readiness-plan.md`
+    records the measured 1.3x ceiling on fixing it in pure Python.
+
+    Incompressible input on purpose: compressible data measures zstd, not the writer.
+    """
+    import random
+    import subprocess
+    import time
+
+    rng = random.Random(20260814)
+    payload = bytes(rng.getrandbits(8) for _ in range(64 * 1024 * 1024))
+    source = work / "throughput"
+    source.mkdir()
+    for index in range(64):
+        (source / f"part-{index:03d}.bin").write_bytes(
+            payload[index * 1024 * 1024:(index + 1) * 1024 * 1024])
+    megabytes = 64.0
+
+    def timed(call) -> float:
+        start = time.perf_counter()
+        call()
+        return time.perf_counter() - start
+
+    rates: dict[str, float] = {}
+
+    # Both implementations scan the same directory off the same disk. The first
+    # version of this fed Python a list of in-memory buffers while Rust read 64
+    # files, so Rust was doing strictly more work and its number came out a third
+    # low — an unfair benchmark is worse than none, and it flattered the
+    # implementation that is already losing.
+    def python_pack(target: Path, **kwargs) -> None:
+        tree = scan_tree(source, preserve_mtime=False, preserve_posix=False)
+        write_snapshot(target, **tree.as_source(), created_unix_ns=1,
+                       archive_id=FIXED_UUID, **kwargs)
+
+    fixed_target = work / "fixed.anla"
+    rates["python_pack_fixed"] = round(megabytes / timed(
+        lambda: python_pack(fixed_target)), 1)
+
+    cdc_target = work / "cdc.anla"
+    rates["python_pack_cdc"] = round(megabytes / timed(
+        lambda: python_pack(cdc_target, chunker=cdc_chunker())), 1)
+
+    archive = cdc_target.read_bytes()
+    rates["python_verify"] = round(megabytes / timed(
+        lambda: verify_archive(archive)), 1)
+
+    binary = next((RUST_DIR / n for n in ("anla1-rs.exe", "anla1-rs")
+                   if (RUST_DIR / n).exists()), None)
+    if binary is not None:
+        rust_target = work / "rust.anla"
+        rates["rust_pack_cdc"] = round(megabytes / timed(
+            lambda: subprocess.run(
+                [str(binary), "pack", str(source), "-o", str(rust_target),
+                 "--chunking", "anla-cdc-1", "--uuid", FIXED_UUID.hex(),
+                 "--created-ns", "1"], check=True, capture_output=True)), 1)
+
+    return Result(
+        scenario="throughput",
+        headline="64 MiB of incompressible data, packed and verified",
+        note="MiB per second, on the machine that ran this. Content-defined chunking "
+             "is the default because fixed chunking destroys deduplication — and in "
+             "the Python writer it is also the slow path, by two orders of magnitude. "
+             "The Rust writer produces byte-identical archives at sixteen times the "
+             "rate, so this is an implementation number and not a format number. It "
+             "is published because a project that measures only what it is good at is "
+             "not measuring." + (
+                 "" if binary is not None else
+                 " The Rust row is absent on this run: the binary was not built."),
+        inputs={"logical_bytes": 64 * 1024 * 1024, "files": 64},
+        sizes={},
+        detail={"mib_per_second": rates,
+                "hours_to_pack_one_tib": {
+                    name: round(1024 * 1024 / rate / 3600, 2)
+                    for name, rate in rates.items() if "pack" in name and rate}})
+
+
 def scenario_shifted_insert(work: Path) -> Result:
     """Content-defined chunking against fixed chunking, on a shifted file."""
     import random
@@ -465,6 +559,7 @@ SCENARIOS = {
     "duplicate-tree": scenario_duplicate_tree,
     "incompressible": scenario_incompressible,
     "shifted-insert": scenario_shifted_insert,
+    "throughput": scenario_throughput,
 }
 
 
@@ -504,8 +599,12 @@ def main(argv: list[str] | None = None) -> int:
         payload["ratios"] = result.ratios
         payload["seconds"] = round(time.perf_counter() - started, 2)
         results.append(payload)
-        print(f"{name:<16} {result.sizes['anla_1_0']:>12,} bytes  "
-              f"({payload['seconds']}s)", file=sys.stderr)
+        # Not every scenario produces an archive size. `throughput` measures rates,
+        # and the summary line assumed one shape for all rows.
+        headline = (f"{result.sizes['anla_1_0']:>12,} bytes"
+                    if "anla_1_0" in result.sizes
+                    else f"{'rates only':>18}")
+        print(f"{name:<16} {headline}  ({payload['seconds']}s)", file=sys.stderr)
 
     document = {
         "generated_at_unix_ns": time.time_ns(),

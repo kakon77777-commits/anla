@@ -1,6 +1,6 @@
 {
-  "generated_at_unix_ns": 1786696074202778300,
-  "revision": "cd4e6a0",
+  "generated_at_unix_ns": 1786700620861030300,
+  "revision": "f821532",
   "profile": "ANLA 1.0 (draft)",
   "codecs": [
     "store",
@@ -18,38 +18,38 @@
       "headline": "One snapshot of this repository's python/ directory",
       "note": "This row used to be the argument for Zstandard, stated as a measurement: with only `store` a single snapshot was larger than the tree and both compressors beat it comfortably. The codec landed, so the row now answers its own question — and the `store` line is kept beside it, because a benchmark that quietly drops the case it used to lose is not reporting, it is marketing. **This row's input is the live repository, so its absolute byte counts are not comparable between commits** — adding four test files moved every size on it, including every competitor's. Only the ratios within one run mean anything across time, and a regression small enough to hide inside a few new files would not be visible here at all. The four scenarios with fixed inputs are where a regression would show, and they are exact: on the run that added this note, not one byte moved on any of them.",
       "inputs": {
-        "logical_bytes": 1765159,
-        "files": 102
+        "logical_bytes": 2089020,
+        "files": 124
       },
       "sizes": {
-        "anla_1_0": 652864,
-        "anla_1_0_store_only": 1821896,
-        "zip_deflate9": 619389,
-        "targz": 547881,
-        "anla_mvp_deflate": 714342
+        "anla_1_0": 678208,
+        "anla_1_0_store_only": 1880256,
+        "zip_deflate9": 728339,
+        "targz": 641845,
+        "anla_mvp_deflate": 742757
       },
       "detail": {
         "snapshots": 1,
-        "unique_chunks": 102,
-        "chunk_bytes": 596117,
-        "logical_bytes": 1765159,
-        "files_round_tripped": 102,
+        "unique_chunks": 104,
+        "chunk_bytes": 616119,
+        "logical_bytes": 2089020,
+        "files_round_tripped": 124,
         "composition": [
           {
             "snapshot": 1,
-            "new_chunk_bytes": 612112,
-            "metadata_bytes": 40688
+            "new_chunk_bytes": 632424,
+            "metadata_bytes": 45720
           }
         ]
       },
       "ratios": {
-        "anla_1_0_vs_input": 0.3699,
-        "anla_1_0_vs_anla_1_0_store_only": 0.3583,
-        "anla_1_0_vs_zip_deflate9": 1.054,
-        "anla_1_0_vs_targz": 1.1916,
-        "anla_1_0_vs_anla_mvp_deflate": 0.9139
+        "anla_1_0_vs_input": 0.3247,
+        "anla_1_0_vs_anla_1_0_store_only": 0.3607,
+        "anla_1_0_vs_zip_deflate9": 0.9312,
+        "anla_1_0_vs_targz": 1.0567,
+        "anla_1_0_vs_anla_mvp_deflate": 0.9131
       },
-      "seconds": 1.16
+      "seconds": 0.9
     },
     {
       "scenario": "metadata-cost",
@@ -78,101 +78,101 @@
         "anla_1_0_vs_times_only": 1.2163,
         "anla_1_0_vs_times_and_mode": 1.1842
       },
-      "seconds": 0.83
+      "seconds": 0.81
     },
     {
       "scenario": "git-history",
       "headline": "8 successive commits of python/, one snapshot each",
       "note": "Every version is recoverable, byte for byte. The comparison is against keeping each version as its own ZIP, which is what people do without snapshots, and against one tar.gz of all of them — gzip's 32 KB window cannot see from one copy of the tree to the next, which is why deduplication is a different mechanism and not a worse compressor. **This row's input is the live repository, so its absolute byte counts are not comparable between commits** — adding four test files moved every size on it, including every competitor's. Only the ratios within one run mean anything across time, and a regression small enough to hide inside a few new files would not be visible here at all. The four scenarios with fixed inputs are where a regression would show, and they are exact: on the run that added this note, not one byte moved on any of them.",
       "inputs": {
-        "logical_bytes": 3585254,
+        "logical_bytes": 3940288,
         "versions": 8,
         "revisions": [
-          "c0ad581",
-          "cd2fd1d",
-          "d12cfb4",
-          "63cc9f6",
           "8cafce4",
           "18cdf3e",
           "6017599",
-          "65e8b09"
+          "65e8b09",
+          "ed29954",
+          "74b49f2",
+          "1364c66",
+          "082ff39"
         ]
       },
       "sizes": {
-        "anla_1_0": 463656,
-        "anla_1_0_store_only": 1190560,
-        "zip_deflate9_per_version": 1172547,
-        "targz_all_versions": 972661
+        "anla_1_0": 480832,
+        "anla_1_0_store_only": 1211168,
+        "zip_deflate9_per_version": 1300503,
+        "targz_all_versions": 1081737
       },
       "detail": {
         "snapshots": 8,
         "unique_chunks": 69,
-        "chunk_bytes": 320742,
-        "logical_bytes": 3585254,
-        "files_round_tripped": 330,
+        "chunk_bytes": 329763,
+        "logical_bytes": 3940288,
+        "files_round_tripped": 352,
         "composition": [
           {
             "snapshot": 1,
-            "new_chunk_bytes": 137472,
-            "metadata_bytes": 15600
+            "new_chunk_bytes": 151112,
+            "metadata_bytes": 16696
           },
           {
             "snapshot": 2,
-            "new_chunk_bytes": 15832,
-            "metadata_bytes": 15680
+            "new_chunk_bytes": 17616,
+            "metadata_bytes": 16776
           },
           {
             "snapshot": 3,
-            "new_chunk_bytes": 23560,
-            "metadata_bytes": 16056
+            "new_chunk_bytes": 26784,
+            "metadata_bytes": 16776
           },
           {
             "snapshot": 4,
-            "new_chunk_bytes": 39024,
-            "metadata_bytes": 16792
+            "new_chunk_bytes": 49000,
+            "metadata_bytes": 17536
           },
           {
             "snapshot": 5,
-            "new_chunk_bytes": 22256,
-            "metadata_bytes": 16792
+            "new_chunk_bytes": 52280,
+            "metadata_bytes": 17912
           },
           {
             "snapshot": 6,
-            "new_chunk_bytes": 17616,
-            "metadata_bytes": 16792
+            "new_chunk_bytes": 12112,
+            "metadata_bytes": 17912
           },
           {
             "snapshot": 7,
-            "new_chunk_bytes": 26784,
-            "metadata_bytes": 16792
+            "new_chunk_bytes": 27376,
+            "metadata_bytes": 18288
           },
           {
             "snapshot": 8,
-            "new_chunk_bytes": 49000,
-            "metadata_bytes": 17544
+            "new_chunk_bytes": 4296,
+            "metadata_bytes": 18296
           }
         ],
         "after_each_snapshot": [
-          153136,
-          184648,
-          224264,
-          280080,
-          319128,
-          353536,
-          397112,
-          463656
+          167872,
+          202264,
+          245824,
+          312360,
+          382552,
+          412576,
+          458240,
+          480832
         ],
-        "first_snapshot_bytes": 153136,
-        "later_snapshots_bytes": 310520,
-        "mean_later_snapshot_bytes": 44360
+        "first_snapshot_bytes": 167872,
+        "later_snapshots_bytes": 312960,
+        "mean_later_snapshot_bytes": 44709
       },
       "ratios": {
-        "anla_1_0_vs_input": 0.1293,
-        "anla_1_0_vs_anla_1_0_store_only": 0.3894,
-        "anla_1_0_vs_zip_deflate9_per_version": 0.3954,
-        "anla_1_0_vs_targz_all_versions": 0.4767
+        "anla_1_0_vs_input": 0.122,
+        "anla_1_0_vs_anla_1_0_store_only": 0.397,
+        "anla_1_0_vs_zip_deflate9_per_version": 0.3697,
+        "anla_1_0_vs_targz_all_versions": 0.4445
       },
-      "seconds": 8.46
+      "seconds": 5.73
     },
     {
       "scenario": "duplicate-tree",
@@ -232,7 +232,7 @@
         "anla_1_0_vs_input": 0.2292,
         "anla_1_0_vs_zip_deflate9_per_copy": 0.5469
       },
-      "seconds": 0.27
+      "seconds": 0.18
     },
     {
       "scenario": "incompressible",
@@ -276,7 +276,7 @@
         "anla_1_0_vs_zip_deflate9_per_copy": 0.5017,
         "anla_1_0_vs_targz_both": 0.5017
       },
-      "seconds": 1.63
+      "seconds": 1.51
     },
     {
       "scenario": "shifted-insert",
@@ -315,7 +315,32 @@
         "anla_1_0_vs_input": 0.5489,
         "anla_1_0_vs_anla_1_0_fixed_chunking": 0.5486
       },
-      "seconds": 2.1
+      "seconds": 1.98
+    },
+    {
+      "scenario": "throughput",
+      "headline": "64 MiB of incompressible data, packed and verified",
+      "note": "MiB per second, on the machine that ran this. Content-defined chunking is the default because fixed chunking destroys deduplication — and in the Python writer it is also the slow path, by two orders of magnitude. The Rust writer produces byte-identical archives at sixteen times the rate, so this is an implementation number and not a format number. It is published because a project that measures only what it is good at is not measuring.",
+      "inputs": {
+        "logical_bytes": 67108864,
+        "files": 64
+      },
+      "sizes": {},
+      "detail": {
+        "mib_per_second": {
+          "python_pack_fixed": 59.1,
+          "python_pack_cdc": 3.9,
+          "python_verify": 535.4,
+          "rust_pack_cdc": 87.5
+        },
+        "hours_to_pack_one_tib": {
+          "python_pack_fixed": 4.93,
+          "python_pack_cdc": 74.68,
+          "rust_pack_cdc": 3.33
+        }
+      },
+      "ratios": {},
+      "seconds": 26.95
     }
   ]
 }
