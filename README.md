@@ -244,6 +244,27 @@ conformance/vectors/        frozen archives and their hashes
 conformance/run_node.mjs    driver for the JavaScript implementation
 ```
 
+### Which implementation to use
+
+They produce byte-identical archives — CI checks six configurations on three
+platforms — so this is purely a speed question, and it has a measured answer
+([`/bench/`](https://anla.evemisslab.com/bench/), `throughput` row):
+
+| | pack, `anla-cdc-1` | verify |
+|---|---|---|
+| `anla1` (Python) | 3.9 MiB/s | 513 MiB/s |
+| `anla1-rs` (Rust) | 87.5 MiB/s | — |
+
+Content-defined chunking is the default because fixed chunking destroys
+cross-snapshot deduplication, and it is also where the Python writer spends its
+time: a per-byte rolling hash in CPython. That loop is written to be *read* — it
+is the executable half of §5 — and rewriting it for speed buys 1.3× before it
+stops being readable, which is measured in `design/commercial-readiness-plan.md`.
+
+**Use the Python package** to read archives, to check the format against the
+specification, to embed in Python, and for trees measured in megabytes.
+**Use the Rust binary** for volume.
+
 Building the site:
 
 ```bash

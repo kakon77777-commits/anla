@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "anla"
 version = "0.1.0"
-description = "Reference implementation of ANLA-MVP v0.1, the Agent-Native Lossless Archive profile"
+description = "Reference implementation of the Agent-Native Lossless Archive — readable, dependency-light, and slower than the Rust writer by design"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -18,6 +18,24 @@ classifiers = [
   "Topic :: System :: Archiving :: Compression",
 ]
 dependencies = []
+
+# What this package is, so nobody has to measure it to find out.
+#
+# It is the *reference* implementation: dependency-light, readable, and the
+# executable half of the specification. `anla/fastcdc.py` says of its own inner loop
+# that it is "the last place to be clever", and that is deliberate — a stranger has
+# to be able to audit the rule that decides where chunks begin.
+#
+# The cost is measured and published at https://anla.evemisslab.com/bench/ :
+# with content-defined chunking, which is the default because fixed chunking
+# destroys deduplication, this writer packs at **3.9 MiB/s** where the Rust writer
+# does the identical work — byte-identical, checked in CI — at **87.5 MiB/s**.
+# Reading is unaffected at ~500 MiB/s, because verification hashes whole chunks
+# rather than walking bytes.
+#
+# So: use this to read archives, to check the format, to embed in Python, and for
+# trees measured in megabytes. Use `anla1-rs` from the same repository for volume.
+# The two produce the same bytes; only one of them is worth an afternoon.
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "blake3>=1.0", "zstandard>=0.22"]

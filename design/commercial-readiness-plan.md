@@ -142,8 +142,12 @@ now. So the real gap is smaller and different:
   and it is the *fast* implementation. What a user can install today is the 3.9 MiB/s
   one.
 
-That last point is the one that matters: publishing the Python package alone would
-ship the slow path to everyone and make §3.1 the user's problem instead of ours.
+That last point is the one that matters — but the objection is to shipping the slow
+path *silently*, and that is a labelling problem rather than a code one. Both the
+package description and the README now carry the measured numbers and say which
+implementation to use for what: Python to read archives, to check the format, to
+embed, and for megabytes; Rust for volume. They produce the same bytes, so the choice
+costs a user nothing but time. **With that said out loud, publishing is unblocked.**
 
 ### 3.3 The differentiator does not exist
 
@@ -220,10 +224,13 @@ included** — the standing rule, and the reason the benchmark exists.
 
 ### Phase 1 — Make it real (unblocks everything)
 
-1. **Publish what already exists.** The Python packaging is done and correct; it has
-   simply never been released. Build wheels and an sdist in CI, publish to PyPI, and
-   publish the Rust crate — but **not before step 2**, because releasing today would
-   ship the 3.9 MiB/s path to every user and turn §3.1 into their problem.
+1. **Publish what already exists.** ~~Build wheels and an sdist in CI~~ — **done**:
+   every push builds the wheel, the sdist and the Rust binary on three platforms,
+   installs the wheel into a clean environment and runs a stranger's round trip
+   through the console script, then has the Rust binary read what the Python wheel
+   wrote. Publishing has never been rehearsed here, and an unrehearsed release step
+   fails on the day it matters. **Remaining: the release itself** — PyPI, the crate,
+   and binaries attached to a tag.
 2. **Make Rust the production path.** The chunker is the *only* hot loop — hashing
    already uses the BLAKE3 wheel at 1.9 GiB/s and verification runs at 512 MiB/s — so
    a native fast path for `next_cut` alone, on the pattern `anla1.blake3` already
