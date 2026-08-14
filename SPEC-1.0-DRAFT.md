@@ -94,21 +94,26 @@ Three things, and they are worth naming rather than leaving as a feeling:
    caught. The exercise finds every place the document was ambiguous enough that two
    writings of it diverged — five, so far — and nothing at all about the places it
    is confidently, consistently wrong.
-2. **The Rust writer is narrower than the Python one**: it does not carry native
-   names (§5.2.1.1), and **refuses** a name that is not valid UTF-8 rather than
-   guessing. It *does* stream now — records go to disk as they are produced, and an
-   append writes after the newest complete footer and patches the 64-byte header
-   rather than rebuilding the file, which on a 64 MiB archive is 142 ms of copying
-   that no longer happens. What remains is the *input* side: an append still reads
-   the existing archive to walk its footer chain, so appending to an archive larger
-   than memory is not yet possible in either implementation for the same reason. It used to `to_string_lossy()` it — silently storing `caf<0xE9>.txt` as
-   `caf<U+FFFD>.txt`, a different name with every hash verifying, and collapsing two
-   files differing only in an undecodable byte onto one path. That is the same
-   defect as the `errors="replace"` this implementation caught in the *Python*
-   reader, and the difference between *narrower* and *wrong*. It covers files,
+2. **The Rust writer is narrower than the Python one.** It covers files,
    directories, symbolic links, recorded metadata, appending and the fidelity
    report, and byte-identity is demonstrated over all of those — including a
    two-snapshot archive — but not over what it declines to do.
+
+   What it declines to do is carry a native name (§5.2.1.1): it **refuses** a name
+   that is not valid UTF-8 rather than guessing. It used to `to_string_lossy()` it,
+   silently storing `caf<0xE9>.txt` as `caf<U+FFFD>.txt` — a different name with
+   every hash verifying, and two files differing only in an undecodable byte
+   collapsing onto one path. That is the same defect as the `errors="replace"` this
+   implementation caught in the *Python* reader, and the difference between
+   *narrower* and *wrong*.
+
+   It does now **stream**: records go to disk as they are produced, and an append
+   writes after the newest complete footer and patches the 64-byte header rather
+   than rebuilding the file — on a 64 MiB archive, 142 ms of copying that no longer
+   happens, and the saving grows with the archive rather than with the change. What
+   remains is the *input* side: an append still reads the existing archive to walk
+   its footer chain, in **both** implementations, so a fresh pack of a tree larger
+   than memory works and an append to an archive larger than memory does not.
 3. **§10 still lists open questions.** The object name model (whitepaper Q4) is now
    answered in §5.2.1.1 and does *not* change `object_id` for any object whose name
    was already UTF-8 — that absence rule is why it could be answered at this stage
