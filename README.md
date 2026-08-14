@@ -112,6 +112,78 @@ cd rust && cargo build --release
 ./target/release/anla1-rs verify project.anla
 ```
 
+## A second thing this turned out to be: an agent's own memory
+
+An archive that preserves bytes exactly and expands any part of itself on demand is
+also a description of what a model needs from its own context. The same package
+therefore carries a context layer, reachable over MCP, and the target is **an AI
+natively compressing its own history** — remembering it losslessly, addressing it
+semantically, and getting the record itself back rather than a summary of it.
+
+```bash
+pip install "mcp>=1.10,<2"
+python tools/mcp/anla_mcp.py          # stdio; 20 tools
+```
+
+The loop, and what each step is required to prove:
+
+| tool | the claim it has to hold up |
+|---|---|
+| `context_capture` | every byte of the transcript, or a refusal — a limit that would drop the front is an error, not a quiet truncation |
+| `context_segment` | an index family σ over the turns; **the archive is byte-identical before and after** |
+| `context_segment_export` | the views `π_σ(m)` to embed, with the identity that must come back with them |
+| `context_attach_vectors` | vectors into the *auxiliary* plane — `D(P, I) = D(P, ∅)` |
+| `context_address` | a question in, `(turn, start_byte, end_byte)` out, digest verified against the record |
+
+The last row is the whole point. A segment is an **index**, never a stored fragment:
+from Neo's 同一性微積分, 切割 = 索引 — a cut adds a perspective and leaves the object
+whole. So re-cutting the same memory a different way costs nothing and rewrites
+nothing, several schemes coexist over one record, and **a segmenter is allowed to be
+wrong**. Measured on this repository's own development transcript, 6,581 turns,
+17.5 MB → an 11.5 MB archive:
+
+| | measured |
+|---|---|
+| Index | 61,458 segments, median 249 bytes, **coverage 1.0000** — no byte of any turn is unreachable through the index, and none is covered twice |
+| Preservation | digest **unchanged** through indexing, retrieval and expansion, across two coexisting schemes |
+| Expansion | every address resolved to digest-verified exact bytes of the authoritative turn |
+| Identity | a 768-wide corpus and a 64-wide query → `INCOMPARABLE: dimensions differs`, not a number |
+| Search | 61,458 vectors as `float32` = 192 MB, loaded in 0.52 s, ranked in 262 ms, whole call 3.7 s |
+
+**Does the segmenting actually help?** Twelve labelled queries, ground truth located
+by an anchor string the retriever never sees, questions written to avoid the anchor —
+so the label comes from a match the retriever cannot use and the query is exactly the
+case lexical search cannot answer. One corpus for all four rows, digest recorded:
+
+| scheme | segments | R@1 | R@5 | MRR | median rank |
+|---|---|---|---|---|---|
+| `whole-turn-v1` (baseline) | 6,581 | 0.17 | 0.42 | 0.280 | 7.5 |
+| `structural-v1` | 18,814 | 0.50 | 0.58 | 0.545 | 2.0 |
+| `sized-900-v1` (control) | 23,036 | 0.58 | 0.75 | 0.656 | 1.0 |
+| **`changepoint-v1`** | 61,458 | **0.75** | **1.00** | **0.847** | **1.0** |
+
+Two things in that table are worth more than the winning row. The **control beat the
+structural scheme** — cutting every ~900 bytes did better than reading the document's
+own headings and fences, so that structure was not carrying the information and the
+scheme that reads it earned nothing over a ruler. And the **stated p95 gate failed on
+every row**, including the winner: it wanted centred random-pair p95 below +0.15
+against a baseline of +0.238 measured on a third of this corpus, where the baseline is
+now +0.443. `changepoint-v1` halves the crowding to +0.219, which is what the gate was
+reaching for, and the gate as written still failed. It is reported failed, in the
+JSON and here, because a threshold re-read after the fact to mean whatever the result
+supports is not a threshold.
+
+Nothing in this package computes an embedding. The vectors come from whatever model
+the agent has — the OpenAI backend in `bench/` is a *test* backend, and the identity
+travels with the vectors precisely so that a local or browser model can replace it
+without anything silently comparing across the two. That division is UTF-8X's:
+「AI 負責策略生成⋯**AI 不參與解碼**」.
+
+```bash
+python bench/native_context.py --budget 6000     # the whole loop, over the wire
+python bench/segment_retrieval.py <transcript>   # does segmenting actually help?
+```
+
 ## Two implementations, on purpose
 
 | | |

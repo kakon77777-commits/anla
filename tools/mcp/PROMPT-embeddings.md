@@ -1,13 +1,23 @@
 # Prompt: get semantic vectors from a web-side AI
 
 Copy everything between the rules below into ChatGPT (or any assistant with tools),
-and attach the file `*.to-embed.json` produced by:
+and attach the file produced by one of these:
 
 ```bash
-context_export_for_embedding(archive="…/my-context.anla")
+context_segment_export(archive="…/my-context.anla",         # segments — prefer this
+                       scheme="changepoint-v1")
+context_export_for_embedding(archive="…/my-context.anla")   # whole turns
 ```
 
-Then bring the result back with `context_attach_vectors`.
+Then bring the result back with `context_attach_vectors` — passing the same `scheme`
+if the export was a segment export, so the keys are validated against that index and
+the stored identity records which view the vectors describe.
+
+**Prefer the segment export.** Both produce the same `{key, text}` shape, but a whole
+turn covers a defect, a measurement, a decision and an aside, so its vector means
+"technical conversation" and nothing narrower. Measured on twelve labelled queries
+over this repository's own transcript, moving from turns to change-point segments
+took Recall@1 from 0.17 to 0.75 and Recall@5 from 0.42 to 1.00 with the same model.
 
 **Why a file and not chat.** This conversation's own transcript exports as 2,153
 turns / 800 KB, and the vectors coming back would be **5 MB at 256 dimensions and
@@ -30,7 +40,8 @@ embedding and only the embedding.
 ## Input
 
 An attached JSON file: a list of objects, each `{"key": "...", "text": "..."}`.
-Each `text` is one turn of a long conversation. There may be a few thousand.
+Each `text` is one passage of a long conversation — either a whole turn or one
+segment of one. There may be tens of thousands.
 
 ## Output contract
 
@@ -41,8 +52,8 @@ A **downloadable JSON file** named `vectors.json`:
   "model": "the exact embedding model identifier you used",
   "dimensions": 768,
   "vectors": [
-    {"key": "turns/000001-user.json", "vector": [0.0123, -0.0456, ...]},
-    {"key": "turns/000002-assistant.json", "vector": [...]}
+    {"key": "turns/000001-user.json#changepoint-v1:0003", "vector": [0.0123, ...]},
+    {"key": "turns/000002-assistant.json#changepoint-v1:0000", "vector": [...]}
   ]
 }
 ```
@@ -132,16 +143,30 @@ python tools/mcp/make_vectors.py exported.to-embed.json --output vectors.json
 ```
 context_attach_vectors(archive="…/my-context.anla",
                        vectors="…/vectors.json",
+                       scheme="changepoint-v1",           # omit for a turn export
                        model="text-embedding-3-small")
 ```
 
-The vectors land in the archive's **auxiliary** plane — derived, disposable,
-regenerable — so `strip` can remove them and the preserved record does not change by
-a byte.
+The vectors are **auxiliary** — derived, disposable, regenerable — and they live in a
+sidecar *beside* the archive rather than inside it, so removing them is `rm` on one
+file and the archive's bytes never change. That is `D(P, I) = D(P, ∅)` at its most
+literal: delete the whole intelligence plane and every preserved byte extracts
+identically, because the decoder was never reading it.
 
-Then retrieval uses the semantic channel, and `context_find` reports it as
-`PRESENT` with the count of turns carrying one. Until vectors arrive it reports
-`ABSENT` rather than substituting word overlap under the same name.
+They are stored as `float32` behind a JSON header rather than as a JSON array of
+decimals. Measured at 61,458 segments × 768: **192 MB against 978 MB**, and **0.52 s
+to load against 38.1 s** — `frombuffer` instead of parsing a gigabyte of text.
+
+Then retrieval uses the semantic channel — `context_address` for segments,
+`context_find` for turns — and both report the channel as `PRESENT` with the count
+carrying a vector. Until vectors arrive they report `ABSENT` rather than substituting
+word overlap under the same name.
+
+**Install NumPy for the search.** It is optional and the preservation plane never
+needs it, but the pure-Python cosine is 71 µs a pair: 61,458 vectors is 73 minutes
+for one query, which an agent cannot tell from a hang. Without NumPy the search
+refuses above 8,000 vectors and says what to install. With it, the same search is
+**262 ms**.
 
 **The query needs a vector from the same model.** Embed the question with the model
 named above and pass it as `query_vector`; a query embedded by a different model is

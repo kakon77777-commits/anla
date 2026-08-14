@@ -1,0 +1,61 @@
+{
+ "model": "text-embedding-3-small",
+ "dimensions": 768,
+ "turns": 6581,
+ "corpus_digest": "38c5455779cbe268f86aff0605e2e4c8",
+ "corpus_bytes": 17493702,
+ "queries": 12,
+ "schemes_requested": [
+  "structural-v1",
+  "sized-900-v1",
+  "changepoint-v1",
+  "whole-turn-v1"
+ ],
+ "complete": true,
+ "schemes": {
+  "structural-v1": {
+   "segments": 18814,
+   "embedded": 5000,
+   "answerable_queries": 12,
+   "random_p95_centred": 0.3559,
+   "recall_at_1": 0.5,
+   "recall_at_5": 0.583,
+   "mrr": 0.545,
+   "median_rank": 2.0,
+   "gate_p95": false
+  },
+  "sized-900-v1": {
+   "segments": 23036,
+   "embedded": 5000,
+   "answerable_queries": 12,
+   "random_p95_centred": 0.3606,
+   "recall_at_1": 0.583,
+   "recall_at_5": 0.75,
+   "mrr": 0.656,
+   "median_rank": 1.0,
+   "gate_p95": false
+  },
+  "changepoint-v1": {
+   "segments": 61458,
+   "embedded": 5000,
+   "answerable_queries": 12,
+   "random_p95_centred": 0.2193,
+   "recall_at_1": 0.75,
+   "recall_at_5": 1.0,
+   "mrr": 0.847,
+   "median_rank": 1.0,
+   "gate_p95": false
+  },
+  "whole-turn-v1": {
+   "segments": 6581,
+   "embedded": 5000,
+   "answerable_queries": 12,
+   "random_p95_centred": 0.4431,
+   "recall_at_1": 0.167,
+   "recall_at_5": 0.417,
+   "mrr": 0.28,
+   "median_rank": 7.5,
+   "gate_p95": false
+  }
+ }
+}

@@ -1,18 +1,23 @@
 # -*- coding: utf-8 -*-
 """The vector plane, at the size one real conversation actually is.
 
-Written after measuring the thing it replaces. A JSON sidecar of 61,149 vectors at
-768 dimensions is **939 MB**, and a pure-Python cosine over that corpus takes
-**72 minutes for one query** — 70.9 µs per pair, measured, times 61,149. The loop
-closed at 6,000 segments and could not have closed at 61,149, which means the
+Written after measuring the thing it replaces, at full scale rather than by
+extrapolation. 61,458 vectors at 768 dimensions:
+
+    JSON array of decimals   978 MB   write 85.7 s   load 38.1 s
+    float32 + JSON header    192 MB   write 16.6 s   load  0.52 s   search 262 ms
+
+and the search matters more than the size: a pure-Python cosine over that corpus
+takes **73 minutes for one query** — 70.9 µs per pair, measured, times 61,458. The
+loop closed at 6,000 segments and could not have closed at 61,458, which means the
 demonstration was quietly running on a tenth of the record and the design had a
 ceiling nobody had walked into yet.
 
 So the vector plane gets a format and a search:
 
 * **Format.** One JSON header line — identity, keys, width, dtype — then the raw
-  little-endian `float32` rows. 188 MB for the same corpus, and it loads by
-  `frombuffer` rather than by parsing nine hundred megabytes of decimal text.
+  little-endian `float32` rows, loaded by `frombuffer` rather than by parsing a
+  gigabyte of decimal text.
 * **Search.** NumPy when it is installed, one matrix product; otherwise the pure
   loop with a size limit and an error that says what to install. **Not** a silent
   fallback that appears to hang: an agent given no answer for seventy minutes cannot
@@ -38,7 +43,7 @@ __all__ = ["MAGIC", "PURE_PYTHON_LIMIT", "have_numpy", "write_vectors",
 MAGIC = "anla:context:vectors:1"
 
 #: Above this many vectors, the pure-Python path refuses instead of running. 8,000
-#: pairs is about half a second per query; 61,149 is seventy-two minutes. The limit
+#: pairs is about half a second per query; 61,458 is seventy-three minutes. The limit
 #: is where the answer stops arriving while the caller is still waiting for it.
 PURE_PYTHON_LIMIT = 8_000
 

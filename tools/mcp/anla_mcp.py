@@ -919,10 +919,13 @@ def context_attach_vectors(archive: str, vectors: str, model: str = "",
 
     They go into the **auxiliary** plane, which is exactly where they belong:
     `D(P, I) = D(P, ∅)` — dropping the intelligence plane changes nothing a decoder
-    extracts, and an embedding is derived, disposable and regenerable. `strip`
-    removing them must cost nothing but the semantic channel, and the preservation
-    plane stays byte-identical, which is a property this package can check rather
-    than assert.
+    extracts, and an embedding is derived, disposable and regenerable.
+
+    Concretely: a sidecar file *beside* the archive, not a record inside it. So
+    discarding the whole intelligence plane is deleting one file, the archive's bytes
+    are untouched by construction rather than by a rewrite that has to be checked,
+    and the only thing lost is the semantic channel — which then reports itself
+    absent instead of silently degrading into word overlap.
 
     `vectors` is a path to JSON in either shape:
 
@@ -991,9 +994,8 @@ def context_attach_vectors(archive: str, vectors: str, model: str = "",
                                  revision=revision,
                                  projection_version=projection_version,
                                  segmentation_scheme=scheme or "unstated")
-    # float32 rows behind a JSON header, not a JSON array of decimals. The same
-    # 61,149×768 corpus is 939 MB as JSON and 188 MB here, and it loads by
-    # `frombuffer` rather than by parsing nine hundred megabytes of text.
+    # float32 rows behind a JSON header, not a JSON array of decimals. Measured at
+    # 61,458×768: 192 MB against 978 MB, and 0.52 s to load against 38.1 s.
     written = write_vectors(sidecar, cleaned.items(), identity.as_dict(),
                             extra={"model": model or "unstated"})
     return {
@@ -1010,10 +1012,12 @@ def context_attach_vectors(archive: str, vectors: str, model: str = "",
         "search_backend": "numpy" if have_numpy() else
                           "pure python — refuses above 8,000 vectors rather than "
                           "taking an hour per query; install numpy for more",
-        "plane": "auxiliary — disposable and regenerable; the record does not "
-                 "depend on these and `strip` may remove them",
-        "note": "context_find will use the semantic channel when a query vector is "
-                "given too, and will say so in its channel report",
+        "plane": "auxiliary — a sidecar beside the archive, not a record inside it; "
+                 "deleting this file discards the whole intelligence plane and the "
+                 "archive's bytes are unchanged by construction",
+        "note": "context_address (segments) and context_find (turns) will use the "
+                "semantic channel when a query vector is given too, and will say so "
+                "in their channel report",
     }
 
 
@@ -1034,6 +1038,35 @@ def _preserved(archive: str) -> tuple[pathlib.Path, dict[str, bytes]]:
 
 def _segment_sidecar(target: pathlib.Path, scheme: str) -> pathlib.Path:
     return target.with_suffix(f".segments-{scheme}.json")
+
+
+def _project_all(segments, preserved: dict[str, bytes], min_bytes: int = 0):
+    """Project many segments, verifying each turn's digest **once**.
+
+    `project_segment` re-hashes the whole turn on every call, which is right for one
+    call and wrong for sixty thousand: a turn with ten segments was hashed ten times,
+    and the change-point scheme cuts this repository's transcript into 61,458
+    segments over 6,581 turns. The check is not weakened — every turn is still
+    verified against what the index was built from before a byte of it is read, and
+    a turn that fails is skipped entirely rather than projected unchecked.
+    """
+    verified: dict[str, bool] = {}
+    for segment in segments:
+        raw = preserved.get(segment.source_turn)
+        if raw is None:
+            continue
+        ok = verified.get(segment.source_turn)
+        if ok is None:
+            ok = digest_of(raw) == segment.source_digest
+            verified[segment.source_turn] = ok
+        if not ok:
+            continue
+        try:
+            text = project_segment(segment, raw, check=False)
+        except ValueError:
+            continue
+        if len(text) >= min_bytes:
+            yield segment, text
 
 
 @mcp.tool()
@@ -1126,14 +1159,8 @@ def context_segment_export(archive: str, scheme: str = "changepoint-v1",
         raise ValueError(f"no index for {scheme!r}; call context_segment first")
     index = SegmentIndex.of(json.loads(sidecar.read_text(encoding="utf-8")))
 
-    rows = []
-    for segment in index.segments:
-        raw = preserved.get(segment.source_turn)
-        if raw is None:
-            continue
-        text = project_segment(segment, raw)
-        if len(text) >= min_bytes:
-            rows.append({"key": segment.segment_id, "text": text[:chars]})
+    rows = [{"key": segment.segment_id, "text": text[:chars]}
+            for segment, text in _project_all(index.segments, preserved, min_bytes)]
 
     eligible = len(rows)
     if limit and eligible > limit:
@@ -1229,16 +1256,11 @@ def context_address(archive: str, query: str = "", scheme: str = "changepoint-v1
         channel = ("semantic — REFUSED, a query vector was given but no segment "
                    "vectors are attached for this scheme")
 
-    if not ranked:
+    if not ranked and query:
         needle = query.lower()
-        scores = []
-        for segment_id, segment in segments.items():
-            raw = preserved.get(segment.source_turn)
-            if raw is None:
-                continue
-            text = project_segment(segment, raw)
-            if needle and needle in text.lower():
-                scores.append((segment_id, len(needle) / max(len(text), 1)))
+        scores = [(segment.segment_id, len(needle) / max(len(text), 1))
+                  for segment, text in _project_all(index.segments, preserved)
+                  if needle in text.lower()]
         ranked = sorted(scores, key=lambda kv: -kv[1])[:limit]
 
     hits = []

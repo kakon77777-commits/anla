@@ -82,16 +82,123 @@ cheap** — a bad index scheme is discarded and re-cut, not migrated.
 
 ## The acceptance test, fixed before building
 
-The current numbers, on 2,182 turns of this conversation with
+The numbers this was written against, on 2,182 turns of this conversation with
 `text-embedding-3-small` at 768 dimensions:
 
-| | now | required |
+| | then | required |
 |---|---|---|
 | random-pair cosine, centred | mean 0.000, **p95 +0.238** | p95 below +0.15 |
 | best match for a real question | **+0.316 centred**, below random p95 raw | clearly above random p95 |
 
 If segmenting does not move those, it did not work, and no amount of reweighting will
 be offered as though it had.
+
+## What was measured
+
+`bench/segment_retrieval.py`, twelve labelled queries, `text-embedding-3-small` at
+768 dimensions, 5,000 segments embedded per scheme. Each question is about a fact in
+this conversation and its ground truth is located by exact search for a distinctive
+anchor — `anla-gear-1`, `functools.wraps`, `0.317` — while the *question* is written
+to avoid the anchor entirely. The label therefore comes from a string match the
+retriever never sees, and the query is exactly the case lexical matching cannot
+answer.
+
+One corpus for all four rows — 6,581 turns, digest `38c5455779cbe268` — because the
+transcript is the session that is writing this and it grows between runs. Rows
+measured days apart are rows about different corpora, and the whole output is a
+comparison between rows, so the digest is recorded and a merge across digests is
+refused.
+
+| scheme | segments | p95 centred | R@1 | R@5 | MRR | median rank |
+|---|---|---|---|---|---|---|
+| `whole-turn-v1` (baseline) | 6,581 | +0.443 | 0.17 | 0.42 | 0.280 | 7.5 |
+| `structural-v1` | 18,814 | +0.356 | 0.50 | 0.58 | 0.545 | 2.0 |
+| `sized-900-v1` (control) | 23,036 | +0.361 | 0.58 | 0.75 | 0.656 | 1.0 |
+| **`changepoint-v1`** | 61,458 | **+0.219** | **0.75** | **1.00** | **0.847** | **1.0** |
+
+**Segmentation works, and the margin is not subtle.** Against the whole-turn baseline
+measured by the same harness on the same corpus, the change-point scheme takes
+Recall@1 from 0.17 to 0.75, Recall@5 from 0.42 to **1.00**, MRR from 0.280 to 0.847,
+and the median rank of the right passage from 7.5 to 1.
+
+**The control beat the structural scheme, and that is a result about the structural
+scheme.** `sized-900-v1` exists to answer "would cutting every ~900 bytes have done
+as well?" — and it did better: R@1 0.58 against 0.50, MRR 0.656 against 0.545. So the
+document's own headings, paragraph breaks and fences were **not** carrying the
+information; the scheme that reads them earned none of its extra complexity over a
+ruler. What does work is cutting where the *vocabulary* changes, which is the only
+one of the three that looks at content.
+
+**The stated p95 gate failed — for every scheme, including the winner.** It is
+reported as failed and the JSON records `gate_p95: false` on all four rows.
+
+What the gate got wrong is worth stating precisely, because the temptation is to
+relabel it. It required p95 below +0.15, calibrated against a turn-level baseline of
+**+0.238** measured on 2,182 turns. On this corpus the turn-level baseline is
+**+0.443** — the quantity the threshold was set against moved by more than the
+threshold itself, so a scheme could halve the crowding and still miss. `changepoint-v1`
+did halve it, from +0.443 to +0.219, and that is the number the gate was reaching for;
+but a gate is not allowed to be re-read after the fact as whatever the result
+supports. **A quantity compared only to its own earlier value is pinned by nothing**,
+and this gate was exactly that.
+
+So: the gate as written failed, the defect is mine, and the claim rests on the
+retrieval measurements — Recall@1, Recall@5 and MRR — which were also fixed in
+advance, are measured against ground truth the retriever never sees, and answer
+directly the question p95 was only ever a proxy for.
+
+## The end-to-end run says something the benchmark does not
+
+`bench/native_context.py` drives the whole loop over MCP against the live transcript,
+with no guarantee that the answer-bearing segment is in the embedded corpus — which
+`segment_retrieval.py` deliberately does guarantee, so that recall is measured against
+a large haystack without paying to embed all of it. The end-to-end number is lower,
+and both are true of different questions:
+
+* the benchmark answers *does segmenting improve retrieval, holding the corpus fixed*
+* the end-to-end run answers *what does an agent actually get, today, on its own
+  history* — including that the corpus contains near-duplicates of every topic,
+  because a development transcript discusses the same defect a dozen times.
+
+The second is the honest headline for a user and the first is the honest headline for
+the design decision. Neither replaces the other, and the gap between them is a
+measurement, not an embarrassment: it is the distance between "the unit is right" and
+"the retriever is good".
+
+On the 6,000-segment run it addressed 5 of 5 questions to digest-verified exact bytes
+and got **1 of 5 right at rank 1**, against R@1 0.75 in the benchmark. Both numbers
+are honest and they measure different things; the run prints them separately and
+prints how much of the index carried a vector, because a nearest hit inside a tenth
+of the record is indistinguishable from a complete search unless the share is stated.
+
+Three hazards found by running it, none of which the benchmark could have shown:
+
+1. **The transcript contains the benchmark's own questions** — in the source file, in
+   earlier runs' output, in the discussion of them — and an embedding matches a
+   question to itself far more strongly than to its answer. The first end-to-end run
+   duly addressed the line of `QUESTIONS` rather than the passage. Same class as the
+   sentinel string that matched the turn where it was typed. Dropped by exact match
+   now, and the count is printed, since a silent exclusion is a thumb on the scale in
+   the other direction.
+2. **`limit` took a prefix.** Exporting the first 5,000 of 61,458 segments searched
+   the opening eight per cent of the conversation and reported itself exactly as a
+   complete search would. Sampling now spreads across the record by default and names
+   which part it covered.
+3. **A JSON vector sidecar does not survive one conversation.** Measured at 61,458 ×
+   768, both formats written and read at full scale rather than extrapolated:
+
+   | | size | write | load | search |
+   |---|---|---|---|---|
+   | JSON array of decimals | 978 MB | 85.7 s | 38.1 s | — |
+   | `float32` behind a JSON header | **192 MB** | 16.6 s | **0.52 s** | **262 ms** |
+
+   And the search itself: pure-Python cosine is 70.9 µs a pair, so that corpus is
+   **73 minutes for one query** — which an agent cannot distinguish from a hang.
+   Without NumPy the search now **refuses** above 8,000 vectors and says what to
+   install, because a refusal naming the fix beats an answer nobody is still waiting
+   for. NumPy stays optional: the preservation plane must never need it, and a
+   channel that cannot run should say so rather than degrade into something
+   indistinguishable from working.
 
 ## On 相位
 

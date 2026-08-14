@@ -66,6 +66,40 @@ re-describe each turn, every checkpoint, growing with the conversation. That is
 Decision 1's price at turn granularity, `FLAG_COMPRESSED_METADATA` is the reserved
 answer, and until then checkpoint on meaningful boundaries rather than on a timer.
 
+## Semantic addressing — from a question to the exact bytes
+
+A whole turn is the wrong unit to embed: it covers a defect, a measurement, a
+decision and an aside, so its vector means "technical conversation" and nothing
+narrower. Measured, that showed up as the best real match scoring *below* the 95th
+percentile of random pairs. The unit had to get smaller — but not by storing pieces.
+
+From Neo's 同一性微積分, **切割 = 索引**: a cut adds a perspective and leaves the
+object whole. So a segment is `(turn, start_byte, end_byte)` in the auxiliary plane,
+several index families coexist over one record, and re-cutting rewrites nothing.
+
+| tool | what it does |
+|---|---|
+| `context_segment` | Build an index family σ. Reports coverage and the archive's digest before and after — indexing that changed a byte would be a defect, so it is checked rather than asserted. |
+| `context_segment_export` | The views `π_σ(m)` to embed, with the identity that must come back with them. A `limit` samples across the whole record by default and names which part it covered. |
+| `context_attach_vectors` | Vectors into the auxiliary plane, keyed by segment. `float32` behind a JSON header: 61,458 × 768 measures **978 MB as JSON and 192 MB here**, and loads in 0.52 s instead of 38.1 s. |
+| `context_address` | A question in, `(turn, start_byte, end_byte)` out, digest verified against the record. |
+
+Three refusals are the load-bearing part:
+
+* a query vector whose model, revision, dimensions, projection version or scheme
+  disagrees with the corpus returns **`INCOMPARABLE`**, not a number. Width is not
+  identity, and cosine will give a confident answer to two vector spaces;
+* a corpus too large for the available backend **says so**. Pure-Python cosine is
+  71 µs a pair, so 61,458 vectors is 73 minutes for one query — an agent cannot tell
+  that from a hang. With NumPy the same search is **262 ms**;
+* a search over a partially embedded index reports `semantic_corpus_share`, because
+  the nearest hit inside a tenth of the record looks exactly like a complete search.
+
+`bench/segment_retrieval.py` measures whether any of this helps, against twelve
+labelled queries whose ground truth comes from an anchor string the retriever never
+sees. `bench/native_context.py` runs the whole loop over the wire on this
+repository's own transcript.
+
 ## Two rules these tools follow
 
 **Every number was measured by the call that returned it.** No estimates and no

@@ -15,11 +15,13 @@ called directly, and no client could have called any of them.
 Exits non-zero on the first thing that does not hold, so CI can run it.
 """
 
+import collections
 import json
 import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -42,6 +44,21 @@ proc = subprocess.Popen(
     cwd=str(ROOT), text=True, encoding="utf-8", bufsize=1,
 )
 
+# stderr is drained continuously rather than read once at the end. The pipe holds
+# about 64 KB; a child that fills it blocks inside its own write and stops
+# answering, and this script would block in readline waiting for a reply that never
+# comes — both processes at zero CPU, indistinguishable from a slow call.
+#
+# Measured, because a full-scale run did stall and this was my first theory for it:
+# the server emits **480 bytes** of stderr across capture + segment + export of a
+# 61,458-segment transcript, so it was not the cause. (The stall had two better
+# candidates, both real: an un-retried 429, and the host down to 528 MB of free RAM
+# from an unrelated process.) The drain stays because the hazard is one log line
+# away from being real; it is not credited with a fix it did not make.
+_stderr: collections.deque[str] = collections.deque(maxlen=200)
+threading.Thread(target=lambda: [_stderr.append(line.rstrip()) for line in proc.stderr],
+                 daemon=True).start()
+
 _id = 0
 
 
@@ -60,7 +77,7 @@ def send(method, params=None, notify=False):
     while True:
         line = proc.stdout.readline()
         if not line:
-            raise SystemExit("server closed: " + (proc.stderr.read() or "")[-600:])
+            raise SystemExit("server closed: " + " | ".join(_stderr)[-600:])
         try:
             payload = json.loads(line)
         except json.JSONDecodeError:
@@ -246,7 +263,15 @@ else:
            "nothing clearing the threshold says so rather than returning a bare zero")
 
     print("\nsemantic addressing: index, address, expand to exact bytes")
-    indexed = call("context_segment", archive=ctx, scheme="structural-v1")
+    # Deliberately the 1 MiB archive rather than `ctx`. `context_capture` with no
+    # transcript takes whatever session on this machine is newest, so `ctx` has been
+    # anything from 6,000 to 10,569 turns between runs of this file — and a test
+    # whose runtime is set by which conversation someone had last is a test that
+    # eventually gets skipped. The declared-partial archive is a real archive with
+    # real turns and a bounded size; the assertions below are about the index and
+    # the addressing, not about how much history there is.
+    small = str(WORK / "trunc.anla")
+    indexed = call("context_segment", archive=small, scheme="structural-v1")
     show("segment", indexed, ["segments", "coverage", "preservation_unchanged",
                               "median_segment_bytes"])
     expect(indexed.get("preservation_unchanged") is True,
@@ -258,38 +283,100 @@ else:
 
     # A second family over the same memory. σ₁ and σ₂ coexist; neither is a
     # migration, and the first index must still be readable afterwards.
-    second = call("context_segment", archive=ctx, scheme="sized-900-v1")
+    second = call("context_segment", archive=small, scheme="sized-900-v1")
     expect(second.get("preservation_unchanged") is True
            and second.get("segments") != indexed.get("segments"),
            "a second scheme adds a second index rather than replacing the first")
 
-    # Address it. No vectors are attached here, so this must use the lexical
-    # channel *and say so* — the point of the assertion is the naming, not the hit.
-    needle = "preservation plane"
-    addressed = call("context_address", archive=ctx, scheme="structural-v1",
+    # The needle is taken OUT of this archive rather than written down. The first
+    # version searched for "preservation plane", which is a fact about the corpus
+    # the harness does not control: `context_capture` takes the machine's newest
+    # session, that turned out to be an unrelated 10,569-turn conversation, the
+    # phrase was not in it, and the run returned zero hits — while the assertion
+    # `all(needle in h["text"] for h in hits)` passed, because every element of an
+    # empty list satisfies anything.
+    # Paths from a projection of *this* archive. The first attempt reused the
+    # omission list from `ctx`, whose turn paths do not exist in `small`, so the
+    # expansion came back empty and the needle came back empty with it.
+    inside = call("context_project", archive=small, level="L1", budget_bytes=4000)
+    sample = call("context_expand", archive=small,
+                  paths=[o["path"] for o in inside.get("omitted", [])[:8]])
+    words = sorted({w.lower() for w in
+                    "".join((sample.get("restored") or {}).values()).split()
+                    if len(w) >= 9 and w.isalpha()})
+    # No fallback to a common word. The first version fell back to "the", which
+    # every segment contains, so the search would have "found" its needle no matter
+    # what the code did — a passing assertion measuring nothing. Better to fail and
+    # say the archive gave the test nothing distinctive to look for.
+    expect(bool(words), "the archive yielded a distinctive word to search for")
+    needle = words[len(words) // 2] if words else ""
+
+    addressed = call("context_address", archive=small, scheme="structural-v1",
                      query=needle, limit=3)
     show("address", addressed, ["channel", "expanded_exactly", "segments_searched"])
     expect("lexical" in addressed.get("channel", ""),
            "with no vectors attached the weak channel is named, not blended in")
     hits = addressed.get("hits", [])
-    expect(bool(hits) and all(h["digest_verified"] for h in hits),
+    expect(len(hits) > 0,
+           f"a string taken out of this archive is found in it again ({needle!r})")
+    expect(len(hits) > 0 and all(h["digest_verified"] for h in hits),
            "every hit's turn digest matches what the index was built against")
-    expect(all(needle in h["text"].lower() for h in hits),
+    expect(len(hits) > 0 and all(needle in h["text"].lower() for h in hits),
            "the addressed bytes really contain what was asked for")
 
     # Expand exactly: go from the address back to the record through a *different*
     # tool, and check the byte range against the turn that context_expand returns.
     top = hits[0]
-    restored = call("context_expand", archive=ctx, paths=[top["source_turn"]])
+    restored = call("context_expand", archive=small, paths=[top["source_turn"]])
     body = (restored.get("restored") or {}).get(top["source_turn"], "")
     expect(bool(body), "the addressed turn came back from the record")
     expect(0 <= top["start_byte"] < top["end_byte"] <= len(body.encode("utf-8")),
            "the address is a byte range inside the turn as the record stores it")
 
-    refused = call("context_address", archive=ctx, scheme="structural-v1",
+    refused = call("context_address", archive=small, scheme="structural-v1",
                    query=needle, query_vector=[0.1] * 8)
     expect("REFUSED" in refused.get("channel", ""),
            "a query vector with no corpus vectors is refused rather than ignored")
+
+    # D(P, I) = D(P, ∅), checked rather than asserted. Vectors are attached, the
+    # archive's bytes are compared before and after, then the whole intelligence
+    # plane is deleted and the record is compared again. Eight fabricated vectors
+    # are enough: this measures where they are stored, not what they mean.
+    import hashlib as _h
+    before_bytes = _h.blake2b(pathlib.Path(small).read_bytes(), digest_size=16).hexdigest()
+    keys = [h["segment_id"] for h in hits]
+    fake = WORK / "fake-vectors.json"
+    fake.write_text(json.dumps({
+        "model": "fabricated-for-this-test", "dimensions": 8,
+        "vectors": [{"key": k, "vector": [(i + j) / 10 for j in range(8)]}
+                    for i, k in enumerate(keys)]}), encoding="utf-8")
+    stored = call("context_attach_vectors", archive=small, vectors=str(fake),
+                  scheme="structural-v1", model="fabricated-for-this-test")
+    show("attach", stored, ["attached", "sidecar_bytes", "identity_fingerprint",
+                            "search_backend"])
+    after_bytes = _h.blake2b(pathlib.Path(small).read_bytes(), digest_size=16).hexdigest()
+    expect(after_bytes == before_bytes,
+           "attaching the intelligence plane left the archive byte-identical")
+    expect(pathlib.Path(stored["sidecar"]).exists()
+           and pathlib.Path(stored["sidecar"]).suffix == ".anlavec",
+           "the vectors are a sidecar beside the archive, not a record inside it")
+
+    # A query from a different model at the same width is the trap: cosine would
+    # answer. Width here is 8 either way, and only the model name differs.
+    mismatched = call("context_address", archive=small, scheme="structural-v1",
+                      query=needle, query_vector=[0.2] * 8, model="a-different-model")
+    expect("INCOMPARABLE" in (mismatched.get("incomparable") or ""),
+           "same width, different model -> INCOMPARABLE rather than a number")
+
+    pathlib.Path(stored["sidecar"]).unlink()
+    without = call("context_address", archive=small, scheme="structural-v1",
+                   query=needle, limit=1)
+    gone = _h.blake2b(pathlib.Path(small).read_bytes(), digest_size=16).hexdigest()
+    expect(gone == before_bytes and len(without.get("hits", [])) > 0,
+           "deleting the whole intelligence plane leaves the record intact and "
+           "readable")
+    expect("lexical" in without.get("channel", ""),
+           "with the vectors gone the semantic channel says so instead of degrading")
 
 print("\nerrors an agent can act on")
 absent = call("anla_verify", archive=str(WORK / "nope.anla"))
