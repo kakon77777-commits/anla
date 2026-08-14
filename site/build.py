@@ -224,6 +224,19 @@ def page_home(lang: str) -> str:
 </div></section>
 
 <section class="section"><div class="wrap">
+  <div class="section-head"><span class="kicker">{esc(s['two_kicker'])}</span>
+    <h2>{esc(s['two_h2'])}</h2><p class="section-desc">{esc(s['two_desc'])}</p></div>
+  <div class="grid-3">
+    <article class="feature"><h3>{esc(s['two_a_h'])}</h3><p>{esc(s['two_a_p'])}</p></article>
+    <article class="feature"><h3>{esc(s['two_b_h'])}</h3><p>{esc(s['two_b_p'])}</p></article>
+    <article class="feature"><h3>{esc(s['two_c_h'])}</h3><p>{esc(s['two_c_p'])}</p></article>
+  </div>
+  <p class="section-desc" style="margin-top:22px">
+    <a class="btn" href="{C.REPO}/blob/main/SPEC-1.0-DRAFT.md" rel="noreferrer">{esc(s['two_cta'])} &rarr;</a>
+  </p>
+</div></section>
+
+<section class="section"><div class="wrap">
   <div class="section-head"><span class="kicker">{esc(s['proof_kicker'])}</span>
     <h2>{esc(s['proof_h2'])}</h2><p class="section-desc">{esc(s['proof_desc'])}</p></div>
   <div class="grid-2">

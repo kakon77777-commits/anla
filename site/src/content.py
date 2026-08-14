@@ -125,6 +125,34 @@ STRINGS: dict[str, dict[str, str]] = {
         "strip_4_d": "A research profile, frozen and tested — not yet somewhere to "
                      "keep the only copy of anything.",
 
+        "two_kicker": "Two profiles",
+        "two_h2": "ANLA 1.0 now has two implementations, and the freeze rule is met.",
+        "two_desc": "ANLA-MVP v0.1 is the frozen profile you can verify in a browser "
+                    "tab. ANLA 1.0 is the one a preservation system would adopt, and "
+                    "in July it set itself a rule: nothing is frozen until two "
+                    "independent implementations produce byte-identical archives and "
+                    "a differential fuzzer finds no verdict divergence. Both halves "
+                    "now hold.",
+        "two_a_h": "Byte-identical output",
+        "two_a_p": "The same tree packed by a Python writer and a Rust writer, sharing "
+                   "no code below BLAKE3 and Zstandard, produces the same bytes — "
+                   "with fixed chunking, content-defined chunking, recorded metadata, "
+                   "symbolic links, and a two-snapshot archive built by "
+                   "create-then-append on both sides. Six comparisons, three "
+                   "operating systems.",
+        "two_b_h": "No verdict divergence",
+        "two_b_p": "Sixteen thousand mutated archives across four seeds, each shown "
+                   "to both readers: zero disagreements. It found four real defects "
+                   "getting there, including a rule three separate implementations "
+                   "had skipped.",
+        "two_c_h": "Still a draft, and here is why",
+        "two_c_p": "Two implementations by one author are weaker evidence than two by "
+                   "two: a shared misreading reproduces rather than being caught. "
+                   "That is not hypothetical — an archive whose header and manifest "
+                   "disagreed passed both readers, and only the byte comparison "
+                   "caught it. The object name model is also still open, and "
+                   "answering it changes every object id.",
+        "two_cta": "Read the draft specification",
         "why_kicker": "Control-plane transition",
         "why_h2": "Not another interface over ZIP.",
         "why_desc": "Traditional formats assume a human picks the files and a level, "
@@ -479,6 +507,32 @@ STRINGS: dict[str, dict[str, str]] = {
         "strip_4_t": "實驗性",
         "strip_4_d": "已凍結並測試過的研究 Profile——但還不是拿來存放唯一副本的地方。",
 
+        "two_kicker": "兩個 profile",
+        "two_h2": "ANLA 1.0 現在有兩套實作，而凍結規則已達成。",
+        "two_desc": "ANLA-MVP v0.1 是已凍結、可以在瀏覽器分頁裡驗證的 profile。"
+                    "ANLA 1.0 則是一個保存系統真的會採用的那一個——"
+                    "而它在七月給自己訂下一條規則："
+                    "在兩套獨立實作產生逐位元相同的封裝、"
+                    "且 differential fuzzer 找不到判決分歧之前，沒有任何部分被凍結。"
+                    "兩個半部現在都成立。",
+        "two_a_h": "逐位元相同的輸出",
+        "two_a_p": "同一棵樹，由一個 Python writer 跟一個 Rust writer 各自打包——"
+                   "兩者在 BLAKE3 跟 Zstandard 之上不共用任何程式碼——"
+                   "產生相同的 bytes。固定切塊、內容定義切塊、"
+                   "記錄 metadata、symbolic link，以及兩邊各自「建立→附加」"
+                   "產生的雙 snapshot 封裝。六組比較，三個作業系統。",
+        "two_b_h": "找不到判決分歧",
+        "two_b_p": "四個 seed、一萬六千個被突變的封裝，"
+                   "每一個都給兩套 reader 看：零個不一致。"
+                   "在走到這裡之前它找出了四個真實缺陷，"
+                   "包括一條被三套獨立實作都跳過的規則。",
+        "two_c_h": "仍然是草案，而且這是理由",
+        "two_c_p": "同一個作者寫的兩套實作，證據力弱於兩個作者寫的："
+                   "共同的誤讀會重現而不是被抓到。"
+                   "而這不是假設——一個 header 跟 manifest 不一致的封裝"
+                   "通過了兩套 reader，只有逐位元比較抓到它。"
+                   "物件名稱模型也還沒有定案，而回答它會改變每一個 object id。",
+        "two_cta": "讀草案規格",
         "why_kicker": "控制平面轉移",
         "why_h2": "不是再做一個 ZIP 介面。",
         "why_desc": "傳統格式預設人類選檔案、選壓縮等級，其餘交給固定演算法。ANLA 把"
