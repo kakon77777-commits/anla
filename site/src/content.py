@@ -110,7 +110,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "Reference implementations",
         "fact_impl_v": "2, cross-verified",
         "fact_tests": "Conformance tests",
-        "fact_tests_v": "733 + fuzzing",
+        "fact_tests_v": "738 + fuzzing",
         "strip_1_t": "Local-first",
         "strip_1_d": "The workbench runs entirely in your tab: your files are read "
                      "into memory and never sent anywhere. The page makes no requests "
@@ -148,8 +148,13 @@ STRINGS: dict[str, dict[str, str]] = {
                    "before its payload is read, so every mutation was stopped one "
                    "layer early. A strategy that repairs the hash over what it "
                    "mutates — a lying writer rather than a corrupt disk — found three "
-                   "more defects in its first five hundred archives. Three thousand "
-                   "more since, clean.",
+                   "more defects in its first five hundred archives. Then, because "
+                   "random sampling found something on Linux that the same seed could "
+                   "not reproduce on Windows, we stopped sampling: every member of a "
+                   "manifest, deleted, renamed and retyped in turn, asked of both "
+                   "readers. Sixty-five disagreements out of a hundred and seventy-nine "
+                   "— thirty-three of them one reader crashing where the other answered "
+                   "cleanly. All fixed; the enumeration runs in CI.",
         "two_c_h": "Still a draft, and here is why",
         "two_c_p": "Two implementations by one author are weaker evidence than two by "
                    "two: a shared misreading reproduces rather than being caught. "
@@ -501,7 +506,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "參考實作",
         "fact_impl_v": "2 套，互相驗證",
         "fact_tests": "一致性測試",
-        "fact_tests_v": "733 項 + 模糊測試",
+        "fact_tests_v": "738 項 + 模糊測試",
         "strip_1_t": "本機優先",
         "strip_1_d": "工作台完全在你的分頁裡執行：檔案只讀進記憶體，不會被送到任何"
                      "地方。頁面本身不發出任何請求，其內容安全政策也禁止對外連線。",
@@ -537,7 +542,14 @@ STRINGS: dict[str, dict[str, str]] = {
                    "所以每一個突變都在前一層就被擋下來了。"
                    "改成「突變之後把 hash 補回去」——"
                    "模擬的不是壞掉的磁碟，而是一個說謊的 writer——"
-                   "它在最初的五百個封裝裡就找出三個新缺陷。之後再跑三千個，全部乾淨。",
+                   "它在最初的五百個封裝裡就找出三個新缺陷。"
+                   "接著，因為隨機抽樣在 Linux 上找到的東西"
+                   "在 Windows 用同一個 seed 重現不出來，我們就不再抽樣："
+                   "把 manifest 的每一個成員逐一刪除、改名、換型別，"
+                   "兩套 reader 各問一次。"
+                   "179 個案例裡有 65 個判斷不一致——"
+                   "其中 33 個是一邊直接崩潰、另一邊乾淨拒絕。"
+                   "全部修好了，而這套列舉現在跑在 CI 裡。",
         "two_c_h": "仍然是草案，而且這是理由",
         "two_c_p": "同一個作者寫的兩套實作，證據力弱於兩個作者寫的："
                    "共同的誤讀會重現而不是被抓到。"

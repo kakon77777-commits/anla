@@ -23,6 +23,38 @@ __all__ = [
 EXIT_OK = 0
 
 
+def reportable(value: object) -> object:
+    """A detail value that will survive being reported.
+
+    **An error report that raises while reporting is worse than the error it was
+    reporting**, and this has now happened twice. First a lone surrogate in a path,
+    which `json.dump(..., ensure_ascii=False)` cannot encode; that was fixed at the
+    one raise site that produced it. Then a `bytes` object in an object's `kind`,
+    found by the differential fuzzer — the reader refused the archive correctly and
+    then died formatting the refusal, with nothing left to catch it.
+
+    Fixing it at the raise site fixed one field. Fixing it here fixes every field,
+    including the ones nobody has written yet, which is the only version of this fix
+    that stays fixed.
+    """
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        return raw.hex() if len(raw) <= 64 else raw[:64].hex() + f"…+{len(raw) - 64}"
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            return ascii(value)          # lone surrogates, from a POSIX filename
+        return value
+    if isinstance(value, bool) or value is None or isinstance(value, (int, float)):
+        return value
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [reportable(item) for item in value]
+    if isinstance(value, dict):
+        return {str(k): reportable(v) for k, v in value.items()}
+    return repr(value)
+
+
 class AnlaError(Exception):
     """Base class. Carries a stable code and the CLI exit status."""
 
@@ -41,7 +73,7 @@ class AnlaError(Exception):
                 "message": self.message,
                 "retryable": False,
                 "archive_safe": True,
-                "details": self.details,
+                "details": {str(k): reportable(v) for k, v in self.details.items()},
             }
         }
 

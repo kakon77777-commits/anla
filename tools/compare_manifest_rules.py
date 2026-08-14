@@ -52,11 +52,16 @@ def base_archive() -> bytes:
     can be built without touching a filesystem, because a narrow one silently
     excludes the rules that only apply to what it lacks."""
     from anla1.manifest import ObjectEntry
+    # Every array must be non-empty, or the element-level cases below have nothing to
+    # mutate and quietly test nothing — an empty observable passing any comparison.
     first = append_snapshot(
-        b"", files=[SourceEntry.of("a.txt", b"x" * 400),
+        b"", files=[SourceEntry.of("a.txt", b"x" * 400,
+                                   {"common": {"mtime_ns": 5}, "posix": {"mode": 0o644}}),
                     SourceEntry.of("dir/b.txt", b"y" * 400)],
         directories=["dir"],
         objects=[ObjectEntry(kind="symbolic-link", path="link", target=b"a.txt")],
+        fidelity=[{"path": "gone", "reason": "read-failed"}],
+        auxiliary=[{"note": "a planner decision log lives here"}],
         created_unix_ns=1, archive_id=FIXED_UUID, codec=CODEC_ZSTD)
     return append_snapshot(
         first, files=[SourceEntry.of("a.txt", b"x" * 400 + b"more")],
@@ -170,6 +175,25 @@ def cases(manifest: dict):
             if (type(value) is not type(manifest["objects"][0][member])
                     or value != manifest["objects"][0][member]):
                 yield f"object.{member}: is {shape}", _retype_in_object(member, value)
+    # Inside the arrays. The first version of this enumerated the *top-level members
+    # of three maps* and reported full agreement — while a `TypeError` was still
+    # reachable in an array element, which the random fuzzer then found on Linux.
+    # A finished axis is a finished axis, not a finished job.
+    for member in sorted(manifest):
+        if not isinstance(manifest[member], list) or not manifest[member]:
+            continue
+        for shape, value in WRONG_TYPES.items():
+            if type(value) is not type(manifest[member][0]):
+                yield f"{member}[0]: is {shape}", _retype_element(member, value)
+        yield f"{member}[0]: removed", _drop_element(member)
+        if isinstance(manifest[member][0], dict):
+            for key in sorted(manifest[member][0]):
+                yield f"{member}[0].{key}: deleted", _drop_in_element(member, key)
+                for shape, value in WRONG_TYPES.items():
+                    if type(value) is not type(manifest[member][0][key]):
+                        yield (f"{member}[0].{key}: is {shape}",
+                               _retype_in_element(member, key, value))
+
     first_chunk = next(iter(manifest["chunks"].values()))
     for member in sorted(first_chunk):
         yield f"chunk.{member}: deleted", _drop_in_chunk(member)
@@ -194,6 +218,30 @@ def _rename(member):
 def _retype(member, value):
     def edit(m):
         m[member] = value
+    return edit
+
+
+def _retype_element(member, value):
+    def edit(m):
+        m[member][0] = value
+    return edit
+
+
+def _drop_element(member):
+    def edit(m):
+        m[member].pop(0)
+    return edit
+
+
+def _drop_in_element(member, key):
+    def edit(m):
+        m[member][0].pop(key, None)
+    return edit
+
+
+def _retype_in_element(member, key, value):
+    def edit(m):
+        m[member][0][key] = value
     return edit
 
 

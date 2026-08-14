@@ -82,6 +82,31 @@ def test_the_refusal_can_itself_be_reported():
     payload.encode("utf-8")  # what the CLI does to stderr; raises if the escape is gone
 
 
+@pytest.mark.parametrize("detail", [
+    b"regular-file",                       # what the fuzzer actually put there
+    LATIN1_NAME,                           # a lone surrogate, from a POSIX filename
+    {"nested": b"\x00\xff"},               # a map of the same
+    [b"a", LATIN1_NAME],                   # and a list
+    object(),                              # something with no JSON form at all
+])
+def test_no_detail_value_can_break_the_error_report(detail):
+    """The class, after the instance was fixed twice.
+
+    An error report that raises while reporting is worse than the error it was
+    reporting, and there is nothing left to catch it. The surrogate case above was
+    fixed at the one raise site that produced it; the differential fuzzer then found
+    `bytes` in an object's `kind`, where the reader refused the archive correctly
+    and then died formatting the refusal — `json.dump(..., ensure_ascii=False)` has
+    no form for a byte string. Sanitising in `as_dict` covers every field, including
+    the ones nobody has written yet, which is the only version of this fix that
+    stays fixed.
+    """
+    error = UnsafeObject("something is wrong", value=detail)
+    payload = json.dumps(error.as_dict(), ensure_ascii=False)
+    payload.encode("utf-8")                # exactly what the CLI writes to stderr
+    assert "something is wrong" in payload
+
+
 def test_the_check_lives_in_the_ordering_helper_not_the_call_sites():
     """The class, not the instance.
 
