@@ -96,6 +96,37 @@ If you cannot state the third one truthfully, do not return a file.
 
 ---
 
+## What came back the first time
+
+ChatGPT refused to embed and wrote a script, which is exactly what rules 1 and 3
+ask for. It is in this directory as [`make_vectors.py`](make_vectors.py), kept close
+to as written because it is good — atomic checkpointed writes, exact key and order
+preservation, per-vector width validation, and a batch failure that falls back to
+per-row retries so one bad row costs one row.
+
+**One thing was changed, and it would have bitten at your scale.** The script
+imported `time` and never used it — the tell that retry was intended and dropped —
+and had no handling for a rate limit. With a few thousand rows in batches of 64, a
+single 429 failed the batch, then failed each of its 64 rows individually, and
+recorded all 64 as permanent omissions. A transient throttle became permanent loss,
+in the one channel of this system with no independent check on whether it is
+complete. Transient failures now back off and retry; only permanent ones become
+omissions.
+
+Exercised against a stub API, because a script nobody has run is a plan:
+
+```
+the happy path      10 vectors, width 768, keys and order preserved
+a rate limit        waited out, 10/10 — nothing lost to the throttle
+a permanent error   exit 2, one row omitted and named, the other nine survived
+```
+
+```bash
+python -m pip install -U openai
+export OPENAI_API_KEY=...
+python tools/mcp/make_vectors.py exported.to-embed.json --output vectors.json
+```
+
 ## Bringing it back
 
 ```
