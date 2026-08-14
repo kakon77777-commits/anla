@@ -645,6 +645,28 @@ def append_snapshot(data: bytes, *,
     return out.finish(archive_id, footer_offset)
 
 
+def _stored_bytes(data: bytes, descriptor: dict, chunk_id: bytes) -> bytes:
+    """The bytes a descriptor points at, or a refusal — never a short slice.
+
+    Python slicing past the end of a buffer returns what is there and no complaint,
+    so a descriptor claiming a payload beyond the archive produced a *shorter* string
+    whose hash then failed — reported as an integrity failure, i.e. "these bytes are
+    damaged, find another copy", for a manifest that was simply describing something
+    that was never there. Rust bounds-checks and calls it malformed, which is what a
+    caller can act on.
+
+    Written once and used twice, because the slice was written twice and the second
+    copy is exactly where a fix like this gets forgotten.
+    """
+    start = descriptor["payload_offset"]
+    end = start + descriptor["payload_length"]
+    if end > len(data):
+        raise ManifestInvalid("chunk descriptor points past the end of the archive",
+                              chunk_id=chunk_id.hex()[:16], offset=start, end=end,
+                              archive_bytes=len(data))
+    return data[start:end]
+
+
 DESCRIPTOR_FIELDS = ("record_offset", "record_length", "payload_offset",
                      "payload_length", "raw_size", "codec_id", "payload_hash")
 
@@ -746,8 +768,7 @@ def extract_snapshot(data: bytes, snapshot: Snapshot) -> dict[str, bytes]:
             if record.type != "CHNK":
                 raise ManifestInvalid("chunk descriptor points at a non-CHNK record",
                                       found=record.type)
-            stored = data[descriptor["payload_offset"]:
-                          descriptor["payload_offset"] + descriptor["payload_length"]]
+            stored = _stored_bytes(data, descriptor, chunk_id)
             # The stored bytes and the raw bytes are hashed separately, and both are
             # checked: `payload_hash` catches damage to what is on disk, `chunk_id`
             # catches a codec that decoded to something else entirely.
@@ -812,8 +833,7 @@ def verify_archive(data: bytes) -> ArchiveReport:
             if record.header.get("chunk_id") != chunk_id:
                 raise IntegrityFailure("chunk record disagrees with its descriptor",
                                        chunk_id=chunk_id.hex()[:16])
-            stored = data[descriptor["payload_offset"]:
-                          descriptor["payload_offset"] + descriptor["payload_length"]]
+            stored = _stored_bytes(data, descriptor, chunk_id)
             if C.hash_bytes(stored, snapshot.hash_algorithm) != descriptor["payload_hash"]:
                 raise IntegrityFailure("stored chunk does not match its payload hash",
                                        chunk_id=chunk_id.hex()[:16])

@@ -97,31 +97,163 @@ fn invalid(message: impl Into<String>) -> Error {
 /// Trusting the declared root because the footer's hash covered the manifest bytes
 /// would mean a root that says nothing: it would prove only that the manifest had
 /// not been edited, not that it describes what it claims to.
+/// The shape §5 gives each member, checked where its presence is checked.
+///
+/// Presence alone was all either reader established, and it is not enough: a
+/// manifest whose `created_unix_ns` is a text string was **accepted here** while
+/// Python refused it, because nothing on this side ever read that member and
+/// nothing had said what it was. `tools/compare_manifest_rules.py` enumerates every
+/// single-member edit and put the count at 65 disagreements out of 179; the two
+/// shape tables, one per implementation, are most of the answer.
+const MEMBER_SHAPES: &[(&str, Shape)] = &[
+    ("anla_version", Shape::Array),
+    ("archive_id", Shape::Bytes),
+    ("snapshot_sequence", Shape::Uint),
+    ("created_unix_ns", Shape::Uint),
+    ("hash_algorithms", Shape::Array),
+    ("required_capabilities", Shape::Array),
+    ("optional_capabilities", Shape::Array),
+    ("objects", Shape::Array),
+    ("chunks", Shape::Map),
+    ("metadata", Shape::Array),
+    ("auxiliary", Shape::Array),
+    ("objects_root", Shape::Bytes),
+    ("chunks_root", Shape::Bytes),
+    ("metadata_root", Shape::Bytes),
+    ("preservation_root", Shape::Bytes),
+    ("auxiliary_root", Shape::Bytes),
+];
+
+/// Allowed but not required. Absent is legal; present and the wrong shape is not.
+const OPTIONAL_SHAPES: &[(&str, Shape)] = &[
+    ("parent_snapshot", Shape::Bytes),
+    ("packing_plan", Shape::Map),
+    ("packing_plan_digest", Shape::Bytes),
+];
+
+#[derive(Clone, Copy, PartialEq)]
+enum Shape {
+    Uint,
+    Bytes,
+    Text,
+    Array,
+    Map,
+}
+
+fn check_shape(value: &Value, expected: Shape, what: &str) -> Result<()> {
+    let ok = match expected {
+        Shape::Uint => value.as_u64().is_ok(),
+        Shape::Bytes => value.as_bytes().is_ok(),
+        Shape::Text => value.as_text().is_ok(),
+        Shape::Array => value.as_array().is_ok(),
+        Shape::Map => value.as_map().is_ok(),
+    };
+    if ok {
+        return Ok(());
+    }
+    let name = match expected {
+        Shape::Uint => "an integer",
+        Shape::Bytes => "a byte string",
+        Shape::Text => "text",
+        Shape::Array => "an array",
+        Shape::Map => "a map",
+    };
+    Err(invalid(format!("{what} must be {name}")))
+}
+
+/// Every member of a chunk descriptor. Nothing checked these on either side.
+const CHUNK_SHAPES: &[(&str, Shape)] = &[
+    ("record_offset", Shape::Uint),
+    ("record_length", Shape::Uint),
+    ("payload_offset", Shape::Uint),
+    ("payload_length", Shape::Uint),
+    ("raw_size", Shape::Uint),
+    ("codec_id", Shape::Uint),
+    ("payload_hash", Shape::Bytes),
+];
+
+/// First eight bytes of an id, for an error message. A whole hash in a message is
+/// noise; none of it makes the message unactionable.
+fn hex_prefix(id: &[u8]) -> String {
+    id.iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
 pub fn verify_manifest(manifest: &Value, algorithm: &str) -> Result<()> {
-    for member in [
-        "anla_version",
-        "archive_id",
-        "snapshot_sequence",
-        "created_unix_ns",
-        "hash_algorithms",
-        "required_capabilities",
-        "optional_capabilities",
-        "objects",
-        "chunks",
-        "metadata",
-        "auxiliary",
-        "objects_root",
-        "chunks_root",
-        "metadata_root",
-        "preservation_root",
-        "auxiliary_root",
-    ] {
-        if manifest.get(member).is_none() {
-            return Err(invalid(format!("manifest is missing required member: {member}")));
+    for (member, shape) in MEMBER_SHAPES {
+        match manifest.get(member) {
+            None => {
+                return Err(invalid(format!(
+                    "manifest is missing required member: {member}"
+                )))
+            }
+            Some(value) => check_shape(value, *shape, &format!("manifest.{member}"))?,
+        }
+    }
+    // The *value*, not only the shape. A manifest declaring a version this reader
+    // does not implement must be refused, and checking that its `anla_version` is
+    // an array said nothing about which version it claims to be. Python refused
+    // `[]` here while this reader accepted it.
+    let version = manifest
+        .need("anla_version")
+        .and_then(|v| v.as_array())
+        .map_err(|e| invalid(e.to_string()))?;
+    let numbers: Vec<u64> = version.iter().filter_map(|v| v.as_u64().ok()).collect();
+    if numbers != vec![1u64, 0u64] {
+        return Err(invalid(format!(
+            "unsupported manifest version: {numbers:?}"
+        )));
+    }
+    for (member, shape) in OPTIONAL_SHAPES {
+        if let Some(value) = manifest.get(member) {
+            check_shape(value, *shape, &format!("manifest.{member}"))?;
+        }
+    }
+    for (_, descriptor) in manifest
+        .need("chunks")
+        .and_then(|v| v.as_map())
+        .map_err(|e| invalid(e.to_string()))?
+    {
+        for (member, shape) in CHUNK_SHAPES {
+            match descriptor.get(member) {
+                None => {
+                    return Err(invalid(format!(
+                        "chunk descriptor is missing required member: {member}"
+                    )))
+                }
+                Some(value) => check_shape(value, *shape, &format!("chunk.{member}"))?,
+            }
         }
     }
 
     let objects = manifest.need("objects").and_then(|v| v.as_array()).map_err(|e| invalid(e.to_string()))?;
+
+    // Every chunk an object names must be described. Without this the reader still
+    // refused such a manifest — but as an `integrity-failure`, because the missing
+    // reference only showed up later as a root that did not match, which tells the
+    // caller the bytes are damaged when the document is simply wrong. Python
+    // reached the same conclusion from the other side, where `verify` passed
+    // outright and `extract` then died looking the descriptor up.
+    let described = manifest
+        .need("chunks")
+        .and_then(|v| v.as_map())
+        .map_err(|e| invalid(e.to_string()))?;
+    for entry in objects {
+        let Some(chunks) = entry.get("chunks") else { continue };
+        for reference in chunks.as_array().map_err(|e| invalid(e.to_string()))? {
+            let id = reference
+                .as_bytes()
+                .map_err(|_| invalid("a chunk reference must be a byte string"))?;
+            if !described
+                .iter()
+                .any(|(key, _)| key.as_bytes().map(|k| k == id).unwrap_or(false))
+            {
+                return Err(invalid(format!(
+                    "an object names a chunk the manifest does not describe: {}",
+                    hex_prefix(id)
+                )));
+            }
+        }
+    }
     let mut seen_paths: Vec<&str> = Vec::new();
     let mut object_leaves: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
     for entry in objects {

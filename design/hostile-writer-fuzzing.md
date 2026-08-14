@@ -110,9 +110,71 @@ one measurement — instrument the reader, count which functions ever run — an
 answer would have been embarrassing at any point in the previous sixteen thousand
 mutants.
 
+## And then: enumeration, because random is not complete
+
+The new mutator did its job and then showed its own limit. CI fuzzed seed 40 on
+Linux, found **one divergence in 3000 mutants**, and the same seed on Windows found
+none — because the seed corpus is built from the working tree, and the two trees are
+not the same archive. A finding you cannot reopen is a note.
+
+So `tools/compare_manifest_rules.py` enumerates instead of sampling. Every member of
+the manifest, of an object entry and of a chunk descriptor: delete it, rename it,
+give it each wrong shape, and — added after the first pass missed it — a *negative*
+integer and a boolean. Repair every hash and root so only the rules can refuse the
+result. Ask both readers. Print every disagreement.
+
+**65 disagreements in 179 cases.** Not one of them was reachable before
+`rehashed_manifest` existed.
+
+| what | count | who was right |
+|---|---|---|
+| Python crashed (`KeyError`, `TypeError`) where Rust said `manifest-invalid` | 33 | Rust |
+| Both refused, different code | 24 | Rust, mostly |
+| Python refused, **Rust accepted** | 4 | Python |
+| **Python accepted**, Rust refused | 4 | Rust |
+
+The 33 crashes were one sentence: **a member used by code that had established only
+that it existed.** `manifest["chunks"][id]["raw_size"]` was arithmetic on whatever
+was there. Two tables — one per implementation — checked where presence is checked,
+closed all of them.
+
+Four rounds of tightening followed, and each one is a lesson about the instrument
+rather than the format:
+
+1. **Optional members were not in the table.** 65 → 16, and four of the sixteen were
+   `parent_snapshot` with the wrong type reaching an `AttributeError`.
+2. **The enumeration had no negative-integer row.** CBOR's unsigned and negative
+   integers are different major types; Python's `int` is one type. `raw_size: -5`
+   was accepted here and refused by Rust, and only the *random* fuzzer had ever hit
+   it. The complete-looking enumeration was complete over the wrong alphabet.
+3. **The comparison table mistranslated a code.** It mapped
+   `ANLA_RESOURCE_LIMIT_EXCEEDED` to `resource-limit`; Rust says
+   `resource-limit-exceeded`. Two readers that agreed were reported as disagreeing —
+   the same instrument failure as the fuzzer's 284 false mismatches, and the fix was
+   to read `rust/src/error.rs` instead of remembering it.
+4. **The fixture undid the edit it was testing.** Repairing the roots overwrote any
+   edit *to* a root member, so five of the sixteen members were "compared" as
+   untouched archives that both readers accepted. `protect` names the member the
+   repair must leave alone.
+
+Two format-level defects came out of it that neither reader had:
+
+- **An object could name a chunk the manifest does not describe.** Python's `verify`
+  passed and `extract` then died on a `KeyError`; Rust reached the same refusal only
+  as a *root mismatch*, i.e. "the bytes are damaged" for a document that was simply
+  wrong. **Verify exists to predict whether extract will work.** Both readers check
+  it now, before the object loop — structure before content.
+- **A descriptor pointing past the end of the archive** produced a short Python
+  slice, no complaint, and then a hash failure reported as corruption.
+
 ## Where this lives now
 
 - `tools/fuzz_1_0.py` — `rehashed_manifest`, 20 shares of the strategy pool.
+- `tools/compare_manifest_rules.py` — the enumeration, in CI. It fails on any
+  disagreement *and* if fewer than half the edits were refused at all, because a run
+  where nothing was refused would report agreement about nothing.
+- `python/tests/test_manifest_shapes_1_0.py` — the shape rules as unit tests, with a
+  negative control that real corruption is still reported as corruption.
 - `python/tests/test_hostile_writer_1_0.py` — the same construction as a fixture, so
   the three defects have named tests rather than a seed that happened to find them.
   Its `forge()` rebuilds the footer rather than requiring a same-length edit, after

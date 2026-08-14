@@ -302,6 +302,17 @@ jobs:
         # Rust must refuse, so a pass cannot be vacuous.
         run: python tools/compare_names.py
 
+      - name: Every single-member manifest edit, both readers
+        # Enumeration rather than sampling. The fuzzer reaches these rules now, but
+        # randomly and from a corpus built out of the working tree — so a finding on
+        # Linux was not reproducible on Windows, which is exactly what happened. This
+        # deletes, renames and retypes every member of the manifest, of an object and
+        # of a chunk descriptor, repairs every hash and root so only the rules can
+        # refuse the result, and compares. Its first run: 65 disagreements in 179
+        # cases. It fails if any remain, and also if too few edits were refused at
+        # all, because agreement about nothing is not agreement.
+        run: python tools/compare_manifest_rules.py
+
       - name: Differential fuzzing, python against rust
         # The tool that found the missing section 4.3 check within three hundred
         # mutants. Seeded from the run number so the space keeps being searched

@@ -41,7 +41,7 @@ __all__ = [
     "ObjectEntry", "ChunkEntry", "Roots",
     "object_id_for", "object_leaf", "chunk_leaf", "check_object_path", "sorted_by_path",
     "derive_path", "check_native_name", "native_name_for", "NATIVE_NAME_CAPABILITY",
-    "check_metadata", "check_fidelity", "fidelity_of",
+    "check_metadata", "check_fidelity", "fidelity_of", "check_shape",
     "compute_roots", "build_manifest", "verify_manifest", "without_auxiliary",
 ]
 
@@ -502,16 +502,56 @@ def verify_manifest(manifest: dict, hasher: Hasher) -> Roots:
     for member in REQUIRED_MEMBERS:
         if member not in manifest:
             raise ManifestInvalid(f"manifest is missing required member: {member}")
+        check_shape(manifest[member], MEMBER_SHAPES[member], what=f"manifest.{member}")
+    for chunk_id, descriptor in manifest["chunks"].items():
+        if not isinstance(descriptor, dict):
+            raise ManifestInvalid("a chunk descriptor must be a map")
+        for member, shape in CHUNK_SHAPES.items():
+            if member not in descriptor:
+                raise ManifestInvalid(
+                    f"chunk descriptor is missing required member: {member}")
+            check_shape(descriptor[member], shape, what=f"chunk.{member}")
     if manifest["anla_version"] != MANIFEST_VERSION:
         raise ManifestInvalid("unsupported manifest version",
                               found=manifest["anla_version"])
-    if not isinstance(manifest["objects"], list) or not isinstance(manifest["chunks"], dict):
-        raise ManifestInvalid("objects must be an array and chunks a map")
+
+    # Structure before content, the rule this reader learned when an archive broken
+    # in two places got whichever verdict its reader reached first. A chunk
+    # reference is structure; `object_id` is content — and the reference check ran
+    # *after* the object loop, so a bad `chunks` member was reported as an integrity
+    # failure (its object id no longer matched) rather than as the malformed
+    # manifest it is. Rust checked references first and said so.
+    #
+    # The check itself was missing entirely until `tools/compare_manifest_rules.py`
+    # put the two readers side by side: `verify` passed an archive whose objects
+    # named chunks nothing described, and `extract` then died on a `KeyError`
+    # looking one up. **Verify exists to predict whether extract will work.**
+    for entry in manifest["objects"]:
+        if not isinstance(entry, dict):
+            raise ManifestInvalid("an object entry must be a map")
+        references = entry.get("chunks")
+        if references is None:
+            continue
+        check_shape(references, list, what="object.chunks")
+        for chunk_id in references:
+            if not isinstance(chunk_id, bytes):
+                raise ManifestInvalid("a chunk reference must be a byte string",
+                                      path=str(entry.get("path"))[:60])
+            if chunk_id not in manifest["chunks"]:
+                raise ManifestInvalid("an object names a chunk the manifest does "
+                                      "not describe",
+                                      path=str(entry.get("path"))[:60],
+                                      chunk_id=chunk_id.hex()[:16])
 
     seen_paths: set[str] = set()
     for entry in manifest["objects"]:
         if not isinstance(entry, dict) or "object_id" not in entry:
             raise ManifestInvalid("object entry has no object_id")
+        # Its *shape*, before it is compared against a computed hash. Comparing a
+        # text `object_id` to bytes is never equal, so this used to surface as an
+        # integrity failure — an archive reported as corrupt when it was malformed,
+        # which sends the caller looking for another copy of a file that is fine.
+        check_shape(entry["object_id"], bytes, what="object.object_id")
         # Absence and illegality are different answers, and this line used to give
         # the same one to both: `entry.get("path")` returns `None` for a manifest
         # with no `path` member at all, and `check_object_path` reported that as an
@@ -585,6 +625,67 @@ def manifest_bytes(manifest: dict) -> bytes:
     return encode(manifest)
 
 
+#: What §5 says each member *is*, checked in the same place presence is checked.
+#: Presence alone was never enough: `manifest["chunks"][id]["raw_size"]` was read as
+#: an integer by code that had confirmed only that the key existed, so a manifest
+#: with a text `raw_size` left the CLI as a `TypeError` traceback. Enumerating every
+#: single-member edit against the Rust reader found **65 disagreements in 179
+#: cases**, 33 of them Python crashing where Rust answered `manifest-invalid`, and
+#: every one was this: a member used without its type ever being established.
+#: `tools/compare_manifest_rules.py` is that enumeration.
+MEMBER_SHAPES = {
+    "anla_version": list, "archive_id": bytes, "snapshot_sequence": int,
+    "created_unix_ns": int, "hash_algorithms": list,
+    "required_capabilities": list, "optional_capabilities": list,
+    "objects": list, "chunks": dict, "metadata": list, "auxiliary": list,
+    "objects_root": bytes, "chunks_root": bytes, "metadata_root": bytes,
+    "preservation_root": bytes, "auxiliary_root": bytes,
+}
+
+#: Every member of a chunk descriptor, and what it is. Nothing checked these at all —
+#: they were read straight out of the map by arithmetic and slicing.
+CHUNK_SHAPES = {
+    "record_offset": int, "record_length": int, "payload_offset": int,
+    "payload_length": int, "raw_size": int, "codec_id": int, "payload_hash": bytes,
+}
+
+#: The members §5 allows but does not require. Their absence is legal; their
+#: presence with the wrong shape is not, and leaving them out of the table above was
+#: enough to keep an `AttributeError` reachable after the required ones were fixed —
+#: the enumeration went from 65 disagreements to 16 and these were four of them.
+OPTIONAL_SHAPES = {
+    "parent_snapshot": bytes, "packing_plan": dict, "packing_plan_digest": bytes,
+}
+
+SHAPE_NAMES = {list: "an array", dict: "a map", int: "an unsigned integer",
+               bytes: "a byte string", str: "text"}
+
+
+def check_shape(value: object, expected: type, *, what: str) -> None:
+    """One member, one type, one error.
+
+    `bool` is excluded explicitly where an integer is wanted, because in Python it
+    *is* one — and a manifest holding `true` where a byte count belongs is malformed
+    however conveniently it arithmetics.
+    """
+    if expected is int:
+        # Every integer member in these tables is a CBOR *unsigned* integer — a
+        # count, a size, an offset, a sequence number. Python's `int` covers the
+        # negatives too, so `isinstance(value, int)` accepted `raw_size: -5` where
+        # Rust's `as_u64()` refused it, and the difference surfaced as Python
+        # blaming a root mismatch for a manifest that was simply malformed. `bool`
+        # is a subclass of `int` here as well, and `true` is not a byte count
+        # however conveniently it arithmetics.
+        if isinstance(value, bool):
+            raise ManifestInvalid(f"{what} must be an integer, not a boolean")
+        if isinstance(value, int) and value < 0:
+            raise ManifestInvalid(f"{what} must not be negative", found=value)
+    if not isinstance(value, expected):
+        raise ManifestInvalid(
+            f"{what} must be {SHAPE_NAMES.get(expected, expected.__name__)}",
+            found=type(value).__name__)
+
+
 def parse_manifest(payload: bytes) -> dict:
     """Decode a manifest, and refuse one that is missing a member §5 requires.
 
@@ -606,4 +707,8 @@ def parse_manifest(payload: bytes) -> dict:
     for member in REQUIRED_MEMBERS:
         if member not in value:
             raise ManifestInvalid(f"manifest is missing required member: {member}")
+        check_shape(value[member], MEMBER_SHAPES[member], what=f"manifest.{member}")
+    for member, shape in OPTIONAL_SHAPES.items():
+        if member in value:
+            check_shape(value[member], shape, what=f"manifest.{member}")
     return value
