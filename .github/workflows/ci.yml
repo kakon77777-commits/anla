@@ -226,8 +226,15 @@ jobs:
           if not names:
               sys.exit("the harness produced no scenarios")
           for result in fresh["results"]:
-              if not result["sizes"].get("anla_1_0"):
-                  sys.exit(f"{result['scenario']} produced no ANLA size")
+              # Not every scenario measures an archive size — `throughput` measures
+              # rates. What every scenario must produce is *some* measurement, and
+              # asking for `anla_1_0` specifically was the third place in this
+              # feature that assumed one shape for all rows, after the summary
+              # printer and the page renderer. The guard's purpose is to catch a
+              # scenario that silently produced nothing, and it still does.
+              measured = result["sizes"].get("anla_1_0") or result["detail"]
+              if not measured:
+                  sys.exit(f"{result['scenario']} produced no measurement at all")
           missing = names - {r["scenario"] for r in published["results"]}
           if missing:
               sys.exit(f"bench/results.json does not cover {sorted(missing)} — "
