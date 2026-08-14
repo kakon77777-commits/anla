@@ -7,7 +7,40 @@ an archive contains, or to what a decoder must accept or reject, requires a new
 
 ---
 
-## 2026-08-14 — The second implementation, and both halves of the freeze rule
+## 2026-08-14 — The second implementation, both halves of the freeze rule, and a streaming writer
+
+### Added
+
+- **`write_snapshot` streams to disk.** Records go to the file as they are produced
+  and the existing archive is memory-mapped rather than read, so the memory bound
+  falls from *archive + largest file* to *largest file*. A tree larger than RAM is
+  packable; before this it was not. The `anla1` CLI uses it for both `pack` and
+  `append`.
+
+  **An append no longer rewrites the archive.** It writes after the newest complete
+  footer and patches the 64-byte header. Measured on the corpus: a second snapshot
+  touched **21,184 bytes instead of rewriting 191,200**. For a hundred-gigabyte
+  archive that is the difference between seconds and hours.
+
+  It is the same code behind a different sink, so it must be **byte-identical** to
+  the in-memory path — and the writer comparison says it is: every figure unchanged
+  from before the refactor. A streaming rewrite that moved one byte would be a
+  broken one.
+
+- `verify` after a pack now reads the archive back **off the disk, memory-mapped**,
+  rather than checking the buffer that was meant to become it. Stronger, and it
+  keeps the memory ceiling off.
+
+### Fixed
+
+- **Windows will not truncate a memory-mapped file**, so reclaiming a torn append
+  failed with a permission error. The read and the write are now two phases: map the
+  archive, take what an append needs, let go, then write.
+
+  The clean-append case hid it completely — truncating to the file's existing length
+  is a no-op and succeeds. Only a *torn* archive actually shrinks the file, so the
+  torn-append test is the one that found it, and it existed because §4.4 said that
+  case mattered.
 
 ### Added
 

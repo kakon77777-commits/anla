@@ -33,7 +33,7 @@ from .container import CORE_HASH, HASHES
 from .fs import restore_tree, scan_tree
 from .manifest import fidelity_of
 from .snapshot import (
-    append_snapshot,
+    write_snapshot,
     cdc_chunker,
     diff,
     list_snapshots,
@@ -109,6 +109,24 @@ def _read(path: str) -> bytes:
     return Path(path).read_bytes()
 
 
+def _verify_on_disk(path: str):
+    """Verify the archive as it now exists, mapped rather than read.
+
+    Mapped because the writer no longer holds the archive in memory, and a verify
+    that loaded the whole thing back would put the ceiling straight back on. The
+    reader is slice-based, so a memory map is a drop-in for `bytes` and the
+    operating system decides what stays resident.
+
+    Reading it back off the disk is also the stronger check: it grades the bytes
+    that are actually there rather than the buffer that was meant to become them.
+    """
+    import mmap
+
+    with open(path, "rb") as handle:
+        with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+            return verify_archive(mapped)
+
+
 def _pick(archive: bytes, sequence: int | None):
     """One snapshot by number, or the newest.
 
@@ -126,15 +144,6 @@ def _pick(archive: bytes, sequence: int | None):
                        available=[s.sequence for s in snapshots])
 
 
-def _write_out(path: str, data: bytes, force: bool) -> None:
-    target = Path(path)
-    if target.exists() and not force:
-        raise InvalidInput("output already exists; pass --force to replace it",
-                           path=str(target))
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(data)
-
-
 def _skip_payload(tree) -> tuple[list[dict], int]:
     return tree.skipped, 11 if tree.skipped else 0
 
@@ -148,8 +157,17 @@ def cmd_pack(args: argparse.Namespace) -> int:
                      allow_unsupported=args.skip_unsupported,
                      preserve_mtime=not (args.no_mtime or args.no_metadata),
                      preserve_posix=not args.no_metadata)
-    data = append_snapshot(
-        b"", files=tree.files, directories=tree.directories,
+    target = Path(args.output)
+    if target.exists() and not args.force:
+        raise InvalidInput("output already exists; pass --force to replace it",
+                           path=str(target))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        target.unlink()
+    # Streamed to disk rather than assembled in memory: the archive never exists as
+    # one object, so a tree larger than RAM is packable.
+    size = write_snapshot(
+        target, files=tree.files, directories=tree.directories,
         objects=tree.objects, fidelity=tree.skipped,
         created_unix_ns=_created_ns(args.created_ns),
         chunker=_chunker(args.chunking, args.chunk_avg),
@@ -157,12 +175,11 @@ def cmd_pack(args: argparse.Namespace) -> int:
         level=args.level,
         hash_algorithm=args.hash,
         archive_id=_uuid_arg(args.uuid) or _new_uuid())
-    _write_out(args.output, data, args.force)
-    report = verify_archive(data)
+    report = _verify_on_disk(str(target))
     skipped, code = _skip_payload(tree)
     files = sum(1 for e in report.snapshots[-1].manifest["objects"]
                 if e["kind"] == "regular-file")
-    _emit({"archive": args.output, "bytes": len(data), "snapshot": 1,
+    _emit({"archive": args.output, "bytes": size, "snapshot": 1,
            "files": files,
            "links": sum(1 for e in report.snapshots[-1].manifest["objects"]
                         if e["kind"] == "symbolic-link"),
@@ -176,7 +193,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
            "skipped": skipped},
           args.json,
           [f"packed {args.source} -> {args.output}",
-           f"  {len(data):,} bytes, {report.unique_chunks} chunks, snapshot 1",
+           f"  {size:,} bytes, {report.unique_chunks} chunks, snapshot 1",
            f"  {report.chunk_bytes:,} stored for {report.logical_bytes:,} logical "
            f"bytes ({args.codec})"]
           + [f"  skipped {s['path']} ({s['kind']})" for s in skipped])
@@ -184,26 +201,27 @@ def cmd_pack(args: argparse.Namespace) -> int:
 
 
 def cmd_append(args: argparse.Namespace) -> int:
-    existing = _read(args.archive)
-    before = len(existing)
+    before = Path(args.archive).stat().st_size
     tree = scan_tree(args.source, exclude=args.exclude or (),
                      allow_unsupported=args.skip_unsupported,
                      preserve_mtime=not (args.no_mtime or args.no_metadata),
                      preserve_posix=not args.no_metadata)
-    data = append_snapshot(
-        existing, files=tree.files, directories=tree.directories,
+    # In place. An append writes the new records after the newest complete footer
+    # and patches the 64-byte header; it does not rewrite the archive to add a
+    # manifest, which for a large one is the difference between seconds and hours.
+    size = write_snapshot(
+        args.archive, files=tree.files, directories=tree.directories,
         objects=tree.objects, fidelity=tree.skipped,
         created_unix_ns=_created_ns(args.created_ns),
         chunker=_chunker(args.chunking, args.chunk_avg),
         codec=CODEC_ZSTD if args.codec == 'zstd' else CODEC_STORE,
         level=args.level)
-    report = verify_archive(data)
-    Path(args.archive).write_bytes(data)
+    report = _verify_on_disk(args.archive)
     latest, previous = report.snapshots[-1], report.snapshots[-2]
     changes = diff(previous, latest)
     skipped, code = _skip_payload(tree)
     _emit({"archive": args.archive, "snapshot": latest.sequence,
-           "bytes": len(data), "grew_by": len(data) - before,
+           "bytes": size, "grew_by": size - before,
            "added": changes.added, "removed": changes.removed,
            "modified": changes.modified,
            "new_chunks": len(changes.new_chunks),
@@ -211,7 +229,7 @@ def cmd_append(args: argparse.Namespace) -> int:
            "skipped": skipped},
           args.json,
           [f"appended snapshot {latest.sequence} to {args.archive}",
-           f"  +{len(data) - before} bytes, {len(changes.new_chunks)} new chunks, "
+           f"  +{size - before} bytes, {len(changes.new_chunks)} new chunks, "
            f"{len(changes.shared_chunks)} reused",
            f"  {len(changes.added)} added, {len(changes.modified)} modified, "
            f"{len(changes.removed)} removed"]

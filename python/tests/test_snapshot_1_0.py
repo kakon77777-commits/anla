@@ -558,3 +558,78 @@ def test_the_header_and_the_manifest_must_agree_about_archive_id():
     forged = replace_latest(data, reroot(manifest, latest.hash_algorithm))
     with pytest.raises(IntegrityFailure, match="disagree about archive_id"):
         list_snapshots(forged)
+
+
+# ---------------------------------------------------------------------------
+# streaming
+# ---------------------------------------------------------------------------
+
+def test_streaming_to_a_file_produces_the_same_bytes(tmp_path):
+    """The only property a streaming refactor is allowed to have.
+
+    Same code, different sink: one accumulates a buffer and returns it, the other
+    writes records to a file as they are produced. A refactor that changed one byte
+    would be a broken one, and this is what says it did not.
+    """
+    from anla1.snapshot import write_snapshot
+
+    in_memory = append_snapshot(b"", files=V1, directories=["docs"],
+                                created_unix_ns=CREATED, archive_id=ARCHIVE_ID)
+    streamed = tmp_path / "streamed.anla"
+    size = write_snapshot(streamed, files=V1, directories=["docs"],
+                          created_unix_ns=CREATED, archive_id=ARCHIVE_ID)
+    assert size == len(in_memory)
+    assert streamed.read_bytes() == in_memory
+
+
+def test_an_append_does_not_rewrite_what_is_already_there(tmp_path):
+    """What streaming actually buys, stated as bytes touched rather than as speed.
+
+    The in-memory path rebuilds the whole file to add a manifest and a footer. For a
+    hundred-gigabyte archive that is a hundred gigabytes of copying to record one
+    snapshot. This writes after the newest complete footer and patches the 64-byte
+    header, so the prefix is never opened for writing at all — and the test checks
+    the prefix is byte-for-byte what it was, not merely that the result verifies.
+    """
+    from anla1.snapshot import write_snapshot
+
+    archive = tmp_path / "a.anla"
+    write_snapshot(archive, files=V1, directories=["docs"],
+                   created_unix_ns=CREATED, archive_id=ARCHIVE_ID)
+    before = archive.read_bytes()
+
+    write_snapshot(archive, files=V2, directories=["docs"],
+                   created_unix_ns=CREATED + 1)
+    after = archive.read_bytes()
+
+    assert len(after) > len(before)
+    # Everything the first snapshot wrote is still exactly where it was. Only the
+    # header moved, because the hint lives there and is advisory.
+    assert after[C.HEADER_SIZE:len(before)] == before[C.HEADER_SIZE:]
+    assert after[:32] == before[:32]
+
+    snapshots = list_snapshots(after)
+    assert [s.sequence for s in snapshots] == [1, 2]
+    assert extract_snapshot(after, snapshots[0]) == V1
+    assert extract_snapshot(after, snapshots[1]) == V2
+
+
+def test_streaming_reclaims_a_torn_append(tmp_path):
+    """A half-written append is truncated, not written after.
+
+    Writing after it would leave every following record at an offset that is not a
+    multiple of eight, which makes the new footer invisible to the backwards scan
+    (§4.4). The file sink seeks to the newest complete footer and truncates.
+    """
+    from anla1.snapshot import write_snapshot
+
+    archive = tmp_path / "a.anla"
+    write_snapshot(archive, files=V1, created_unix_ns=CREATED, archive_id=ARCHIVE_ID)
+    good = archive.read_bytes()
+    archive.write_bytes(good + b"\x00" * 37)      # a torn write, not even aligned
+
+    write_snapshot(archive, files=V2, created_unix_ns=CREATED + 1)
+    result = archive.read_bytes()
+    assert result[C.HEADER_SIZE:len(good)] == good[C.HEADER_SIZE:]
+    assert [s.sequence for s in list_snapshots(result)] == [1, 2]
+    assert len(result) % C.RECORD_ALIGNMENT == 0

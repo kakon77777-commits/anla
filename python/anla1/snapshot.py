@@ -25,7 +25,9 @@ by an invariant that was written down and checked by nobody.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from anla.errors import IntegrityFailure, InvalidInput, ManifestInvalid
@@ -55,7 +57,7 @@ __all__ = [
     "single_chunk", "cdc_chunker",
     "create_archive", "append_snapshot",
     "snapshot_id_of", "read_snapshot", "list_snapshots", "latest_snapshot",
-    "extract_snapshot", "verify_archive", "diff",
+    "extract_snapshot", "verify_archive", "diff", "write_snapshot",
     "CODEC_STORE", "CODEC_ZSTD",
 ]
 
@@ -120,6 +122,73 @@ def cdc_chunker(profile: Any = None) -> Chunker:
     # nothing, and that is invisible in every check except the size.
     chunk.plan = chosen.as_manifest_member()
     return chunk
+
+
+# ---------------------------------------------------------------------------
+# where the bytes go
+# ---------------------------------------------------------------------------
+
+class _Sink:
+    """Somewhere to put a snapshot's bytes, that also knows the current offset.
+
+    The writer needs `tell()` as much as `write()`: every chunk descriptor records
+    where its record landed, so the position *is* part of the output. Behind this
+    interface that is either a growing buffer or a real file, and the two produce
+    identical bytes because they are the same code — which the byte comparison
+    between the Python and Rust writers then proves rather than assumes.
+    """
+
+    def write(self, data: bytes) -> None:
+        raise NotImplementedError
+
+    def tell(self) -> int:
+        raise NotImplementedError
+
+
+class _MemorySink(_Sink):
+    def __init__(self, prefix: bytes) -> None:
+        self._buffer = bytearray(prefix)
+
+    def write(self, data: bytes) -> None:
+        self._buffer += data
+
+    def tell(self) -> int:
+        return len(self._buffer)
+
+    def finish(self, archive_id: bytes, footer_offset: int) -> bytes:
+        return C.with_footer_hint(bytes(self._buffer), footer_offset)
+
+
+class _FileSink(_Sink):
+    """Writes in place, and *does not rewrite what is already there*.
+
+    An append seeks to the end of the newest complete snapshot, truncates whatever
+    a torn write left after it, and writes only the new records — then patches the
+    64-byte header. The in-memory path rebuilds the whole file to do the same thing,
+    which for a hundred-gigabyte archive is a hundred gigabytes of pointless
+    copying to add one manifest.
+    """
+
+    def __init__(self, handle, resume_at: int) -> None:
+        self._handle = handle
+        self._handle.seek(resume_at)
+        self._handle.truncate(resume_at)
+        self._position = resume_at
+
+    def write(self, data: bytes) -> None:
+        self._handle.write(data)
+        self._position += len(data)
+
+    def tell(self) -> int:
+        return self._position
+
+    def finish(self, archive_id: bytes, footer_offset: int) -> bytes:
+        # The hint is a property of the header, and the header is 64 bytes at offset
+        # zero. Nothing else in the file moves, which is the whole point.
+        self._handle.seek(0)
+        self._handle.write(C.build_header(archive_id, latest_footer_hint=footer_offset))
+        self._handle.flush()
+        return b""
 
 
 # ---------------------------------------------------------------------------
@@ -343,9 +412,11 @@ def append_snapshot(data: bytes, *,
                     directories: Iterable[str] = (),
                     created_unix_ns: int,
                     metadata: Mapping[str, dict] | None = None,
+                    prior: "list[Snapshot] | None" = None,
                     objects: Iterable[ObjectEntry] = (),
                     fidelity: Iterable[dict] = (),
                     auxiliary: Iterable[dict] = (),
+                    sink: "_Sink | None" = None,
                     chunker: Chunker = single_chunk,
                     codec: int = CODEC_STORE,
                     level: int = DEFAULT_LEVEL,
@@ -357,7 +428,14 @@ def append_snapshot(data: bytes, *,
     header, except for its hint, which is advisory by specification and which no
     reader is permitted to trust for deciding what is latest.
     """
-    if data:
+    if prior is not None:
+        # The caller already read the chain and has since let go of the archive —
+        # `write_snapshot` must, because Windows refuses to truncate a file while it
+        # is memory-mapped. So the identity comes from what it read, not from bytes
+        # nobody is holding any more.
+        archive_id = prior[-1].manifest["archive_id"]
+        started = True
+    elif data:
         header = C.parse_header(data)
         if archive_id is not None and archive_id != header.archive_uuid:
             raise InvalidInput("archive_id does not match the archive",
@@ -370,8 +448,10 @@ def append_snapshot(data: bytes, *,
         data = create_archive(archive_id)
         started = False
 
+    if prior is not None:
+        started = True
     if started:
-        previous = list_snapshots(data)
+        previous = prior if prior is not None else list_snapshots(data)
         parent = previous[-1]
         # An archive that already chose an algorithm has chosen it for its chunk ids.
         if hash_algorithm is None:
@@ -415,7 +495,12 @@ def append_snapshot(data: bytes, *,
     #
     # And failed appends would otherwise accumulate forever, since no later snapshot
     # ever has a reason to reclaim them.
-    out = bytearray(data[:resume_at] if started else data)
+    # A sink rather than a buffer. `None` means the caller wants bytes back, which
+    # is every test and the in-memory API; a `_FileSink` means the archive is being
+    # written where it will live and never exists in memory at all.
+    if sink is None:
+        sink = _MemorySink(data[:resume_at] if started else data)
+    out = sink
     chunk_entries: dict[bytes, ChunkEntry] = {}
     tree_objects = [ObjectEntry(kind="directory", path=path)
                     for path in sorted(directories, key=lambda p: p.encode("utf-8"))]
@@ -438,13 +523,13 @@ def append_snapshot(data: bytes, *,
                 continue                       # already in the archive: never twice
             used, stored = compress_chunk(piece, codec, level)
             payload_hash = hasher(stored)
-            offset = len(out)
+            offset = out.tell()
             record = C.build_record(
                 "CHNK",
                 {"chunk_id": chunk_id, "codec_id": used,
                  "raw_size": len(piece), "payload_hash": payload_hash},
                 stored, sequence)
-            out += record
+            out.write(record)
             parsed = C.parse_record(record, 0)
             chunk_entries[chunk_id] = ChunkEntry(
                 chunk_id=chunk_id, record_offset=offset, record_length=len(record),
@@ -529,25 +614,87 @@ def append_snapshot(data: bytes, *,
         parent_snapshot=parent_id, packing_plan=plan)
 
     payload = encode(manifest)
-    manifest_offset = len(out)
+    manifest_offset = out.tell()
     manifest_record = C.build_record(
         "MANF", {"hash_algorithm": hash_algorithm, "payload_hash": hasher(payload)},
         payload, sequence)
-    out += manifest_record
+    out.write(manifest_record)
     sequence += 1
 
-    footer_offset = len(out)
-    out += C.build_footer_record(
+    footer_offset = out.tell()
+    out.write(C.build_footer_record(
         sequence=sequence, snapshot_sequence=snapshot_sequence,
         manifest_offset=manifest_offset, manifest_length=len(manifest_record),
         preservation_root=manifest["preservation_root"],
         auxiliary_root=manifest["auxiliary_root"],
-        previous_footer_offset=previous_footer, hash_algorithm=hash_algorithm)
-    return C.with_footer_hint(bytes(out), footer_offset)
+        previous_footer_offset=previous_footer, hash_algorithm=hash_algorithm))
+    return out.finish(archive_id, footer_offset)
 
 
 DESCRIPTOR_FIELDS = ("record_offset", "record_length", "payload_offset",
                      "payload_length", "raw_size", "codec_id", "payload_hash")
+
+
+
+
+def write_snapshot(archive: "os.PathLike[str] | str", **kwargs) -> int:
+    """Write or append a snapshot straight to a file, never holding it in memory.
+
+    Returns the archive's size in bytes.
+
+    The in-memory `append_snapshot` needs *archive + largest file* live at once,
+    which means a tree larger than RAM cannot be packed at all. This needs the
+    largest single file and a page or two, because the records go to disk as they
+    are produced and the existing archive is memory-mapped rather than read.
+
+    It must produce byte-identical output to the in-memory path — it is the same
+    code behind a different sink — and `tools/compare_writers.py` is what says so,
+    since a streaming refactor that changed one byte would be a broken one.
+    """
+    import mmap
+    import os as _os
+
+    path = Path(archive)
+    exists = path.exists() and path.stat().st_size > 0
+    if not exists:
+        # `x+b` would refuse an existing empty file; the truncating open is correct
+        # here because there is nothing in it to lose.
+        with open(path, "wb") as handle:
+            handle.write(C.build_header(kwargs["archive_id"]))
+    # Two phases, and the split is not stylistic. **Windows refuses to truncate a
+    # file that is memory-mapped**, so the mapping has to be gone before the writer
+    # can reclaim a torn append. Read what an append needs, let go, then write.
+    #
+    # The clean-append case hid this: truncating to the file's existing length is a
+    # no-op and succeeds. Only a *torn* archive — where there is something after the
+    # last footer to reclaim — actually shrinks the file, and that is the test that
+    # found it.
+    prior = None
+    with open(path, "rb") as handle:
+        with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+            # The reader is slice-based, so a memory map is a drop-in for `bytes`
+            # and the operating system decides what is resident.
+            resume_at = _resume_offset(mapped)
+            if resume_at > C.HEADER_SIZE:
+                prior = list_snapshots(mapped)
+
+    with open(path, "r+b") as handle:
+        append_snapshot(b"", prior=prior, sink=_FileSink(handle, resume_at),
+                        **({**kwargs, "archive_id": None} if prior else kwargs))
+    return _os.path.getsize(path)
+
+
+def _resume_offset(data) -> int:
+    """Where a new snapshot starts: the end of the newest complete footer.
+
+    Not the end of the file. Everything past that footer belongs to no snapshot —
+    it can only be an append that did not finish — so it is reclaimed, and that is
+    also what keeps the next record eight-byte aligned (SPEC §4.4).
+    """
+    header = C.parse_header(data)
+    if len(data) <= header.header_size:
+        return header.first_record_offset
+    return C.find_latest_footer(data).record.end
 
 
 def _entry_from_descriptor(chunk_id: bytes, descriptor: Mapping[str, Any]) -> ChunkEntry:
