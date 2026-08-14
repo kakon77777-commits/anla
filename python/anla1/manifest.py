@@ -32,14 +32,14 @@ from typing import Any, Callable, Iterable
 from anla.errors import IntegrityFailure, InvalidInput, ManifestInvalid, UnsafeObject
 from anla.format import safe_path
 
-from .cbor import decode, encode
+from .cbor import decode_untrusted, encode
 from .merkle import merkle_root
 
 __all__ = [
     "OBJECT_ID_PREFIX", "PRESERVATION_PREFIX", "OBJECT_KINDS",
     "METADATA_NAMESPACES", "FIDELITY_REASONS",
     "ObjectEntry", "ChunkEntry", "Roots",
-    "object_id_for", "object_leaf", "chunk_leaf", "check_object_path",
+    "object_id_for", "object_leaf", "chunk_leaf", "check_object_path", "sorted_by_path",
     "check_metadata", "check_fidelity", "fidelity_of",
     "compute_roots", "build_manifest", "verify_manifest", "without_auxiliary",
 ]
@@ -81,7 +81,38 @@ def check_object_path(path: object) -> str:
     if normalized != path:
         raise UnsafeObject("object path is not stored in normalized form",
                            path=path, normalized=normalized)
+    # And it must be *encodable*. `safe_path` checks a path's structure and never
+    # asked whether it could become bytes, so a POSIX name that is not UTF-8 — which
+    # `os.listdir` hands back as lone surrogates — passed this function and then
+    # crashed four layers down in the CBOR encoder with a UnicodeEncodeError. A
+    # crash where a refusal is owed. See `design/q4-name-model.md`.
+    try:
+        normalized.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise UnsafeObject(
+            "object path cannot be encoded as UTF-8",
+            path=ascii(normalized), detail=str(exc),
+            hint="a name that is not UTF-8 needs the native-name model, "
+                 "design/q4-name-model.md") from exc
     return normalized
+
+
+def sorted_by_path(items: Iterable[Any], path_of: Callable[[Any], str] = lambda e: e.path) -> list:
+    """Validate, then order — the single place a path becomes bytes for sorting.
+
+    SPEC §5.2.1 orders objects by their UTF-8 path bytes, so `encode("utf-8")` in a
+    sort key is the *first* thing in the writer that assumes a path is encodable. It
+    was written five separate times, and all five raised `UnicodeEncodeError` from
+    inside a lambda instead of the refusal a caller is owed. Patching them one at a
+    time would have left the sixth to be written later with the same defect, so the
+    validation lives here, in the operation that needs it, and the call sites cannot
+    order a path without it.
+    """
+    items = list(items)
+    for item in items:
+        check_object_path(path_of(item))
+    return sorted(items, key=lambda item: path_of(item).encode("utf-8"))
+
 
 #: Domain separation again, for the same reason as in the Merkle tree: an object id
 #: and a Merkle leaf must not be computable from one another.
@@ -176,6 +207,12 @@ class ObjectEntry:
 
     def identity(self) -> dict:
         """The fields an object id is computed over — everything but the id."""
+        # Checked *here*, where the encoding happens, not in `build_manifest` which
+        # validates the entries after `as_manifest_entry` has already encoded them.
+        # An unencodable path therefore reached the CBOR encoder first and came back
+        # as a UnicodeEncodeError. A check placed after the thing it is meant to
+        # guard is not a check.
+        check_object_path(self.path)
         body: dict[str, Any] = {"kind": self.kind, "path": self.path}
         if self.kind == "regular-file":
             body["size"] = self.size
@@ -382,10 +419,21 @@ def verify_manifest(manifest: dict, hasher: Hasher) -> Roots:
     for entry in manifest["objects"]:
         if not isinstance(entry, dict) or "object_id" not in entry:
             raise ManifestInvalid("object entry has no object_id")
-        # The security boundary. Until Milestone 1 nothing put a real filesystem
-        # path into a 1.0 archive, so nothing had yet needed to say what a legal one
-        # is — an omission, not a decision.
-        path = check_object_path(entry.get("path"))
+        # Absence and illegality are different answers, and this line used to give
+        # the same one to both: `entry.get("path")` returns `None` for a manifest
+        # with no `path` member at all, and `check_object_path` reported that as an
+        # *unsafe path* — a security event — when what had actually happened was a
+        # required member going missing. Rust called it `manifest-invalid`, Rust was
+        # right, and the hostile-writer mutator is what made the two disagree out
+        # loud. A caller acts differently on the two: one says an archive tried to
+        # escape, the other says these bytes are broken.
+        if not isinstance(entry.get("path"), str):
+            raise ManifestInvalid("object entry has no path",
+                                  found=type(entry.get("path")).__name__)
+        # *Now* the security boundary. Until Milestone 1 nothing put a real
+        # filesystem path into a 1.0 archive, so nothing had yet needed to say what
+        # a legal one is — an omission, not a decision.
+        path = check_object_path(entry["path"])
         if entry.get("kind") not in OBJECT_KINDS:
             raise ManifestInvalid("unsupported object kind", kind=entry.get("kind"),
                                   path=path, supported=list(OBJECT_KINDS))
@@ -443,7 +491,24 @@ def manifest_bytes(manifest: dict) -> bytes:
 
 
 def parse_manifest(payload: bytes) -> dict:
-    value = decode(payload)
+    """Decode a manifest, and refuse one that is missing a member §5 requires.
+
+    The presence check used to live only in `verify_manifest`, which runs *after*
+    `read_snapshot` has already read `manifest["hash_algorithms"]` to cross-check it
+    against the record header. A manifest without that member therefore reached an
+    unguarded subscript and left the CLI as a `KeyError` traceback while Rust
+    answered `manifest-invalid` — the third defect of exactly this shape, after the
+    UTF-8 path and the missing `path` member.
+
+    All three were one mistake repeated: a required member read somewhere other than
+    the one place that checks required members are there. Putting the check in the
+    *constructor* rather than the validator is what ends the pattern — downstream
+    code cannot obtain a manifest that lacks a member, so it cannot forget to ask.
+    """
+    value = decode_untrusted(payload, what="manifest")
     if not isinstance(value, dict):
         raise ManifestInvalid("manifest is not a CBOR map")
+    for member in REQUIRED_MEMBERS:
+        if member not in value:
+            raise ManifestInvalid(f"manifest is missing required member: {member}")
     return value

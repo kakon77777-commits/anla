@@ -51,7 +51,7 @@ from typing import Iterable
 from anla.errors import FidelityDegraded, InvalidInput, UnsafeObject
 from anla.globs import matches_any
 
-from .manifest import ObjectEntry, check_object_path
+from .manifest import ObjectEntry, check_object_path, sorted_by_path
 from .snapshot import Snapshot, SourceEntry, extract_snapshot
 
 __all__ = ["SourceTree", "RestoreReport", "scan_tree", "restore_tree"]
@@ -225,9 +225,9 @@ def scan_tree(root: str | os.PathLike[str], *,
                 metadata=_metadata(stat, preserve_mtime, preserve_posix)))
             tree.total_bytes += stat.st_size
 
-    tree.files.sort(key=lambda e: e.path.encode("utf-8"))
-    tree.directories.sort(key=lambda p: p.encode("utf-8"))
-    tree.objects.sort(key=lambda e: e.path.encode("utf-8"))
+    tree.files = sorted_by_path(tree.files)
+    tree.directories = sorted_by_path(tree.directories, lambda p: p)
+    tree.objects = sorted_by_path(tree.objects)
     tree.skipped.sort(key=lambda s: s["path"])
     return tree
 

@@ -37,6 +37,9 @@ sys.path.insert(0, str(ROOT / "python"))
 
 from anla1.cli import main as anla1_main  # noqa: E402
 from anla1.fs import scan_tree  # noqa: E402
+from anla.errors import AnlaError
+from anla1 import container as C
+from anla1.blake3 import blake3_256
 from anla1.snapshot import append_snapshot, cdc_chunker  # noqa: E402
 
 RUST = ROOT / "rust" / "target" / "release" / (
@@ -194,8 +197,49 @@ def splice(rng: random.Random, data: bytes) -> bytes:
     return bytes(out)
 
 
+def rehashed_manifest(rng: random.Random, data: bytes) -> bytes:
+    """Mutate the manifest payload and then *repair* its hash.
+
+    Every other strategy here is defeated by the integrity layer before it can be
+    interesting. A random flip inside a manifest fails the payload hash, both
+    readers answer `integrity-failure`, they agree, and the mutant is scored as a
+    success — while the CBOR decoder, the canonical-form rules, the path rules and
+    the root arithmetic behind that hash are never executed at all. Sixteen thousand
+    mutants had reached none of them.
+
+    So this one plays the part the threat model actually cares about: not a corrupt
+    disk, but a *writer that is lying*, with correct hashes over illegal content.
+    That is the only mutation class that can reach the parser, and the first archive
+    built this way found a real divergence — Python raised an unhandled
+    `UnicodeDecodeError`, exit 1; Rust answered `manifest-invalid`, exit 4.
+    """
+    try:
+        record = C.parse_record(data, C.find_latest_footer(data).manifest_offset)
+    except AnlaError:
+        return bytes(data)          # nothing to lie about; leave it to another strategy
+    payload = bytearray(data[record.payload_offset:
+                             record.payload_offset + record.payload_length])
+    if not payload:
+        return bytes(data)
+    at = rng.randrange(len(payload))
+    payload[at] ^= 1 << rng.randrange(8)
+    header = dict(record.header)
+    header["payload_hash"] = blake3_256(bytes(payload))
+    try:
+        rebuilt = C.build_record(record.type, header, bytes(payload),
+                                 record.sequence, record.flags)
+    except AnlaError:
+        return bytes(data)
+    span = ((record.unpadded_length + 7) // 8) * 8
+    if len(rebuilt) != span:
+        return bytes(data)          # a length change would move every later offset
+    out = bytearray(data)
+    out[record.offset:record.offset + span] = rebuilt
+    return bytes(out)
+
+
 STRATEGIES = ([bitflip] * 30 + [truncate] * 10 + [extend] * 5
-              + [wild_field] * 30 + [splice] * 15)
+              + [wild_field] * 30 + [splice] * 15 + [rehashed_manifest] * 20)
 
 
 # ---------------------------------------------------------------------------

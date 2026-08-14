@@ -42,6 +42,8 @@ from __future__ import annotations
 import struct
 from typing import Any
 
+from anla.errors import ManifestInvalid
+
 __all__ = [
     "encode", "decode", "CborError", "NotCanonical",
     "MAJOR_UINT", "MAJOR_NEGINT", "MAJOR_BYTES", "MAJOR_TEXT",
@@ -259,6 +261,31 @@ class _Reader:
         if info in (25, 26, 27):
             raise CborError("floating point must not appear in a preservation plane")
         raise CborError(f"unsupported simple value: {info}")
+
+
+def decode_untrusted(data: bytes, *, what: str, **context: Any) -> Any:
+    """Decode CBOR that came out of an *archive* rather than out of this program.
+
+    `decode` raises `CborError`, which is a `ValueError`. That is right for a caller
+    who handed the *encoder* something it cannot represent — a programming mistake —
+    and wrong for bytes read off a disk, where malformed input is an ordinary
+    outcome and the caller is owed a code, an exit status and a JSON error object
+    like every other archive defect. The same exception type meant two situations,
+    so the boundary has to say which one it is; reclassifying `CborError` itself
+    would have mislabelled every encoder error as a corrupt archive.
+
+    Until this existed, a manifest holding invalid UTF-8 *whose payload hash was
+    correct for those bytes* left the Python CLI as an unhandled traceback with exit
+    1, while Rust answered `manifest-invalid` with exit 4. The differential fuzzer
+    could not find it, and the reason is worth keeping: a random mutation fails the
+    payload hash long before the decoder runs, so sixteen thousand mutants never
+    reached this code at all. **The integrity layer was shielding the parser from
+    the fuzzer.** `tools/fuzz_1_0.py` now re-hashes what it mutates.
+    """
+    try:
+        return decode(data)
+    except CborError as exc:
+        raise ManifestInvalid(f"{what}: {exc}", **context) from exc
 
 
 def decode(data: bytes, *, strict: bool = True, max_depth: int = MAX_DEPTH) -> Any:

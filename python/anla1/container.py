@@ -44,7 +44,7 @@ from anla.errors import (  # the error vocabulary is shared: same codes, same ex
 )
 
 from .blake3 import blake3_256
-from .cbor import CborError, decode, encode
+from .cbor import decode_untrusted, encode
 
 __all__ = [
     "ARCHIVE_MAGIC", "RECORD_MAGIC", "HEADER_SIZE", "RECORD_FRAME_SIZE",
@@ -311,11 +311,8 @@ def parse_record(data: bytes, offset: int) -> Record:
         raise IntegrityFailure("record header CRC mismatch", offset=offset)
     if any(data[offset + unpadded:end]):
         raise ManifestInvalid("record padding is not zero", offset=offset)
-    try:
-        header = decode(header_bytes) if header_length else {}
-    except CborError as exc:
-        raise ManifestInvalid(f"record header is not canonical CBOR: {exc}",
-                             offset=offset) from exc
+    header = (decode_untrusted(header_bytes, what="record header", offset=offset)
+              if header_length else {})
     if not isinstance(header, dict):
         raise ManifestInvalid("record header is not a CBOR map", offset=offset)
     # §4: a record type is four ASCII bytes. `errors="replace"` used to stand here,
@@ -423,11 +420,7 @@ def parse_footer_record(data: bytes, offset: int) -> Footer:
         raise ManifestInvalid("footer header has no payload hash", offset=offset)
     if hash_bytes(payload, algorithm) != expected:
         raise IntegrityFailure("footer payload hash mismatch", offset=offset)
-    try:
-        body = decode(payload)
-    except CborError as exc:
-        raise ManifestInvalid(f"footer payload is not canonical CBOR: {exc}",
-                             offset=offset) from exc
+    body = decode_untrusted(payload, what="footer", offset=offset)
     if not isinstance(body, dict):
         raise ManifestInvalid("footer payload is not a CBOR map", offset=offset)
     for required in ("snapshot_sequence", "manifest_offset", "manifest_length",

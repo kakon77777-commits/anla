@@ -184,7 +184,12 @@ def test_a_non_canonical_record_header_is_refused():
     struct.pack_into("<I", frame, 32, C.crc32(non_canonical))
     rebuilt = bytes(frame) + non_canonical
     rebuilt += bytes(C.padding_for(len(rebuilt)))
-    with pytest.raises(ManifestInvalid, match="canonical CBOR"):
+    # The wording is `<what>: <cbor complaint>`, uniform across the three places an
+    # archive's CBOR is decoded and matching what the Rust reader prints. Two of
+    # those three used to wrap `CborError` by hand and the third was forgotten,
+    # which is how a malformed manifest escaped the Python CLI as a traceback; one
+    # helper does it now and there is no hand-written block left to forget.
+    with pytest.raises(ManifestInvalid, match="record header: "):
         C.parse_record(rebuilt, 0)
 
 

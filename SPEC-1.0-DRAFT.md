@@ -46,6 +46,29 @@ writer.
   disagreements the fuzzer found on its first runs and which are recorded in §4.3
   and below.
 
+**And what that clause did not cover, which is the more useful thing to record.**
+Every mutation strategy the fuzzer had was defeated by a hash before it could be
+interesting: a record's `payload_hash` is checked before its payload is parsed, so a
+mutated manifest produced `integrity-failure` from both readers, they agreed, and
+the CBOR decoder, the canonical-form rules, the path rules, the required-member
+rules and the root arithmetic **were never executed**. Sixteen thousand mutants had
+reached none of them. The clause was satisfied and most of the reader was untested.
+
+The strategy that reaches them mutates a manifest and then *repairs the hash over
+what it mutated* — not a corrupt disk, but a writer that is lying, with every
+integrity field correct over content built to make a reader misbehave. It found
+three divergences on its first five hundred mutants, all of them Python crashing or
+misclassifying where Rust answered correctly. They are fixed, they have named tests
+in `python/tests/test_hostile_writer_1_0.py`, and the reasoning is in
+[`design/hostile-writer-fuzzing.md`](design/hostile-writer-fuzzing.md).
+
+The general form is worth stating in a specification rather than a commit message:
+**a fuzzer is bounded by the states its mutations can construct, and in a layered
+format the early layers are very effective at making the later ones unreachable.**
+Anything guarded behind a checksum, a signature or a schema validator has the same
+blind spot. The question to ask of a fuzzer is not what it found, but which code a
+mutation can reach at all.
+
 The clause is stated over `store`, and §8 says why: compressed output is a function
 of the compressor, so two writers on different libzstd builds may legitimately
 differ. What must match under any codec is `objects_root` and the chunk-id set, and
@@ -412,10 +435,27 @@ would differ from the tree that went in with every hash verifying. A conforming
 reader MUST refuse such a path, and a writer MUST refuse such a name rather than
 storing the rewritten form.
 
+A `path` MUST also be **encodable as UTF-8**, and a writer MUST check this rather
+than discover it. The requirement looks redundant — `path` is CBOR text, so of
+course it is UTF-8 — but a POSIX filename is an arbitrary byte string, and a runtime
+that surfaces an undecodable byte as a lone surrogate hands the writer a `str` that
+cannot be encoded back. The rule above governs a path's *structure*; this one
+governs whether it can exist at all, and the two are separate checks. Objects are
+ordered by their UTF-8 path bytes, so a name with no UTF-8 bytes has no position in
+the order and cannot be written even in principle.
+
+Errors here divide, and a conforming reader MUST NOT merge them: a `path` member
+that is **absent or not a text string** makes the manifest invalid, while a `path`
+that is present and breaks a rule above makes the object unsafe. The first says
+these bytes are damaged; the second says this archive is trying to escape. A caller
+acts on them differently.
+
 This is where whitepaper question 4 bites, and it is not answered here. Until the
 name model carries native and legacy forms alongside the portable one, a name that
 cannot survive the round trip is refused, because refusing is the only answer that
-does not quietly change what the archive contains.
+does not quietly change what the archive contains. `design/q4-name-model.md` sets
+out the model that will answer it; the checks in this subsection are the part of it
+that is already true and already enforced.
 
 `kind` MUST be `regular-file`, `directory` or `symbolic-link`. Devices, sockets and
 FIFOs are not representable in 1.0 and MUST NOT be approximated by something that is

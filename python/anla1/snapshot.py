@@ -48,6 +48,7 @@ from .manifest import (
     ObjectEntry,
     build_manifest,
     check_fidelity,
+    sorted_by_path,
     parse_manifest,
     verify_manifest,
 )
@@ -403,8 +404,7 @@ def _as_entries(files: Mapping[str, bytes] | Iterable[SourceEntry],
         entries = list(files)
         if metadata:
             raise InvalidInput("metadata belongs on the entries when entries are given")
-    entries.sort(key=lambda entry: entry.path.encode("utf-8"))
-    return entries
+    return sorted_by_path(entries)
 
 
 def append_snapshot(data: bytes, *,
@@ -503,7 +503,7 @@ def append_snapshot(data: bytes, *,
     out = sink
     chunk_entries: dict[bytes, ChunkEntry] = {}
     tree_objects = [ObjectEntry(kind="directory", path=path)
-                    for path in sorted(directories, key=lambda p: p.encode("utf-8"))]
+                    for path in sorted_by_path(directories, lambda p: p)]
     tree_objects += list(objects)
     # A complete manifest: descriptors for chunks written now *and* for chunks
     # written by an earlier snapshot, so that reading this snapshot needs no other.

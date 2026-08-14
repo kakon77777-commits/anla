@@ -13,6 +13,9 @@ _extract/
 conformance/out-check/
 conformance/out/
 conformance/fuzz-findings/
+# The 1.0 fuzzer writes here; the pattern above predates it and did not
+# cover it, so a run left untracked artifacts in `git status`.
+conformance/fuzz-1.0-findings/
 conformance/.fuzz-work/
 repro-digest.txt
 test_demo/_out/
