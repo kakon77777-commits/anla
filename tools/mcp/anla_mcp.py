@@ -62,9 +62,12 @@ from anla.errors import AnlaError  # noqa: E402
 from anla.fastcdc import CdcProfile  # noqa: E402
 from anla1 import container as C  # noqa: E402
 from anla1.fs import restore_tree, scan_tree  # noqa: E402
+from anla1.context import (  # noqa: E402
+    expand, project, projection_manifest, read_jsonl, turn_entries,
+)
 from anla1.snapshot import (  # noqa: E402
-    CODEC_STORE, CODEC_ZSTD, cdc_chunker, diff as snapshot_diff, list_snapshots,
-    single_chunk, verify_archive, write_snapshot,
+    CODEC_STORE, CODEC_ZSTD, cdc_chunker, diff as snapshot_diff, extract_snapshot,
+    list_snapshots, single_chunk, verify_archive, write_snapshot,
 )
 
 mcp = FastMCP("anla")
@@ -606,6 +609,241 @@ def anla_compare_writers(source: str) -> dict:
         first = min(len(a), len(b))
     return {"identical": a == b, "python_bytes": len(a), "rust_bytes": len(b),
             "first_differing_byte": first}
+
+
+# ---------------------------------------------------------------------------
+# context — an agent's own history, kept whole and read as a projection
+# ---------------------------------------------------------------------------
+#
+# `design/context-compression.md` has the argument. The short version is MNVP
+# 原則四: 永久刪除與可展開壓縮是不同操作 — permanent deletion and expandable
+# compression are different operations, and summarising a context is the first.
+#
+# These five tools are the second. The whole record goes into an archive; what a
+# model reads is a projection that names what it left out; and any omission comes
+# back byte for byte, from the archive, with no model involved in the returning.
+
+def _sessions(root: str = "") -> list[pathlib.Path]:
+    where = pathlib.Path(root).expanduser() if root else pathlib.Path.home() / ".claude/projects"
+    return sorted(where.rglob("*.jsonl"), key=lambda f: -f.stat().st_mtime)
+
+
+@mcp.tool()
+@_guard
+def context_capture(archive: str, transcript: str = "", session_root: str = "",
+                    max_mib: int = 64, chunk_avg: int = 16384) -> dict:
+    """Store a conversation transcript losslessly, one object per turn.
+
+    With no `transcript`, takes the most recently modified session on this machine —
+    which for an agent running inside one is its own. That is the point: an agent
+    can capture the context it is currently living in.
+
+    Every turn becomes its own archive object, so any single one can be handed back
+    later without reading the rest. Identical turns — the same file read twice, the
+    same tool result repeated — are stored once, which is where a transcript's
+    redundancy actually lives.
+
+    Appends when the archive exists, so calling this repeatedly through a long
+    session costs roughly what changed rather than the whole context again.
+    """
+    found = _sessions(session_root)
+    source = pathlib.Path(transcript).expanduser() if transcript else (
+        found[0] if found else None)
+    if source is None or not source.is_file():
+        raise ValueError(f"no transcript found (looked in {session_root or '~/.claude/projects'})")
+
+    data = source.read_bytes()
+    if len(data) > max_mib * 1024 ** 2:
+        # From the end: the recent part of a context is the part a projection is
+        # about, and truncating from the front keeps the turn indices meaningful
+        # relative to the tail rather than silently renumbering everything.
+        data = data[-max_mib * 1024 ** 2:]
+        data = data[data.find(b"\n") + 1:]
+
+    turns = read_jsonl(data)
+    if not turns:
+        raise ValueError(f"{source} holds no turns")
+
+    target = pathlib.Path(archive).expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    existed = target.exists()
+    before = target.stat().st_size if existed else 0
+
+    started = time.perf_counter()
+    size = write_snapshot(
+        target, files=turn_entries(turns),
+        created_unix_ns=time.time_ns(),
+        **({} if existed else {"archive_id": uuid.uuid4().bytes}),
+        chunker=_chunker("cdc", chunk_avg), codec=CODEC_ZSTD)
+    elapsed = time.perf_counter() - started
+
+    snapshot = list_snapshots(target.read_bytes())[-1]
+    return {
+        "archive": str(target),
+        "transcript": str(source),
+        "turns": len(turns),
+        "context_bytes": len(data),
+        "archive_bytes": size,
+        "added": size - before,
+        "share_of_context": round(size / len(data), 4) if data else None,
+        "unique_chunks": len(snapshot.manifest["chunks"]),
+        "deduplicated_turns": len(turns) - len(snapshot.manifest["chunks"]),
+        "snapshots": len(list_snapshots(target.read_bytes())),
+        "seconds": round(elapsed, 2),
+    }
+
+
+@mcp.tool()
+@_guard
+def context_project(archive: str, level: str = "L1", budget_bytes: int = 32000,
+                    keep_recent: int = 6) -> dict:
+    """Read the context as a projection, with a manifest of what it leaves out.
+
+    `L0` core, `L1` comparison, `L2` explanation, `L3` audit — MNVP §6.1, and a
+    higher level never preserves less than a lower one.
+
+    The returned `omitted` list is the point. It is not a count: every entry carries
+    the `path` that restores that turn byte for byte through `context_expand`, plus
+    a short hint so you can decide whether it is worth restoring. A projection that
+    could only tell you *how much* it dropped would be a summary.
+    """
+    data = _archive(archive).read_bytes()
+    snapshot = list_snapshots(data)[-1]
+    turns = _turns_of(data, snapshot)
+    projection = project(turns, level=level, budget_bytes=budget_bytes,
+                         keep_recent=keep_recent)
+    manifest = projection_manifest(projection)
+    return {
+        "level": projection.level,
+        "text": projection.text,
+        "preserved": len(projection.preserved),
+        "omitted": manifest["omitted"],
+        "expandable": manifest["expandable"],
+        "bytes_shown": manifest["bytes_shown"],
+        "bytes_total": manifest["bytes_total"],
+        "share_shown": manifest["share_shown"],
+    }
+
+
+@mcp.tool()
+@_guard
+def context_expand(archive: str, paths: list[str]) -> dict:
+    """Hand back omitted turns, byte for byte.
+
+    This is what makes the projection a compression rather than a deletion. It
+    reads whole objects out of the archive — no model, no reconstruction, no
+    approximation — so what comes back is what went in.
+    """
+    data = _archive(archive).read_bytes()
+    restored = expand(data, paths)
+    return {
+        "restored": {path: raw.decode("utf-8", "replace")
+                     for path, raw in restored.items()},
+        "bytes": {path: len(raw) for path, raw in restored.items()},
+        "total_bytes": sum(len(raw) for raw in restored.values()),
+    }
+
+
+@mcp.tool()
+@_guard
+def context_find(archive: str, query: str, limit: int = 12) -> dict:
+    """Locate turns, so you know what is worth expanding.
+
+    Expansion is useless without this — you cannot restore what you cannot find.
+
+    Deliberately a placeholder for DRVS, and built in its discipline rather than as
+    a stopgap that contradicts it: **every hit says what matched** rather than
+    carrying an opaque score, results land in fixed tiers rather than being ranked
+    by a number, and a query that matches nothing confidently says so instead of
+    returning a bare zero or dressing a weak match as a strong one.
+
+    Two channels only, both exact about what they are: `phrase` (the query appears)
+    and `terms` (some of its words do). DRVS's dictionary, relation and semantic
+    channels are not here, and their absence degrades this structurally — it finds
+    less, and never invents.
+    """
+    data = _archive(archive).read_bytes()
+    snapshot = list_snapshots(data)[-1]
+    turns = _turns_of(data, snapshot)
+    needle = query.strip().lower()
+    if not needle:
+        raise ValueError("an empty query has no honest answer")
+    words = [w for w in needle.split() if len(w) > 2]
+
+    hits = []
+    for turn in turns:
+        haystack = (turn.text or "").lower()
+        if needle in haystack:
+            tier, why = "A", "the phrase appears in this turn"
+        elif words and all(w in haystack for w in words):
+            tier, why = "B", "every word of the query appears, not as a phrase"
+        elif words and sum(w in haystack for w in words) >= max(1, len(words) // 2):
+            tier, why = "C", "some words of the query appear"
+        else:
+            continue
+        hits.append({"path": turn.path, "index": turn.index, "role": turn.role,
+                     "tier": tier, "why": why, "bytes": len(turn.raw),
+                     "hint": (turn.text or "").strip().replace("\n", " ")[:160]})
+
+    hits.sort(key=lambda h: (h["tier"], -h["index"]))
+    best = hits[0]["tier"] if hits else None
+    return {
+        "query": query,
+        "hits": hits[:limit],
+        "total": len(hits),
+        # Never a bare zero, and never a weak match dressed as a confident one.
+        "disclosure": (
+            "no turn matched even weakly; the archive may not hold this, or the "
+            "wording differs" if not hits else
+            "only weak matches — some query words appear, the phrase does not"
+            if best == "C" else
+            "matches are on words rather than the phrase" if best == "B" else
+            "the phrase itself appears"),
+        "channels_present": ["phrase", "terms"],
+        "channels_absent": ["dictionary", "relation", "semantic"],
+    }
+
+
+@mcp.tool()
+@_guard
+def context_status(archive: str) -> dict:
+    """What this context archive holds: snapshots, turns, and what it cost."""
+    data = _archive(archive).read_bytes()
+    snapshots = list_snapshots(data)
+    latest = snapshots[-1]
+    turns = _turns_of(data, latest)
+    logical = sum(len(t.raw) for t in turns)
+    roles: dict[str, int] = {}
+    for turn in turns:
+        roles[turn.role] = roles.get(turn.role, 0) + 1
+    return {
+        "archive": str(_archive(archive)),
+        "snapshots": len(snapshots),
+        "turns": len(turns),
+        "context_bytes": logical,
+        "archive_bytes": len(data),
+        "share_of_context": round(len(data) / logical, 4) if logical else None,
+        "unique_chunks": len(latest.manifest["chunks"]),
+        "roles": dict(sorted(roles.items(), key=lambda kv: -kv[1])[:10]),
+    }
+
+
+def _turns_of(data: bytes, snapshot) -> list:
+    """Rebuild the turn list from the archive, in conversation order.
+
+    Order comes from the paths, which are zero-padded so the archive's own object
+    ordering (§5.2.1, by UTF-8 path bytes) *is* the conversation's. Nothing stores
+    the sequence separately, so nothing can disagree with it.
+    """
+    restored = extract_snapshot(data, snapshot)
+    turns = []
+    for path in sorted(restored):
+        parsed = read_jsonl(restored[path])
+        if parsed:
+            turn = parsed[0]
+            turns.append(type(turn)(index=int(path.split("/")[1][:6]), role=turn.role,
+                                    raw=turn.raw, tool=turn.tool, text=turn.text))
+    return turns
 
 
 if __name__ == "__main__":

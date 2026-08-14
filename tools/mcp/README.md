@@ -42,6 +42,30 @@ deduplicating against nothing while every check still passes.
 | `anla_manifest` | The five roots, capabilities, the plan, and the fidelity report. |
 | `anla_compare_writers` | Pack one tree with both implementations and diff the bytes. |
 
+## Context — an agent compressing its own
+
+`design/context-compression.md` has the argument; MNVP 原則四 has the sentence:
+**永久刪除與可展開壓縮是不同操作** — permanent deletion and expandable compression
+are different operations, and summarising a context is the first.
+
+| tool | what it does |
+|---|---|
+| `context_capture` | Store a transcript losslessly, one object per turn. Name none and it takes this machine's newest session — which, for an agent inside one, is its own. |
+| `context_project` | Read it at L0/L1/L2/L3, with a manifest naming every omission and the path that restores it. |
+| `context_expand` | Hand omitted turns back byte for byte, out of the archive, with no model involved. |
+| `context_find` | Locate turns worth expanding. A placeholder for DRVS, built in its discipline: every hit says *what* matched, results land in tiers rather than carrying a score, and a query that matches nothing says so. |
+| `context_status` | Turns, snapshots, unique chunks, what it cost. |
+
+On a real 6.3 MB session of 2,071 turns: the record is 63.5% of the context with 260
+turns deduplicated away, an L1 projection is **0.25%** of it, and expanded turns come
+back byte-identical.
+
+**The cost worth knowing before you use it:** capturing the same context twice added
+970,584 bytes of which **100% was manifest and none was new content** — 352 bytes to
+re-describe each turn, every checkpoint, growing with the conversation. That is
+Decision 1's price at turn granularity, `FLAG_COMPRESSED_METADATA` is the reserved
+answer, and until then checkpoint on meaningful boundaries rather than on a timer.
+
 ## Two rules these tools follow
 
 **Every number was measured by the call that returned it.** No estimates and no

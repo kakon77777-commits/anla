@@ -225,6 +225,34 @@ restated. And the win is in the *keeping*, not in any single compression.
 
 ---
 
+### Built, and what running it found
+
+`python/anla1/context.py` and five `context_*` tools on the MCP server. An agent
+names no transcript and gets the newest session on the machine — which, running
+inside one, is its own.
+
+On a real 6.3 MB session, 2,071 turns:
+
+| | |
+|---|---|
+| the record | 3,993,192 bytes, 63.5% of the context, 260 turns deduplicated away |
+| L1 projection | 15,993 bytes — **0.25%** — 314 turns shown, 1,757 omitted, every one addressable |
+| expansion | byte-identical to the transcript |
+
+**And a cost that only appeared by running it.** Capturing the *same* context a
+second time added 970,584 bytes — and **100% of that was manifest, with zero new
+chunk records**. 352 bytes to re-describe each turn, every checkpoint.
+
+That is Decision 1's known price — a manifest describes its whole snapshot, never a
+delta — but the benchmark measured it at file granularity, where it was 20% of what
+a later snapshot added. At *turn* granularity it is the entire cost, and it grows
+linearly with the length of the conversation. A long session checkpointed often pays
+O(turns) each time, for nothing.
+
+So the next piece of format work is named, and it is not `INDX`:
+**`FLAG_COMPRESSED_METADATA`**, which §4 reserved for exactly this. Until then, a
+context store should checkpoint on meaningful boundaries rather than on a timer.
+
 ## 5. What is missing, honestly
 
 1. **Addressable partial extraction.** `INDX` is a reserved record type and nothing

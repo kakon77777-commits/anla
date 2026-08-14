@@ -173,6 +173,45 @@ if "error" in compared:
 else:
     expect(compared.get("identical") is True, "both writers emit identical bytes")
 
+print("\ncontext: an agent capturing its own")
+ctx = str(WORK / "ctx.anla")
+captured = call("context_capture", archive=ctx, max_mib=4)
+if "error" in captured:
+    print(f"  skipped: {captured['error'][:90]}")
+else:
+    show("capture", captured, ["turns", "context_bytes", "archive_bytes",
+                               "deduplicated_turns"])
+    expect(captured.get("turns", 0) > 0, "a transcript was found and turned into turns")
+
+    projected = call("context_project", archive=ctx, level="L1", budget_bytes=8000)
+    show("project", projected, ["preserved", "bytes_shown", "share_shown", "expandable"])
+    expect(projected.get("expandable") is True,
+           "every omission carries the path that restores it")
+    expect(0 < projected.get("share_shown", 1) < 0.2,
+           "the projection is a small fraction of the whole context")
+    expect(all("path" in o and "hint" in o for o in projected.get("omitted", [])),
+           "the manifest names its omissions rather than counting them")
+
+    # MNVP §6.2 through the wire, not only inside the library.
+    wide = call("context_project", archive=ctx, level="L2", budget_bytes=8000)
+    expect(wide.get("preserved", 0) >= projected.get("preserved", 0),
+           "L2 preserves at least as much as L1")
+
+    paths = [o["path"] for o in projected.get("omitted", [])[:4]]
+    if paths:
+        back = call("context_expand", archive=ctx, paths=paths)
+        show("expand", back, ["total_bytes"])
+        expect(len(back.get("restored", {})) == len(paths),
+               "every omitted turn asked for came back")
+
+    hunted = call("context_find", archive=ctx, query="the")
+    expect("disclosure" in hunted and hunted.get("channels_absent"),
+           "search discloses its confidence and which channels it does not have")
+    nothing = call("context_find", archive=ctx,
+                   query="zzzzz-nothing-matches-this-zzzzz")
+    expect(nothing.get("hits") == [] and "no turn matched" in nothing.get("disclosure", ""),
+           "a query matching nothing says so rather than returning a bare zero")
+
 print("\nerrors an agent can act on")
 absent = call("anla_verify", archive=str(WORK / "nope.anla"))
 show("missing archive", absent)
