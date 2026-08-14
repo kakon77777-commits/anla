@@ -88,6 +88,19 @@ structured text, all-zeroes and a single repeated byte. That is the shape of the
 ceiling. Five operations per byte in CPython is five operations per byte, and no
 arrangement of them reaches 60 MiB/s.
 
+**Vectorising it is also out, and for a more interesting reason.** The fingerprint is
+`fp = ((fp >> 1) + gear[byte]) mod 2**32`, and a gear word is 32 bits, so a byte's
+contribution is shifted out of existence after 32 steps. That makes the window 32
+bytes wide and suggests the whole thing is a 32-tap convolution — which numpy or any
+SIMD would evaluate in a few passes over the buffer instead of a Python loop per
+byte.
+
+It is not. The `mod 2**32` truncation happens *before* each shift, so a sum that
+overflows loses a bit that the closed form keeps, and the two part company at the
+fourth byte (`0x9388b15a` against `0x1388b15a`). Tested rather than argued. The
+recurrence is sequential by construction and no rearrangement makes it otherwise;
+the only fast implementations are compiled ones.
+
 So the change was **reverted**. `anla/fastcdc.py` exists to be read — it is the
 executable half of the specification, and the file says so: *"this function's output
 is part of the format's identity, so it is the last place to be clever."* Trading
@@ -211,7 +224,10 @@ included** — the standing rule, and the reason the benchmark exists.
    simply never been released. Build wheels and an sdist in CI, publish to PyPI, and
    publish the Rust crate — but **not before step 2**, because releasing today would
    ship the 3.9 MiB/s path to every user and turn §3.1 into their problem.
-2. **Make Rust the production path.** `anla1` gains a native backend when the binary
+2. **Make Rust the production path.** The chunker is the *only* hot loop — hashing
+   already uses the BLAKE3 wheel at 1.9 GiB/s and verification runs at 512 MiB/s — so
+   a native fast path for `next_cut` alone, on the pattern `anla1.blake3` already
+   establishes ("a fast path, never a requirement"), would close the whole gap. `anla1` gains a native backend when the binary
    is available and keeps the pure-Python one as a documented fallback with its speed
    stated. **The byte comparison is what makes this safe** — it already proves the two
    produce identical archives, so switching which one runs is not a change in output.
