@@ -27,9 +27,10 @@ packed by both writers, same fixed `(uuid, created_ns)`, no recorded metadata,
 produces **identical bytes** — with fixed chunking and with `anla-cdc-1` at two
 profiles.
 
-The writer is deliberately narrower than the Python one: one snapshot, regular files
-and directories, no metadata, no links, no append. Byte-identity is demonstrated over
-that surface and no wider, which is worth saying because the surface is the claim.
+The writer covers regular files, directories, symbolic links, recorded metadata,
+appending a second snapshot, and `--skip-unsupported` with the in-archive fidelity
+report. Byte-identity is demonstrated over all of it — six comparisons in CI,
+including a two-snapshot archive built by create-then-append on both sides.
 
 `store` is where byte-identity is claimed. §8 says why: compressed output is a
 function of the compressor, so two writers on different libzstd builds may

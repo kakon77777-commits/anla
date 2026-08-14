@@ -1,22 +1,25 @@
-//! `anla1-rs` — an independent reader for ANLA 1.0 (draft).
+//! `anla1-rs` — an independent reader and writer for ANLA 1.0 (draft).
 //!
 //! This exists for one reason: the freeze rule at the top of `SPEC-1.0-DRAFT.md`
-//! says nothing is frozen until two independent implementations agree, and until
-//! now there has been one. It reads; it does not write. A reader is the half that
-//! matters more for a preservation format — anyone may write an archive, everyone
-//! has to be able to read one — and it is the half a differential fuzzer can use,
-//! because verdict agreement needs no oracle.
+//! says nothing is frozen until two independent implementations produce
+//! byte-identical archives *and* a differential fuzzer finds no verdict divergence.
+//! Until 2026-08-14 there was one implementation. This is the other, and it does
+//! both halves — it reads, so the fuzzer has two verdicts to compare, and it writes,
+//! so there are two sets of bytes to diff.
+//!
+//! **Those two instruments catch different things, which is why the rule has two
+//! clauses.** The fuzzer asks "do you both accept this?", and two implementations
+//! that are wrong in the *same* way answer yes together. That happened: an append
+//! wrote a manifest whose `archive_id` disagreed with the header's, both readers
+//! verified it, and sixteen thousand mutants said nothing. The byte comparison found
+//! it immediately, because writing the same archive twice has no shared blind spot
+//! to hide in.
 //!
 //! **An honest limitation, since the point of the exercise is honesty about
 //! verification.** Two implementations by one author are weaker evidence than two by
 //! two authors: I have read the Python, and a shared misreading of the
-//! specification would reproduce here rather than be caught. What this does still
-//! catch is everything the specification left ambiguous enough that two *writings*
-//! of it diverge, plus every place the Python does something the document never
-//! said. The fuzzer is what turns that from a hope into a search.
-//!
-//! Interface deliberately matches `conformance/run_node.mjs` so the fuzzer can
-//! drive all three the same way.
+//! specification reproduces here rather than being caught. The incident above is
+//! that weakness showing up in practice rather than in theory.
 
 // A reader's surface is wider than any one command uses: a caller embedding this
 // wants the header's fields and `latest_snapshot` even though `verify` does not.
@@ -103,6 +106,7 @@ fn pack_command(command: &str, path: &str, args: &[String])
             level: 10,
             hash_algorithm: "blake3-256".to_string(),
             preserve_metadata: true,
+            allow_unsupported: false,
         };
         let mut output = String::new();
         let mut exclude: Vec<String> = Vec::new();
@@ -151,6 +155,7 @@ fn pack_command(command: &str, path: &str, args: &[String])
                 }
                 "--exclude" => exclude.push(next_arg(&mut rest, flag)?),
                 "--no-metadata" => options.preserve_metadata = false,
+                "--skip-unsupported" => options.allow_unsupported = true,
                 "--json" => {}
                 other => {
                     let _ = value;

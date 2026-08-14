@@ -24,8 +24,10 @@
 //!   eight-byte aligned (§4.4). Getting that wrong makes the new footer *invisible*
 //!   to the backwards scan.
 //!
-//! What it still does not do, stated rather than discovered: no `--skip-unsupported`
-//! and so no fidelity report — an entry it cannot represent stops the pack.
+//! An entry it cannot represent — a device, a socket, a FIFO — stops the pack.
+//! `allow_unsupported` leaves it out instead, and the omission is written into the
+//! archive's fidelity report rather than only into an exit code, because an operator
+//! told once on the day is not a record.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -215,6 +217,7 @@ pub struct PackOptions {
     pub level: i32,
     pub hash_algorithm: String,
     pub preserve_metadata: bool,
+    pub allow_unsupported: bool,
 }
 
 struct Entry {
@@ -266,8 +269,11 @@ fn mtime_ns(meta: &std::fs::Metadata) -> u64 {
         .unwrap_or(0)
 }
 
-fn scan(root: &Path, exclude: &[String], preserve_metadata: bool) -> Result<Vec<Entry>> {
+fn scan(root: &Path, exclude: &[String], preserve_metadata: bool, allow_unsupported: bool)
+    -> Result<(Vec<Entry>, Vec<(String, String)>)>
+{
     let mut entries = Vec::new();
+    let mut skipped: Vec<(String, String)> = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(current) = stack.pop() {
         let listing = std::fs::read_dir(&current)
@@ -326,17 +332,23 @@ fn scan(root: &Path, exclude: &[String], preserve_metadata: bool) -> Result<Vec<
                     metadata: metadata_for(&meta, preserve_metadata),
                 });
             } else {
-                return Err(Error::new(
-                    Kind::UnsafeObject,
-                    format!("this writer cannot represent this entry: {path}"),
-                ));
+                // Refused by default. An archive that silently omitted this would
+                // still be claiming Extract(Pack(F, P)) = F.
+                if !allow_unsupported {
+                    return Err(Error::new(
+                        Kind::UnsafeObject,
+                        format!("1.0 cannot represent this entry: {path}"),
+                    ));
+                }
+                skipped.push((path, "special file".to_string()));
             }
         }
     }
     // By UTF-8 path bytes. Not by locale collation, which is the defect that made the
     // original browser writer's byte layout depend on the machine that ran it.
     entries.sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));
-    Ok(entries)
+    skipped.sort();
+    Ok((entries, skipped))
 }
 
 fn compress(raw: &[u8], codec: u64, level: i32) -> Result<(u64, Vec<u8>)> {
@@ -360,7 +372,8 @@ fn compress(raw: &[u8], codec: u64, level: i32) -> Result<(u64, Vec<u8>)> {
 pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOptions)
     -> Result<Vec<u8>>
 {
-    let entries = scan(root, exclude, options.preserve_metadata)?;
+    let (entries, skipped) = scan(root, exclude, options.preserve_metadata,
+                                  options.allow_unsupported)?;
     let algorithm = options.hash_algorithm.as_str();
     let hash = |data: &[u8]| -> Result<Vec<u8>> { Ok(hash_bytes(data, algorithm)?.to_vec()) };
 
@@ -531,7 +544,26 @@ pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOpti
         })
         .collect();
     let chunks_root = merkle_root(&chunk_leaves, algorithm)?;
-    let metadata_root = merkle_root(&[], algorithm)?;
+    // The fidelity report lives in the *preservation* plane, never in `auxiliary`:
+    // `auxiliary` is disposable by definition, and a record of what the archive does
+    // not hold must not be droppable.
+    let metadata_blocks: Vec<Value> = if skipped.is_empty() {
+        Vec::new()
+    } else {
+        vec![Value::Map(vec![
+            (Value::Text("namespace".into()), Value::Text("fidelity".into())),
+            (Value::Text("entries".into()), Value::Array(
+                skipped.iter().map(|(path, kind)| Value::Map(vec![
+                    (Value::Text("kind".into()), Value::Text(kind.clone())),
+                    (Value::Text("path".into()), Value::Text(path.clone())),
+                    (Value::Text("reason".into()),
+                     Value::Text("kind-not-representable".into())),
+                ])).collect())),
+        ])]
+    };
+    let mut metadata_leaves: Vec<Vec<u8>> = metadata_blocks.iter().map(encode).collect();
+    metadata_leaves.sort();
+    let metadata_root = merkle_root(&metadata_leaves, algorithm)?;
     let auxiliary_root = merkle_root(&[], algorithm)?;
     let mut buffer = vec![PRESERVATION_PREFIX];
     buffer.extend_from_slice(&objects_root);
@@ -576,7 +608,7 @@ pub fn pack(existing: &[u8], root: &Path, exclude: &[String], options: &PackOpti
         (Value::Text("objects".into()), Value::Array(object_values)),
         (Value::Text("chunks".into()),
          Value::Map(referenced.iter().map(|(k, v)| (Value::Bytes(k.clone()), v.clone())).collect())),
-        (Value::Text("metadata".into()), Value::Array(vec![])),
+        (Value::Text("metadata".into()), Value::Array(metadata_blocks)),
         (Value::Text("auxiliary".into()), Value::Array(vec![])),
         (Value::Text("objects_root".into()), Value::Bytes(objects_root)),
         (Value::Text("chunks_root".into()), Value::Bytes(chunks_root)),

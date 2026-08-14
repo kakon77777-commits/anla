@@ -134,6 +134,70 @@ def compare_append(corpus: Path, work: Path) -> int:
     return 1
 
 
+def compare_fidelity(work: Path) -> int:
+    """A tree holding something the format cannot represent.
+
+    POSIX only, because Windows has no FIFOs to leave out — and it is skipped rather
+    than faked, since a scenario that quietly measured something else depending on
+    the host is worse than one that does not run.
+
+    The interesting part is not that both writers skip it. It is that both write the
+    *same fidelity report*, in the preservation plane, so the record of what the
+    archive does not hold is itself part of what the archive is.
+    """
+    import os
+
+    if not hasattr(os, "mkfifo"):
+        print("  fidelity report      skipped (this platform has no FIFOs)")
+        return 0
+
+    tree = work / "fidelity"
+    tree.mkdir(exist_ok=True)
+    (tree / "kept.txt").write_bytes(b"an ordinary file\n")
+    pipe = tree / "pipe"
+    if not pipe.exists():
+        os.mkfifo(pipe)
+
+    py, rs = work / "py-fid.anla", work / "rs-fid.anla"
+    import contextlib
+    import io
+
+    from anla1.cli import main as anla1_main
+
+    argv = ["pack", str(tree), "-o", str(py), "--no-metadata", "--force",
+            "--skip-unsupported", "--codec", "store", "--chunk-avg", "4096",
+            "--uuid", UUID, "--created-ns", CREATED, "--json"]
+    with contextlib.redirect_stdout(io.StringIO()):
+        code = anla1_main(argv)
+    if code != 11:
+        print(f"  fidelity report      python exited {code}, expected 11",
+              file=sys.stderr)
+        return 1
+    result = subprocess.run(
+        [str(RUST), "pack", str(tree), "-o", str(rs), "--no-metadata",
+         "--skip-unsupported", "--codec", "store", "--chunk-avg", "4096",
+         "--uuid", UUID, "--created-ns", CREATED],
+        capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"  fidelity report      rust exited {result.returncode}: "
+              f"{result.stderr}", file=sys.stderr)
+        return 1
+
+    from anla1.manifest import fidelity_of
+
+    report = fidelity_of(latest_snapshot(py.read_bytes()).manifest)
+    if not report:
+        print("  fidelity report      python recorded nothing to compare",
+              file=sys.stderr)
+        return 1
+    if py.read_bytes() == rs.read_bytes():
+        print(f"  fidelity report      byte-identical, {len(report)} absent "
+              f"entry recorded in both")
+        return 0
+    print("  fidelity report      DIFFER", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str]) -> int:
     corpus = Path(argv[0]) if argv else ROOT / "test_demo"
     if not RUST.exists():
@@ -174,6 +238,7 @@ def main(argv: list[str]) -> int:
                       f"objects_root and every chunk id identical — §8 as written")
 
         failures += compare_append(corpus, work)
+        failures += compare_fidelity(work)
 
     if failures:
         print(f"{failures} comparison(s) failed", file=sys.stderr)
