@@ -43,10 +43,22 @@ def has_encoding(call: ast.Call) -> bool:
     return any(keyword.arg == "encoding" for keyword in call.keywords)
 
 
+#: Modules with an `open` that has nothing to do with files. Matching on the
+#: attribute name alone flagged `webbrowser.open("http://…")` as text I/O without an
+#: encoding, which is a false positive in this checker rather than a defect in the
+#: code — and a checker that cries wolf gets its output skimmed, which is how the
+#: real finding gets missed. Kept as a short, named list rather than by trying to
+#: infer types: anything not on it is still checked.
+NOT_FILE_OPENERS = {"webbrowser", "os", "socket", "urllib", "shelve"}
+
+
 def called_name(call: ast.Call) -> str | None:
     if isinstance(call.func, ast.Name):
         return call.func.id
     if isinstance(call.func, ast.Attribute):
+        receiver = call.func.value
+        if isinstance(receiver, ast.Name) and receiver.id in NOT_FILE_OPENERS:
+            return None
         return call.func.attr
     return None
 
