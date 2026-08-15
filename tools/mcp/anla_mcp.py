@@ -102,15 +102,67 @@ def _rust() -> pathlib.Path | None:
                  if (RUST_DIR / n).exists()), None)
 
 
+#: Set by `--share DIR`. While it is set, every path any tool resolves must land
+#: inside it. `None` means unrestricted, which is correct for stdio and for loopback
+#: — there the server has exactly the local agent's own authority and pretending
+#: otherwise would be theatre.
+SHARE_ROOT: pathlib.Path | None = None
+
+#: Tools that create or modify a file at a path the **caller** named.
+#:
+#: The first version of this list was written from memory and was wrong: it left out
+#: `context_export_for_embedding`, which takes an `out` path and writes it — a
+#: write-anywhere tool sitting in a set labelled read-only, which is precisely the
+#: failure the comment above it was warning about. A grep for write calls then
+#: disagreed with the list in *both* directions: it caught that one and missed
+#: `context_attach_vectors`, whose write happens inside `write_vectors`.
+#:
+#: So neither the memory nor the pattern is the authority. The list below is the
+#: union, and `test_mcp_http.py` re-derives it from the source at test time and
+#: fails if the two disagree — the check is the thing that keeps it true, not the
+#: care taken writing it.
+#:
+#: `anla_survey` and `anla_compare_writers` write only inside a temporary directory
+#: they create and remove, so they stay available: they cannot touch anything the
+#: caller can name.
+WRITING_TOOLS = frozenset({
+    "anla_pack", "anla_append", "anla_extract",
+    "context_capture", "context_segment", "context_segment_export",
+    "context_attach_vectors", "context_export_for_embedding",
+})
+
+
+def _confine(resolved: pathlib.Path) -> pathlib.Path:
+    """Refuse a path that resolves outside the shared root.
+
+    Checked after `resolve()`, so `..`, a drive-relative path and a symlink pointing
+    out of the tree are all the same case: whatever the string looked like, this is
+    where it actually landed.
+    """
+    if SHARE_ROOT is None:
+        return resolved
+    try:
+        inside = resolved.is_relative_to(SHARE_ROOT)
+    except ValueError:                                          # different drive
+        inside = False
+    if not inside:
+        raise ValueError(
+            f"{resolved} is outside the shared root {SHARE_ROOT}. This server was "
+            f"started with --share, so it can only see paths under that directory "
+            f"— the check is on the resolved path, so `..` and symlinks do not get "
+            f"around it.")
+    return resolved
+
+
 def _directory(path: str) -> pathlib.Path:
-    resolved = pathlib.Path(path).expanduser().resolve()
+    resolved = _confine(pathlib.Path(path).expanduser().resolve())
     if not resolved.is_dir():
         raise ValueError(f"not a directory: {resolved}")
     return resolved
 
 
 def _archive(path: str) -> pathlib.Path:
-    resolved = pathlib.Path(path).expanduser().resolve()
+    resolved = _confine(pathlib.Path(path).expanduser().resolve())
     if not resolved.is_file():
         raise ValueError(f"not a file: {resolved}")
     return resolved
@@ -1416,18 +1468,41 @@ def _bearer_guard(app, token: str):
     return guarded
 
 
-def _serve_http(host: str, port: int, path: str, token: str) -> None:
+def _serve_http(host: str, port: int, path: str, token: str,
+                allow_hosts: list[str]) -> None:
     import uvicorn
     mcp.settings.host, mcp.settings.port = host, port
     mcp.settings.streamable_http_path = path
+    if allow_hosts:
+        # FastMCP allow-lists loopback Host headers and answers anything else with
+        # 421, which is DNS-rebinding protection and worth keeping: without it a web
+        # page could point a name at 127.0.0.1 and drive this server through the
+        # visitor's own browser. Behind a tunnel the Host is the public name, so the
+        # fix is to *name* the hostname you expect — not to switch the check off,
+        # which is the other thing the internet will tell you to do.
+        security = mcp.settings.transport_security
+        security.allowed_hosts = list(security.allowed_hosts) + allow_hosts
+        security.allowed_origins = list(security.allowed_origins) + [
+            f"https://{h}" for h in allow_hosts]
     app = mcp.streamable_http_app()
     if token:
         app = _bearer_guard(app, token)
     where = f"http://{host}:{port}{path}"
     print(f"anla MCP on {where}", file=sys.stderr)
-    print(f"  auth: {'bearer token required' if token else 'none (loopback only)'}",
+    # "loopback only" was a lie the moment a tunnel was pointed at it, and that is
+    # exactly when the line matters. --allow-host is the operator saying a public
+    # name will arrive, so the banner says what that means.
+    if token:
+        reach = "bearer token required"
+    elif allow_hosts:
+        reach = (f"NONE — and reachable as {', '.join(allow_hosts)}, so anything "
+                 f"with that URL can call these tools")
+    else:
+        reach = "none needed (loopback only)"
+    print(f"  auth: {reach}", file=sys.stderr)
+    print(f"  tools: {len(asyncio.run(mcp.list_tools()))}"
+          + (f"  (read-only, confined to {SHARE_ROOT})" if SHARE_ROOT else ""),
           file=sys.stderr)
-    print(f"  tools: {len(asyncio.run(mcp.list_tools()))}", file=sys.stderr)
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
@@ -1444,7 +1519,31 @@ def _main(argv: list[str]) -> int:
     parser.add_argument("--path", default="/mcp")
     parser.add_argument("--token", default=os.environ.get("ANLA_MCP_TOKEN", ""),
                         help="shared secret; also read from ANLA_MCP_TOKEN")
+    parser.add_argument("--allow-host", action="append", default=[],
+                        metavar="HOST", dest="allow_hosts",
+                        help="an extra Host header to accept, for when a tunnel or "
+                             "proxy puts a public name in front. Repeatable. "
+                             "Loopback is always accepted; this adds to it rather "
+                             "than replacing the DNS-rebinding check.")
+    parser.add_argument("--share", metavar="DIR", default="",
+                        help="read-only, and confined to DIR. One flag rather than "
+                             "two, because half of this configuration is worse than "
+                             "neither: writable-but-confined still lets a caller "
+                             "overwrite what is in there, and read-only-but-"
+                             "unconfined still reads the whole disk.")
     args = parser.parse_args(argv)
+
+    if args.share:
+        global SHARE_ROOT
+        SHARE_ROOT = pathlib.Path(args.share).expanduser().resolve()
+        if not SHARE_ROOT.is_dir():
+            parser.error(f"--share {SHARE_ROOT} is not a directory")
+        # Removed, not refused at call time: a tool that is absent cannot be
+        # attempted, cannot appear in tools/list, and cannot be talked into running
+        # by anything that reaches the URL. A tool that refuses is still a tool
+        # whose refusal has to be correct every time.
+        for name in sorted(WRITING_TOOLS):
+            mcp._tool_manager.remove_tool(name)
 
     if os.environ.get("ANLA_MCP_SELFTEST"):
         print(json.dumps(sorted(t.name for t in asyncio.run(mcp.list_tools()))))
@@ -1464,7 +1563,7 @@ def _main(argv: list[str]) -> int:
             f"to prove they are you, or leave --host at 127.0.0.1 and put a tunnel "
             f"in front of it. This is refused rather than warned about because a "
             f"warning is a thing you scroll past.")
-    _serve_http(args.host, args.port, args.path, args.token)
+    _serve_http(args.host, args.port, args.path, args.token, args.allow_hosts)
     return 0
 
 

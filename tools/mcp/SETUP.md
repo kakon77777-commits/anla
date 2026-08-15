@@ -59,6 +59,55 @@ url = "http://127.0.0.1:8791/mcp"
 
 Check it: `codex mcp list`.
 
+---
+
+## 0b. claude.ai and ChatGPT — the "custom connector" dialogs
+
+Those two dialogs want an **HTTPS URL their servers can reach**, so localhost is out
+and §0 does not help. Worse, look at what they offer for authentication: Claude gives
+you *OAuth client id and secret*, ChatGPT gives you a dropdown. **Neither can send
+the bearer token this server understands.** So a plain tunnel plus the full tool set
+would put twenty read-and-write-anything tools on a public URL with no auth at all —
+which is what ChatGPT's own dialog warns about, accurately.
+
+The way to have this today is to give the public URL much less to be wrong about:
+
+```bash
+python tools/mcp/anla_mcp.py --http --share "D:/Ai/mcp-share" \
+       --allow-host <the-tunnel-hostname>
+```
+
+`--share` is one flag rather than two on purpose. Half of this configuration is
+worse than neither: writable-but-confined still lets a caller overwrite what is in
+there, and read-only-but-unconfined still reads the whole disk. So it does both, and
+the writing tools are **removed** rather than made to refuse — a tool that is not
+advertised cannot be attempted, while a tool that refuses is one whose refusal has to
+be right every single time. Twelve tools remain; eight are withdrawn.
+
+The blast radius becomes exactly one directory: **whatever you put in the shared
+folder is readable by anyone who learns the URL.** Nothing else on the machine is,
+and `..`, absolute paths and symlinks are all checked after resolution, so none of
+them get out of it.
+
+Then the tunnel:
+
+```bash
+winget install --id Cloudflare.cloudflared
+cloudflared tunnel --url http://127.0.0.1:8791
+```
+
+It prints `https://<random-words>.trycloudflare.com`. Restart the server with that
+hostname in `--allow-host` (FastMCP answers `421 Misdirected Request` to a Host it
+does not know — that is DNS-rebinding protection, and naming your hostname is the
+fix; switching the check off is not), and paste **`https://<that>/mcp`** — with the
+`/mcp` on the end — into either dialog.
+
+Two things about the quick tunnel: it is **ephemeral**, so the URL changes every time
+`cloudflared` restarts and dies when you close it; and both processes have to stay
+running. For a URL that persists, make a named tunnel on a domain you own and point
+it at the same port — same server, same `--share`, just a stable name in
+`--allow-host`.
+
 ### Why it binds to 127.0.0.1, and what happens if you change that
 
 These twenty tools read and write arbitrary paths on this machine — they pack
