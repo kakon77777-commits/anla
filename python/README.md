@@ -19,9 +19,23 @@ by a conformance suite and a differential fuzzer.
 ## Install
 
 ```bash
-pip install anla-archive                  # reader, writer, verifier, both CLIs
-pip install "anla-archive[speed,zstd]"    # the BLAKE3 and Zstandard fast paths
+pip install "anla-archive[speed,zstd]"    # what you probably want
+pip install anla-archive                  # no optional dependencies at all
 ```
+
+Take the first line unless you have a reason not to. `anla1 pack` defaults to
+Zstandard, so a bare install refuses that command until `zstandard` is present —
+cleanly, naming the fix, rather than quietly storing uncompressed:
+
+```
+ANLA_UNSUPPORTED_REQUIRED_CAPABILITY: this archive uses zstd and the zstandard
+library is not installed        {"install": "pip install zstandard"}
+```
+
+That refusal is the design, not a rough edge: an archive that uses a codec declares
+it as a **required** capability, and a reader without it must say so rather than
+guess. `--codec store` works on a bare install and produces archives any reader can
+open.
 
 The distribution is `anla-archive`; the import packages and the commands are `anla`
 and `anla1`. PyPI refuses the bare name — it is one character from several existing

@@ -8,6 +8,7 @@ for it, the frozen specification of the subset that implements it, two reference
 implementations that agree byte for byte, the conformance suite that proves it, and
 the site that hosts a working version you can run in a browser tab.
 
+- **Install:** `pip install "anla-archive[speed,zstd]"` — the distribution is `anla-archive`; the imports and commands are `anla` and `anla1`
 - **Site and live workbench:** https://anla.evemisslab.com
 - **Live test:** https://anla.evemisslab.com/demo/ — runs the suite in your browser
 - **Specification:** [`SPEC.md`](SPEC.md) — normative for `ANLA-MVP v0.1`
@@ -137,8 +138,8 @@ should share one server. `--share DIR` makes it read-only and confined to one
 directory, which is what a public URL should be given:
 
 ```bash
-pip install "mcp>=1.10,<2"
-python tools/mcp/anla_mcp.py                          # stdio; 20 tools
+pip install "anla-archive[speed,zstd]" "mcp>=1.10,<2"
+python tools/mcp/anla_mcp.py                          # stdio; 21 tools
 python tools/mcp/anla_mcp.py --http                   # http://127.0.0.1:8791/mcp
 python tools/mcp/anla_mcp.py --http --share ./shared  # 12 tools, read-only
 ```
