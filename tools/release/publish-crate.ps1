@@ -79,42 +79,24 @@ try {
     Write-Host ""
     Write-Host "  got $($token.Length) characters: $masked"
 
-    # Ask the registry what this token is, before spending a publish attempt on it.
-    # Two rounds were lost to "403: this token does not have the required
-    # permissions" with nothing to distinguish a missing scope from an unverified
-    # email, and both are answerable here: /api/v1/me needs authentication, so
-    # reaching it proves the token is valid, and the reply carries the email state.
-    Write-Host "  asking crates.io what this token can do..." -NoNewline
-    $who = $null
-    try {
-        $who = Invoke-RestMethod -Uri "https://crates.io/api/v1/me" -Headers @{
-            "Authorization" = $token
-            "User-Agent"    = "anla-release (kakon77777@gmail.com)"
-        } -TimeoutSec 30
-        Write-Host ""
-        Write-Host "    account        : $($who.user.login)"
-        $verified = $who.user.email_verified
-        if ($null -eq $verified) { $verified = "(not reported)" }
-        Write-Host "    email verified : $verified"
-        if ($verified -eq $false) {
-            Write-Host ""
-            Write-Host "  crates.io will refuse to publish until that address is verified." -ForegroundColor Red
-            Write-Host "  https://crates.io/settings/profile"
-            Remove-Variable token
-            exit 1
-        }
-        Write-Host "    the token authenticates, so a 403 from here on is SCOPE:" -ForegroundColor Yellow
-        Write-Host "    it must include publish-new, and must not be restricted to"
-        Write-Host "    crate names other than anla1."
-    } catch {
-        Write-Host " failed" -ForegroundColor Red
-        Write-Host "    $($_.Exception.Message)"
-        Write-Host ""
-        Write-Host "  A 401/403 here means the token itself is not valid -- it was"
-        Write-Host "  mistyped, revoked, or belongs to a different registry."
-        Remove-Variable token
-        exit 1
-    }
+    # There is deliberately no preflight here, and the one that was here was wrong.
+    #
+    # It called /api/v1/me to prove the token was valid, got 403, and announced "the
+    # token itself is not valid". crates.io tokens carry ENDPOINT scopes: a token
+    # scoped to publish-new is not permitted to call /me, so that 403 meant the
+    # token was correctly narrow -- the opposite of what the check reported. A
+    # narrowly scoped token can, by design, do exactly one thing, which is why no
+    # preflight can tell a good one from a bad one.
+    #
+    # The publish response already distinguishes them, in the registry's own words:
+    #
+    #   "this token does not have the required permissions"  -> valid token, wrong
+    #                                                           scope
+    #   "authentication failed" / 401                        -> wrong token
+    #
+    # So the diagnosis belongs after the attempt, reading what came back, rather
+    # than before it, reading something that cannot answer.
+
     Write-Host ""
     Write-Host "  crates.io is permanent: a published version can be yanked but never" -ForegroundColor Yellow
     Write-Host "  deleted, and 0.1.0 can never be used again for this crate."
@@ -143,19 +125,26 @@ try {
     if ($code -ne 0) {
         Write-Host ""
         Write-Host "  publish failed with exit $code." -ForegroundColor Red
-        Write-Host "  cargo prints the registry's own message above -- read that first."
         Write-Host ""
-        Write-Host "  403 'this token does not have the required permissions':"
-        Write-Host "       the token exists and authenticated fine -- it just is not"
-        Write-Host "       allowed to do THIS. For a crate that does not exist yet the"
-        Write-Host "       scope must include " -NoNewline
+        Write-Host "  Read the registry's exact words above -- they separate the"
+        Write-Host "  three cases, and nothing before the attempt can:"
+        Write-Host ""
+        Write-Host "  'this token does not have the required permissions'"
+        Write-Host "     The token is VALID and recognised. Its scope is the problem."
+        Write-Host "     Creating a crate that does not exist yet needs " -NoNewline
         Write-Host "publish-new" -ForegroundColor Yellow -NoNewline
-        Write-Host ". publish-update is not enough;"
-        Write-Host "       it only covers new versions of a crate you already own."
-        Write-Host "       Also check the token is not restricted to other crate names."
+        Write-Host "."
+        Write-Host "     publish-update is not enough -- that only covers new versions"
+        Write-Host "     of a crate you already own. On the token page the scope boxes"
+        Write-Host "     start UNTICKED, so a token created by pressing Create straight"
+        Write-Host "     away authenticates and is allowed to do nothing at all."
+        Write-Host "     Leave 'Crates' empty, or list anla1 in it."
         Write-Host ""
-        Write-Host "  403 'A verified email address is required':"
-        Write-Host "       verify the address on https://crates.io/settings/profile"
+        Write-Host "  'authentication failed' or 401"
+        Write-Host "     The token itself is wrong: mistyped, revoked, or expired."
+        Write-Host ""
+        Write-Host "  'A verified email address is required'"
+        Write-Host "     https://crates.io/settings/profile"
         Write-Host ""
         Write-Host "  'already uploaded'  0.1.0 is taken; crates.io never reuses one"
         exit $code
