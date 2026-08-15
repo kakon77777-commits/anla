@@ -49,12 +49,12 @@ proc = subprocess.Popen(
 # answering, and this script would block in readline waiting for a reply that never
 # comes — both processes at zero CPU, indistinguishable from a slow call.
 #
-# Measured, because a full-scale run did stall and this was my first theory for it:
-# the server emits **480 bytes** of stderr across capture + segment + export of a
-# 61,458-segment transcript, so it was not the cause. (The stall had two better
-# candidates, both real: an un-retried 429, and the host down to 528 MB of free RAM
-# from an unrelated process.) The drain stays because the hazard is one log line
-# away from being real; it is not credited with a fix it did not make.
+# Measured, because a run did stall and this was my first theory for it: the server
+# emits **480 bytes** of stderr across capture + segment + export of a
+# 61,458-segment transcript, so it was not the cause. The real one was a lazy
+# `import numpy` running inside FastMCP's worker thread — see anla1/vectors.py. The
+# drain stays because the hazard is one log line away from being real; it is not
+# credited with a fix it did not make.
 _stderr: collections.deque[str] = collections.deque(maxlen=200)
 threading.Thread(target=lambda: [_stderr.append(line.rstrip()) for line in proc.stderr],
                  daemon=True).start()

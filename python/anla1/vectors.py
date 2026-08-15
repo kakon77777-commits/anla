@@ -35,10 +35,29 @@ import array
 import json
 import math
 import pathlib
+import sys
 from typing import Iterable, Sequence
 
 __all__ = ["MAGIC", "PURE_PYTHON_LIMIT", "have_numpy", "write_vectors",
            "read_vectors", "VectorSet"]
+
+#: Imported here, at module import, and never inside a function.
+#:
+#: It was lazy at first — `import numpy` inside `read_vectors`, which reads as the
+#: polite way to keep an optional dependency optional. Over MCP that deadlocked.
+#: FastMCP runs a synchronous tool in a worker thread, so the *first* numpy import
+#: in the server process happened off the main thread, and the call never returned:
+#: the client sat in `readline` and the server sat at 37 s of CPU and stopped. The
+#: identical call took 0.2 s in-process, which is why it survived every test that
+#: imported the module instead of speaking to the server.
+#:
+#: Optional still means optional — `None` here is a supported state and the search
+#: falls back and says so. What is not supported is discovering that at an
+#: unpredictable moment on an unpredictable thread.
+try:
+    import numpy as _np
+except ImportError:                                             # pragma: no cover
+    _np = None
 
 MAGIC = "anla:context:vectors:1"
 
@@ -49,11 +68,7 @@ PURE_PYTHON_LIMIT = 8_000
 
 
 def have_numpy() -> bool:
-    try:
-        import importlib.util
-        return importlib.util.find_spec("numpy") is not None
-    except (ImportError, ValueError):
-        return False
+    return _np is not None
 
 
 class VectorSet:
@@ -109,13 +124,12 @@ class VectorSet:
         centred_query = [q - m for q, m in zip(query, mean)]
 
         if hasattr(self.data, "shape"):
-            import numpy as np
-            matrix = self.data - np.asarray(mean, dtype="float32")
-            vector = np.asarray(centred_query, dtype="float32")
-            norms = np.linalg.norm(matrix, axis=1) * float(np.linalg.norm(vector))
-            with np.errstate(divide="ignore", invalid="ignore"):
-                scores = np.where(norms > 0, matrix @ vector / norms, 0.0)
-            top = np.argsort(-scores)[:limit]
+            matrix = self.data - _np.asarray(mean, dtype="float32")
+            vector = _np.asarray(centred_query, dtype="float32")
+            norms = _np.linalg.norm(matrix, axis=1) * float(_np.linalg.norm(vector))
+            with _np.errstate(divide="ignore", invalid="ignore"):
+                scores = _np.where(norms > 0, matrix @ vector / norms, 0.0)
+            top = _np.argsort(-scores)[:limit]
             return [(self.keys[int(i)], float(scores[int(i)])) for i in top]
 
         if len(self.keys) > PURE_PYTHON_LIMIT:
@@ -161,8 +175,7 @@ def write_vectors(path: pathlib.Path, rows: Iterable[tuple[str, Sequence[float]]
     blob = json.dumps(header, ensure_ascii=False).encode("utf-8") + b"\n"
     if array.array("f").itemsize != 4:
         raise RuntimeError("this platform's float is not 4 bytes")
-    import sys as _sys
-    if _sys.byteorder != "little":
+    if sys.byteorder != "little":
         flat.byteswap()
     path.write_bytes(blob + flat.tobytes())
     return {"file": str(path), "count": len(keys), "width": width,
@@ -184,13 +197,11 @@ def read_vectors(path: pathlib.Path) -> VectorSet:
         raise ValueError(f"{path.name} declares {count}×{width} float32 "
                          f"({width * count * 4:,} bytes) and carries {len(body):,}")
 
-    if have_numpy():
-        import numpy as np
-        data = np.frombuffer(body, dtype="<f4").reshape(count, width)
+    if _np is not None:
+        data = _np.frombuffer(body, dtype="<f4").reshape(count, width)
     else:
         data = array.array("f")
         data.frombytes(body)
-        import sys as _sys
-        if _sys.byteorder != "little":
+        if sys.byteorder != "little":
             data.byteswap()
     return VectorSet(list(header["keys"]), data, width, header)

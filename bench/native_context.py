@@ -68,16 +68,27 @@ class Wire:
     stderr is drained by a thread rather than read at the end: a child's stderr pipe
     holds about 64 KB, and a child that fills it blocks inside its own write while
     the parent blocks in `readline`, both at zero CPU, looking exactly like a slow
-    query.
+    query. Real hazard, kept — but it is *not* what stalled this script, and it took
+    three wrong answers to find out what did.
 
-    That was my first theory when a full-scale run stalled, and measuring killed it:
-    the server emits **480 bytes** of stderr across capture, segment and export of a
-    61,458-segment transcript. Two better-supported explanations turned up
-    afterwards, both real and neither ruled out for that particular stall — a 429
-    that the harness had no backoff for, and the host being down to 528 MB of free
-    RAM because of an unrelated process, which stalls every process on the machine
-    at zero CPU in exactly the same way. The drain stays because the hazard is one
-    log line away from being real; it is not credited with a fix it did not make.
+    A full-scale run hung immediately after attaching vectors. I wrote "the stderr
+    pipe filled" into two files as fact; measured, the server emits **480 bytes**
+    across the whole heavy path. Then a 429 with no backoff turned up (real, and it
+    killed a benchmark run, but not this). Then the host was found down to 528 MB of
+    free RAM from an unrelated process (real, and it stalls everything identically,
+    but not this either).
+
+    The actual cause, reproduced and fixed: `anla1.vectors` imported NumPy lazily,
+    inside `read_vectors`. FastMCP runs a synchronous tool in a worker thread, so the
+    first `context_address` after an attach performed the process's first NumPy
+    import off the main thread — and never returned. The same call in-process took
+    0.2 s, which is why every test that imported the module rather than speaking to
+    the server passed. Moving the import to module scope took that call from
+    never-returning to **0.1 s**.
+
+    Four candidates, three of them plausible and two of them independently real
+    events on the same day. Zero CPU on both sides is consistent with all four, and
+    it was the one observation I had.
     """
 
     def __init__(self, server: pathlib.Path):
