@@ -54,9 +54,11 @@ try {
 
     Write-Host ""
     Write-Host "  Get a token at https://crates.io/settings/tokens"
-    Write-Host "  Scope: " -NoNewline
+    Write-Host "  Scopes: tick " -NoNewline
     Write-Host "publish-new" -ForegroundColor Yellow -NoNewline
-    Write-Host " (this crate does not exist yet)."
+    Write-Host " -- anla1 does not exist yet, and"
+    Write-Host "  publish-update alone will be refused with a 403 that says the token"
+    Write-Host "  lacks permission. Leave the crate restriction empty, or list anla1."
     Write-Host ""
     Write-Host "  Paste it below -- right-click pastes in this window." -ForegroundColor Cyan
     Write-Host ""
@@ -106,10 +108,19 @@ try {
         Write-Host "  publish failed with exit $code." -ForegroundColor Red
         Write-Host "  cargo prints the registry's own message above -- read that first."
         Write-Host ""
-        Write-Host "  Common causes:"
-        Write-Host "    403  the token is wrong, or lacks the publish-new scope"
-        Write-Host "    403  the crates.io account has no verified email address"
-        Write-Host "    'already uploaded'  0.1.0 is taken; crates.io never reuses one"
+        Write-Host "  403 'this token does not have the required permissions':"
+        Write-Host "       the token exists and authenticated fine -- it just is not"
+        Write-Host "       allowed to do THIS. For a crate that does not exist yet the"
+        Write-Host "       scope must include " -NoNewline
+        Write-Host "publish-new" -ForegroundColor Yellow -NoNewline
+        Write-Host ". publish-update is not enough;"
+        Write-Host "       it only covers new versions of a crate you already own."
+        Write-Host "       Also check the token is not restricted to other crate names."
+        Write-Host ""
+        Write-Host "  403 'A verified email address is required':"
+        Write-Host "       verify the address on https://crates.io/settings/profile"
+        Write-Host ""
+        Write-Host "  'already uploaded'  0.1.0 is taken; crates.io never reuses one"
         exit $code
     }
 } finally {
