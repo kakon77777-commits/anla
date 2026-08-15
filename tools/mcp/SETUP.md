@@ -4,11 +4,105 @@ Everything below is already filled in for **this machine** (Windows, Python 3.14
 `C:\Users\kakon\AppData\Local\Python\pythoncore-3.14-64`, repo at
 `D:\Ai\work together\ANLA`). Copy, paste, restart, done.
 
-Verified on 2026-08-15: `mcp` 1.28.1 and `numpy` 2.4.6 are installed, and the server
-starts from **any** working directory with the absolute path below and advertises
-**20 tools**.
+Verified on 2026-08-15: `mcp` 1.28.1, `numpy` 2.4.6 and `uvicorn` 0.51 are installed;
+the server starts from **any** working directory and advertises **20 tools** over
+both transports.
 
 ---
+
+## 0. Which transport — read this first
+
+| | stdio | HTTP |
+|---|---|---|
+| how it starts | the client launches its own copy | you start it once, clients connect |
+| how many clients | one per process | **many at one URL** |
+| what it is for | a single agent on this machine | Claude Code **and** Codex together |
+
+**For what you asked — Claude Code and Codex both using it — start the HTTP server
+once and point both at the URL.** Two stdio registrations would give you two
+processes that cannot see each other's work: one indexes an archive, the other does
+not know the index exists.
+
+```bash
+python "D:/Ai/work together/ANLA/tools/mcp/anla_mcp.py" --http
+```
+
+```
+anla MCP on http://127.0.0.1:8791/mcp
+  auth: none (loopback only)
+  tools: 20
+```
+
+Leave that window open. Then §1a and §1b, and both clients are on the same server.
+
+### Claude Code → the HTTP server
+
+```bash
+claude mcp add --transport http anla --scope user http://127.0.0.1:8791/mcp
+```
+
+### Codex → the same HTTP server
+
+Codex 0.148 (the build on this machine) takes a URL directly:
+
+```bash
+"C:/Users/kakon/AppData/Local/OpenAI/Codex/bin/3cff67e9f778ef0e/codex.exe" mcp add anla --url http://127.0.0.1:8791/mcp
+```
+
+or by hand in `C:\Users\kakon\.codex\config.toml`, beside the `[mcp_servers.*]`
+entries already there:
+
+```toml
+[mcp_servers.anla]
+url = "http://127.0.0.1:8791/mcp"
+```
+
+Check it: `codex mcp list`.
+
+### Why it binds to 127.0.0.1, and what happens if you change that
+
+These twenty tools read and write arbitrary paths on this machine — they pack
+directories, extract over them, and capture whatever transcript they are pointed at.
+On loopback that is exactly the authority the local agent already has. On any other
+interface it is **remote code acting as you**, so:
+
+```bash
+python tools/mcp/anla_mcp.py --http --host 0.0.0.0
+# anla_mcp: error: --host 0.0.0.0 would expose tools that read and write arbitrary
+# paths on this machine to anything that can reach the port, with no authentication.
+```
+
+It **refuses**, rather than warning, because a warning is a thing you scroll past.
+To actually reach it from elsewhere:
+
+```bash
+# 1. a secret, generated rather than chosen
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# 2. the server, bound wide, with that secret required on every request
+set ANLA_MCP_TOKEN=<the secret>
+python tools/mcp/anla_mcp.py --http --host 0.0.0.0
+
+# 3. the client, same secret
+claude mcp add --transport http anla --scope user https://your-host/mcp --header "Authorization: Bearer <the secret>"
+codex mcp add anla --url https://your-host/mcp --bearer-token-env-var ANLA_MCP_TOKEN
+```
+
+**Prefer a tunnel over opening a port.** Keep `--host 127.0.0.1` and put Cloudflare
+Tunnel in front of it, so the machine has no inbound port at all and the tunnel
+carries TLS. Set a token anyway: the tunnel authenticates the *transport*, not the
+caller.
+
+Wrong token and no token are both `401`; that is drilled in all three directions by
+`tools/mcp/test_mcp_http.py`, because a guard tested only with the correct
+credential passes just as well when it is checking nothing.
+
+---
+
+## The rest of this file is the single-client stdio setup
+
+Use it if you want one client with its own private server, or if the HTTP route is
+not working and you want to isolate the problem.
 
 ## 1. Claude Desktop
 
@@ -155,6 +249,10 @@ pretends to be the semantic channel when it is not.
 
 | what you see | what it is |
 |---|---|
+| HTTP client cannot connect | the server window is closed — HTTP mode is a process you keep running, unlike stdio which the client launches |
+| `401` on every HTTP call | a token is set on the server and not on the client, or the other way round |
+| `--host 0.0.0.0` exits immediately | working as designed; set `ANLA_MCP_TOKEN` or keep it on loopback behind a tunnel |
+| Two clients disagree about what exists | they are on **two stdio servers**, not one HTTP server — that is the whole reason for §0 |
 | No `anla` server at all in the client | the config file is invalid JSON — a trailing comma or a single backslash |
 | Server listed but every call fails | `command` is not resolving; use the full `python.exe` path |
 | `this server is written against the mcp 1.x API` | `pip install "mcp>=1.10,<2"` — 2.x moved the entry point |

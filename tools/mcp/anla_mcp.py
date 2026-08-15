@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """ANLA over MCP — the point at which "agent-native" stops being a name.
 
-    python tools/mcp/anla_mcp.py                     # stdio
+    python tools/mcp/anla_mcp.py                     # stdio, one client
+    python tools/mcp/anla_mcp.py --http              # http://127.0.0.1:8791/mcp
 
 The whitepaper's claim is that **a model may plan how to pack, and a deterministic
 decoder with no model in it must return every declared byte**. Until now the second
@@ -27,6 +28,8 @@ Two design rules, both learned the hard way in this repository:
 
 from __future__ import annotations
 
+import argparse
+import asyncio
 import functools
 import hashlib
 import json
@@ -1377,11 +1380,93 @@ def _turns_of(data: bytes, snapshot) -> list:
     return turns
 
 
-if __name__ == "__main__":
-    # stdio, because that is what a local agent speaks and this touches the
-    # filesystem. Nothing here should be reachable over a network.
+def _bearer_guard(app, token: str):
+    """Require `Authorization: Bearer <token>` on every request.
+
+    A shared secret, not OAuth. It exists because of what these tools can do: they
+    read and write arbitrary paths on the host, pack directories and extract over
+    them. On loopback that is exactly the local agent's own authority and needs
+    nothing. The moment the socket leaves the machine it is remote code acting as
+    the user, so `--host` beyond loopback *requires* a token below rather than
+    warning about it — a warning is a thing you scroll past.
+    """
+    import hmac
+
+    async def guarded(scope, receive, send):
+        if scope["type"] != "http":
+            return await app(scope, receive, send)
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1")
+                   for k, v in scope.get("headers", [])}
+        offered = headers.get("authorization", "")
+        prefix = "bearer "
+        # Constant-time, so the comparison does not leak the token's prefix to
+        # something timing the responses.
+        ok = (offered[:len(prefix)].lower() == prefix
+              and hmac.compare_digest(offered[len(prefix):].strip(), token))
+        if not ok:
+            body = b'{"error":"unauthorized"}'
+            await send({"type": "http.response.start", "status": 401,
+                        "headers": [(b"content-type", b"application/json"),
+                                    (b"content-length",
+                                     str(len(body)).encode("ascii")),
+                                    (b"www-authenticate", b'Bearer realm="anla"')]})
+            return await send({"type": "http.response.body", "body": body})
+        return await app(scope, receive, send)
+
+    return guarded
+
+
+def _serve_http(host: str, port: int, path: str, token: str) -> None:
+    import uvicorn
+    mcp.settings.host, mcp.settings.port = host, port
+    mcp.settings.streamable_http_path = path
+    app = mcp.streamable_http_app()
+    if token:
+        app = _bearer_guard(app, token)
+    where = f"http://{host}:{port}{path}"
+    print(f"anla MCP on {where}", file=sys.stderr)
+    print(f"  auth: {'bearer token required' if token else 'none (loopback only)'}",
+          file=sys.stderr)
+    print(f"  tools: {len(asyncio.run(mcp.list_tools()))}", file=sys.stderr)
+    uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
+def _main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="anla_mcp", description="ANLA over MCP — stdio by default, HTTP for "
+                                     "clients that want a URL")
+    parser.add_argument("--http", action="store_true",
+                        help="serve Streamable HTTP instead of stdio, so more than "
+                             "one client can use one running server")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="default 127.0.0.1; anything else requires --token")
+    parser.add_argument("--port", type=int, default=8791)
+    parser.add_argument("--path", default="/mcp")
+    parser.add_argument("--token", default=os.environ.get("ANLA_MCP_TOKEN", ""),
+                        help="shared secret; also read from ANLA_MCP_TOKEN")
+    args = parser.parse_args(argv)
+
     if os.environ.get("ANLA_MCP_SELFTEST"):
-        print(json.dumps(sorted(t.name for t in
-                                __import__("asyncio").run(mcp.list_tools()))))
-    else:
+        print(json.dumps(sorted(t.name for t in asyncio.run(mcp.list_tools()))))
+        return 0
+
+    if not args.http:
+        # stdio: one client, one process, the client's own authority. No change.
         mcp.run()
+        return 0
+
+    loopback = args.host in ("127.0.0.1", "::1", "localhost")
+    if not loopback and not args.token:
+        parser.error(
+            f"--host {args.host} would expose tools that read and write arbitrary "
+            f"paths on this machine to anything that can reach the port, with no "
+            f"authentication. Pass --token (or set ANLA_MCP_TOKEN) so callers have "
+            f"to prove they are you, or leave --host at 127.0.0.1 and put a tunnel "
+            f"in front of it. This is refused rather than warned about because a "
+            f"warning is a thing you scroll past.")
+    _serve_http(args.host, args.port, args.path, args.token)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main(sys.argv[1:]))
