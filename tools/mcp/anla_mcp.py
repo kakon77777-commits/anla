@@ -72,6 +72,7 @@ from anla1.context import (  # noqa: E402
     expand, newest_sessions, project, projection_manifest, read_jsonl,
     turn_entries,
 )
+from anla1.backends import DEFAULT_OLLAMA, backend_for  # noqa: E402
 from anla1.embedding import EmbeddingIdentity, comparable  # noqa: E402
 from anla1.resonance import (  # noqa: E402
     Candidate, classify_persistence, resonant_domain,
@@ -129,7 +130,7 @@ SHARE_ROOT: pathlib.Path | None = None
 WRITING_TOOLS = frozenset({
     "anla_pack", "anla_append", "anla_extract",
     "context_capture", "context_segment", "context_segment_export",
-    "context_attach_vectors", "context_export_for_embedding",
+    "context_attach_vectors", "context_export_for_embedding", "context_embed",
 })
 
 
@@ -1372,6 +1373,72 @@ def context_address(archive: str, query: str = "", scheme: str = "changepoint-v1
                     "`expanded_exactly` measures the expansion, never the relevance "
                     "— a hit from a partial corpus expands just as exactly as a "
                     "right one",
+    }
+
+
+@mcp.tool()
+@_guard
+def context_embed(archive: str, scheme: str = "changepoint-v1",
+                  model: str = "nomic-embed-text", backend: str = "ollama",
+                  host: str = DEFAULT_OLLAMA, limit: int = 0, batch: int = 64,
+                  chars: int = 6000, min_bytes: int = 40) -> dict:
+    """Embed this index's views with a model on **this machine**, in one call.
+
+    The rest of the loop already worked without an external service; this was the
+    one step that did not, and it is the step that decides whether the whole thing
+    can run on a record that must not leave the machine. Embedding a transcript
+    through a hosted API means sending the whole conversation to somebody else.
+
+    The identity written beside the vectors carries the model's **content digest**,
+    so a query embedded later is comparable only if the weights are the same bytes.
+    A hosted model is a name, and a name can be re-pointed silently; this is the
+    one backend where `revision` means something.
+
+    Still no embedding is computed here. ANLA asks; the model answers; everything
+    downstream of the vector is deterministic and local.
+    """
+    target, preserved = _preserved(archive)
+    sidecar = _segment_sidecar(target, scheme)
+    if not sidecar.exists():
+        raise ValueError(f"no index for {scheme!r}; call context_segment first")
+    index = SegmentIndex.of(json.loads(sidecar.read_text(encoding="utf-8")))
+
+    engine = backend_for(backend, host=host)
+    identity = engine.identity(model, projection_version=index.projection_version,
+                               segmentation_scheme=scheme)
+
+    views = [(segment.segment_id, text[:chars]) for segment, text
+             in _project_all(index.segments, preserved, min_bytes)]
+    eligible = len(views)
+    if limit and eligible > limit:
+        step = eligible / limit
+        views = [views[min(eligible - 1, int(i * step))] for i in range(limit)]
+
+    rows = []
+    for start in range(0, len(views), batch):
+        chunk = views[start:start + batch]
+        rows.extend(zip((key for key, _ in chunk),
+                        engine.embed([text for _, text in chunk], model)))
+    if not rows:
+        raise ValueError(f"no segment of {scheme} reached min_bytes={min_bytes}")
+
+    written = write_vectors(target.with_suffix(f".vectors-{scheme}.anlavec"), rows,
+                            identity.as_dict(), extra={"model": identity.model})
+    return {
+        "archive": str(target), "sidecar": written["file"], "scheme": scheme,
+        "embedded": written["count"], "eligible_segments": eligible,
+        "segments_in_index": len(index.segments),
+        "share_of_index": (round(written["count"] / len(index.segments), 4)
+                           if index.segments else None),
+        "sampling": "even stride across the record" if limit and eligible > limit
+                    else "every eligible segment",
+        "sidecar_bytes": written["bytes"],
+        "identity": identity.as_dict(),
+        "identity_fingerprint": identity.fingerprint,
+        "ran_locally": backend == "ollama",
+        "plane": "auxiliary — a sidecar beside the archive; the record is untouched",
+        "next": "context_address with a query_vector from the same model; the "
+                "identity is checked and a mismatch answers INCOMPARABLE",
     }
 
 

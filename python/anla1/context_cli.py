@@ -32,6 +32,9 @@ from pathlib import Path
 from anla.errors import InvalidInput
 from anla.fastcdc import CdcProfile
 
+from .backends import DEFAULT_OLLAMA, backend_for
+from .embedding import EmbeddingIdentity, comparable
+
 from .context import (
     LEVELS, expand, newest_sessions, project, projection_manifest, read_jsonl,
     turn_entries,
@@ -40,7 +43,7 @@ from .segment import SCHEMES, SegmentIndex, build_index, digest_of, project_segm
 from .snapshot import (
     CODEC_ZSTD, cdc_chunker, extract_snapshot, list_snapshots, write_snapshot,
 )
-from .vectors import have_numpy, read_vectors
+from .vectors import have_numpy, read_vectors, write_vectors
 
 
 def _read(path: str) -> bytes:
@@ -280,21 +283,46 @@ def cmd_address(args, emit) -> int:
     index = _load_index(args.archive, args.scheme)
     segments = {s.segment_id: s for s in index.segments}
 
-    sidecar = Path(args.archive).expanduser().with_suffix(
-        f".vectors-{args.scheme}.anlavec")
+    sidecar = _vector_path(args.archive, args.scheme)
     channel = "lexical — no vectors are attached for this scheme"
+    incomparable = None
     ranked: list[tuple[str, float]] = []
-    if sidecar.exists() and args.query_vector:
+
+    if sidecar.exists() and (args.embed or args.query_vector):
         corpus = read_vectors(sidecar)
-        vector = json.loads(Path(args.query_vector).expanduser()
-                            .read_text(encoding="utf-8"))
-        ranked = [(k, s) for k, s in corpus.search(vector, limit=args.limit)
-                  if k in segments]
-        channel = (f"semantic — {len(corpus):,} segments carry a vector, "
-                   f"{'numpy' if have_numpy() else 'pure python'} backend")
-    elif args.query_vector:
-        channel = ("semantic — REFUSED, a query vector was given but no vectors are "
-                   "attached for this scheme")
+        held = EmbeddingIdentity.of(corpus.identity)
+        if args.query_vector:
+            # A vector from somewhere this command cannot interrogate. It may be
+            # right; nothing here can tell, so the identity it is compared against
+            # is the one the caller implicitly asserts by supplying it.
+            vector = json.loads(Path(args.query_vector).expanduser()
+                                .read_text(encoding="utf-8"))
+            asked = EmbeddingIdentity.of({**corpus.identity,
+                                          "dimensions": len(vector)})
+        else:
+            # The corpus says which model made it, so the query is embedded with
+            # that one rather than with a default. The identity check below then
+            # has something to compare rather than being a formality — and a model
+            # that has been re-pulled since has a different digest and is caught.
+            backend = backend_for(args.backend, host=args.host)
+            model = held.model.split(":", 1)[1] if ":" in held.model else held.model
+            asked = backend.identity(model,
+                                     projection_version=index.projection_version,
+                                     segmentation_scheme=args.scheme)
+            vector = backend.embed([args.query], model)[0]
+
+        ok, reason = comparable(asked, held)
+        if not ok:
+            incomparable, channel = reason, f"semantic — refused, {reason}"
+        else:
+            ranked = [(k, s) for k, s in corpus.search(vector, limit=args.limit)
+                      if k in segments]
+            channel = (f"semantic — {len(corpus):,} segments carry a vector from "
+                       f"{held.model}, {'numpy' if have_numpy() else 'pure python'} "
+                       f"backend")
+    elif args.embed or args.query_vector:
+        channel = ("semantic — REFUSED, a query vector was asked for but no vectors "
+                   "are attached for this scheme; run `anla1 context embed` first")
 
     if not ranked:
         needle = args.query.lower()
@@ -328,6 +356,7 @@ def cmd_address(args, emit) -> int:
                      "digest_verified": ok,
                      "text": project_segment(segment, raw, check=False)})
     emit({"archive": args.archive, "scheme": args.scheme, "channel": channel,
+          "incomparable": incomparable,
           "segments_in_index": len(segments), "hits": hits,
           "expanded_exactly": sum(1 for h in hits if h["digest_verified"]),
           "boundary": "`expanded_exactly` measures the expansion, never the "
@@ -340,6 +369,96 @@ def cmd_address(args, emit) -> int:
             f"    {' '.join(h['text'].split())[:200]}" for h in hits]
          or ["nothing matched"])
     return 0 if hits else 1
+
+
+def _vector_path(archive: str, scheme: str) -> Path:
+    return Path(archive).expanduser().with_suffix(f".vectors-{scheme}.anlavec")
+
+
+def cmd_embed(args, emit) -> int:
+    """Embed the index's views with a model on this machine.
+
+    The vectors and the identity of what made them are written together, and the
+    identity carries the model's own content digest — so a query embedded later is
+    comparable only if the weights are literally the same bytes. That is a check a
+    hosted model cannot support, and it is the reason this is worth having beyond
+    saving an API key.
+    """
+    backend = backend_for(args.backend, host=args.host)
+    data = _read(args.archive)
+    restored = extract_snapshot(data, _latest(data))
+    index = _load_index(args.archive, args.scheme)
+    identity = backend.identity(args.model,
+                                projection_version=index.projection_version,
+                                segmentation_scheme=args.scheme)
+
+    views: list[tuple[str, str]] = []
+    verified: dict[str, bool] = {}
+    for segment in index.segments:
+        raw = restored.get(segment.source_turn)
+        if raw is None:
+            continue
+        ok = verified.get(segment.source_turn)
+        if ok is None:
+            ok = digest_of(raw) == segment.source_digest
+            verified[segment.source_turn] = ok
+        if not ok:
+            continue
+        text = project_segment(segment, raw, check=False)
+        if len(text) >= args.min_bytes:
+            views.append((segment.segment_id, text[:args.chars]))
+
+    eligible = len(views)
+    if args.limit and eligible > args.limit:
+        # An even stride, not the first N. Taking a prefix embeds the opening of the
+        # conversation and then answers every later question out of it, reporting
+        # itself exactly as a complete corpus would.
+        step = eligible / args.limit
+        views = [views[min(eligible - 1, int(i * step))] for i in range(args.limit)]
+
+    rows = []
+    for start in range(0, len(views), args.batch):
+        batch = views[start:start + args.batch]
+        vectors = backend.embed([text for _, text in batch], args.model)
+        rows.extend(zip((key for key, _ in batch), vectors))
+        print(f"  embedded {min(start + args.batch, len(views)):,}/{len(views):,}",
+              file=__import__("sys").stderr)
+
+    if not rows:
+        raise InvalidInput(
+            f"nothing to embed: no segment of {args.scheme} reached "
+            f"--min-bytes {args.min_bytes}")
+    written = write_vectors(_vector_path(args.archive, args.scheme), rows,
+                            identity.as_dict(), extra={"model": identity.model})
+    emit({"archive": args.archive, "sidecar": written["file"],
+          "scheme": args.scheme, "embedded": written["count"],
+          "eligible_segments": eligible,
+          "segments_in_index": len(index.segments),
+          "share_of_index": round(written["count"] / len(index.segments), 4)
+                            if index.segments else None,
+          "sidecar_bytes": written["bytes"], "identity": identity.as_dict(),
+          "identity_fingerprint": identity.fingerprint,
+          "plane": "auxiliary — a sidecar beside the archive; deleting it costs the "
+                   "semantic channel and nothing else"},
+         [f"{written['file']}",
+          f"  {written['count']:,} of {len(index.segments):,} segments "
+          f"({written['count'] / len(index.segments):.1%}), "
+          f"{written['bytes'] / 1e6:.0f} MB",
+          f"  {identity.model} @ {identity.dimensions}d, "
+          f"revision {identity.revision[:16]}",
+          f"  fingerprint {identity.fingerprint}"])
+    return 0
+
+
+def cmd_models(args, emit) -> int:
+    backend = backend_for(args.backend, host=args.host)
+    held = backend.models()
+    emit({"backend": backend.name, "host": args.host, "models": held},
+         [f"{m['model']:<28} {(m['dimensions'] or '-'):>6}d  "
+          f"{'embedding' if m['embedding'] else 'generative':<11} "
+          f"{(m['bytes'] or 0) / 1e6:>7.0f} MB  {m['digest'][:16]}"
+          for m in held] or ["this server holds no models"])
+    return 0 if held else 1
 
 
 # ---------------------------------------------------------------------------
@@ -409,9 +528,39 @@ def add_parser(sub, common) -> None:
     addressed.add_argument("query")
     addressed.add_argument("--scheme", default="changepoint-v1",
                            choices=sorted(SCHEMES))
+    addressed.add_argument("--embed", action="store_true",
+                           help="embed the question with the model the attached "
+                                "vectors were made by — read from the sidecar, not "
+                                "chosen here, so the two cannot silently differ")
     addressed.add_argument("--query-vector", default="",
-                           help="path to a JSON array from the same model that "
-                                "produced the attached vectors")
+                           help="path to a JSON array, if you made the vector "
+                                "elsewhere")
+    addressed.add_argument("--backend", default="ollama")
+    addressed.add_argument("--host", default=DEFAULT_OLLAMA)
     addressed.add_argument("--limit", type=int, default=5)
     common(addressed)
     addressed.set_defaults(func=cmd_address)
+
+    embedded = inner.add_parser(
+        "embed", help="embed an index's views with a model on this machine")
+    embedded.add_argument("archive")
+    embedded.add_argument("--scheme", default="changepoint-v1",
+                          choices=sorted(SCHEMES))
+    embedded.add_argument("--model", default="nomic-embed-text")
+    embedded.add_argument("--backend", default="ollama")
+    embedded.add_argument("--host", default=DEFAULT_OLLAMA)
+    embedded.add_argument("--limit", type=int, default=0,
+                          help="0 embeds every eligible segment; a limit samples "
+                               "evenly across the record rather than taking its "
+                               "opening")
+    embedded.add_argument("--batch", type=int, default=64)
+    embedded.add_argument("--chars", type=int, default=6000)
+    embedded.add_argument("--min-bytes", type=int, default=40)
+    common(embedded)
+    embedded.set_defaults(func=cmd_embed)
+
+    listed = inner.add_parser("models", help="what the local backend holds")
+    listed.add_argument("--backend", default="ollama")
+    listed.add_argument("--host", default=DEFAULT_OLLAMA)
+    common(listed)
+    listed.set_defaults(func=cmd_models)

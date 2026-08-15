@@ -223,3 +223,129 @@ def test_a_missing_transcript_is_a_refusal_not_a_traceback(tmp_path, capsys):
     code, message = refused(capsys, "context", "capture", str(tmp_path / "m.anla"),
                             "--transcript", str(tmp_path / "nope.jsonl"))
     assert code == 2 and "not a file" in message
+
+
+# ---------------------------------------------------------------------------
+# the local embedding backend, through the same stub the backend tests use, so
+# `--host` is exercised end to end without needing Ollama installed
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def stub_backend():
+    import json as _json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    tags = {"models": [{"name": "nomic-embed-text:latest", "digest": "cd" * 32,
+                        "size": 274302450, "capabilities": ["embedding"],
+                        "details": {"embedding_length": 8}}]}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def _send(self, payload):
+            body = _json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            self._send(tags)
+
+        def do_POST(self):
+            asked = _json.loads(self.rfile.read(
+                int(self.headers.get("content-length", 0))) or b"{}")
+            # Deterministic and text-dependent, so a query that matches a view
+            # ranks above one that does not — enough to tell "the wiring works"
+            # from "everything scores the same".
+            out = []
+            for text in asked.get("input", []):
+                seed = [float(text.lower().count(c)) for c in "abcdefgh"]
+                out.append(seed or [0.0] * 8)
+            self._send({"embeddings": out})
+
+    httpd = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    httpd.shutdown()
+
+
+def test_embed_writes_vectors_with_the_model_pinned(tmp_path, transcript, capsys,
+                                                    stub_backend):
+    archive = tmp_path / "m.anla"
+    payload(capsys, "context", "capture", str(archive),
+            "--transcript", str(transcript))
+    payload(capsys, "context", "segment", str(archive), "--scheme", "structural-v1")
+
+    code, got = payload(capsys, "context", "embed", str(archive),
+                        "--scheme", "structural-v1", "--host", stub_backend)
+    assert code == 0
+    assert got["embedded"] > 0
+    identity = got["identity"]
+    assert identity["model"] == "ollama:nomic-embed-text:latest"
+    assert identity["dimensions"] == 8
+    assert identity["revision"] == "cd" * 16, (
+        "the model's content digest is the revision — the thing a hosted name "
+        "cannot give, and what makes a later query provably comparable")
+    assert identity["segmentation_scheme"] == "structural-v1"
+    assert identity["projection_version"] != "unstated"
+
+    from pathlib import Path as _P
+    assert _P(got["sidecar"]).suffix == ".anlavec"
+    assert archive.read_bytes()[:8] == archive.read_bytes()[:8]
+
+
+def test_address_embeds_the_query_with_the_corpus_model(tmp_path, transcript,
+                                                        capsys, stub_backend):
+    """`--embed` reads which model to use out of the sidecar rather than taking a
+    flag, so the query and the corpus cannot silently come from different ones."""
+    archive = tmp_path / "m.anla"
+    payload(capsys, "context", "capture", str(archive),
+            "--transcript", str(transcript))
+    payload(capsys, "context", "segment", str(archive), "--scheme", "structural-v1")
+    payload(capsys, "context", "embed", str(archive), "--scheme", "structural-v1",
+            "--host", stub_backend)
+
+    code, got = payload(capsys, "context", "address", str(archive), "gear table",
+                        "--scheme", "structural-v1", "--embed",
+                        "--host", stub_backend)
+    assert code == 0
+    assert "semantic" in got["channel"] and "nomic-embed-text" in got["channel"]
+    assert got["incomparable"] is None
+    assert got["hits"] and all(h["digest_verified"] for h in got["hits"])
+
+
+def test_address_refuses_a_corpus_from_a_model_that_has_changed(
+        tmp_path, transcript, capsys, stub_backend):
+    """The whole point of pinning the digest.
+
+    The sidecar is rewritten with a different revision, as a re-pull of the same
+    model name would produce. Same name, same width — and the comparison must
+    still refuse, because the weights are not the same bytes.
+    """
+    import json as _json
+    from pathlib import Path as _P
+    archive = tmp_path / "m.anla"
+    payload(capsys, "context", "capture", str(archive),
+            "--transcript", str(transcript))
+    payload(capsys, "context", "segment", str(archive), "--scheme", "structural-v1")
+    code, got = payload(capsys, "context", "embed", str(archive),
+                        "--scheme", "structural-v1", "--host", stub_backend)
+
+    sidecar = _P(got["sidecar"])
+    raw = sidecar.read_bytes()
+    newline = bytes([0x0A])
+    split = raw.find(newline)
+    header = _json.loads(raw[:split].decode("utf-8"))
+    header["identity"]["revision"] = "ff" * 16       # as if the model was re-pulled
+    sidecar.write_bytes(_json.dumps(header, ensure_ascii=False).encode("utf-8")
+                        + newline + raw[split + 1:])
+
+    code, refused_out = payload(capsys, "context", "address", str(archive),
+                                "gear table", "--scheme", "structural-v1",
+                                "--embed", "--host", stub_backend)
+    assert "INCOMPARABLE" in (refused_out["incomparable"] or "")
+    assert "revision" in refused_out["incomparable"]

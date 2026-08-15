@@ -90,6 +90,9 @@ def main() -> int:
                         help="segments embedded per scheme")
     parser.add_argument("--model", default="text-embedding-3-small")
     parser.add_argument("--dimensions", type=int, default=768)
+    parser.add_argument("--backend", default="openai", choices=("openai", "ollama"),
+                        help="openai needs a key; ollama runs on this machine")
+    parser.add_argument("--host", default="http://127.0.0.1:11434")
     parser.add_argument("--schemes", default="",
                         help="comma-separated subset, for re-running one row")
     parser.add_argument("--merge", action="store_true",
@@ -98,8 +101,20 @@ def main() -> int:
                         default=pathlib.Path("bench/segment_retrieval.json"))
     args = parser.parse_args()
 
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise SystemExit("OPENAI_API_KEY is not set")
+    # Two backends on identical ground: same corpus digest, same twelve labelled
+    # queries, same schemes. That is the only way the comparison means anything —
+    # and it is the comparison that decides whether the local model is a real
+    # replacement or a convenient one.
+    local = None
+    if args.backend == "ollama":
+        from anla1.backends import backend_for
+        local = backend_for("ollama", host=args.host)
+        identity = local.identity(args.model)
+        args.model, args.dimensions = identity.model, identity.dimensions
+        print(f"backend: {identity.model} @ {identity.dimensions}d, "
+              f"revision {identity.revision[:16]}")
+    elif not os.environ.get("OPENAI_API_KEY"):
+        raise SystemExit("OPENAI_API_KEY is not set (or pass --backend ollama)")
     from openai import OpenAI
     # A 429 killed this run after three of four schemes, twenty minutes and about
     # 15,000 embeddings in — and the harness had no retry, which is the same defect
@@ -107,7 +122,7 @@ def main() -> int:
     # to here. The timeout is short for the same reason it is short there: a client
     # retrying at the 600-second default sits at zero CPU for half an hour and looks
     # exactly like a hang.
-    client = OpenAI(timeout=60.0, max_retries=8)
+    client = None if local is not None else OpenAI(timeout=60.0, max_retries=8)
 
     data = args.transcript.read_bytes()
     data = data[:data.rfind(b"\n") + 1]
@@ -121,6 +136,15 @@ def main() -> int:
     print(f"{len(turns):,} turns, corpus digest {digest[:16]}\n")
 
     def embed(texts: list[str]) -> list[list[float]]:
+        if local is not None:
+            model = args.model.split(":", 1)[1]
+            out = []
+            for i in range(0, len(texts), 64):
+                out.extend(local.embed([t[:6000] or " " for t in texts[i:i + 64]],
+                                       model))
+                print(f"    embedded {min(i + 64, len(texts))}/{len(texts)}",
+                      file=sys.stderr)
+            return out
         out = []
         for i in range(0, len(texts), 128):
             batch = [t[:6000] or " " for t in texts[i:i + 128]]
