@@ -1272,7 +1272,9 @@ def context_segment_export(archive: str, scheme: str = "changepoint-v1",
 @_guard
 def context_address(archive: str, query: str = "", scheme: str = "changepoint-v1",
                     query_vector: list[float] | None = None, limit: int = 5,
-                    model: str = "", revision: str = "unstated") -> dict:
+                    model: str = "", revision: str = "unstated",
+                    embed: bool = True, backend: str = "ollama",
+                    host: str = DEFAULT_OLLAMA) -> dict:
     """Semantic address → the exact bytes of the authoritative turn.
 
     This is the whole of S1 in one call: **Remember → Index → Retrieve → Expand
@@ -1297,10 +1299,45 @@ def context_address(archive: str, query: str = "", scheme: str = "changepoint-v1
     vectors_file = target.with_suffix(f".vectors-{scheme}.anlavec")
     corpus = read_vectors(vectors_file) if vectors_file.exists() else None
 
-    channel, incomparable = "lexical — no vectors attached for this scheme", None
+    # Two different facts, and the first version of this reported one as the other:
+    # "no vectors attached for this scheme" was the default channel string, printed
+    # whenever the caller passed no vector — including when the corpus was fully
+    # embedded. Found by using it: this conversation had 14,000 vectors attached and
+    # every query came back saying there were none.
+    if corpus is None:
+        channel = "lexical — no vectors are attached for this scheme"
+    else:
+        channel = (f"lexical — {len(corpus):,} segments carry a vector, but no query "
+                   f"vector was supplied and embed=False")
+    incomparable = None
     ranked: list[tuple[str, float]] = []
+
+    # Embed the question here rather than making the caller do it. Without this an
+    # agent over MCP cannot reach the semantic channel at all: it would have to run
+    # the same model itself and pass the vector in, which is the one part of the
+    # loop this server is best placed to do. The model is read from the sidecar, so
+    # query and corpus cannot come from different ones.
+    embedded_identity = None
+    if corpus is not None and embed and not query_vector and query:
+        stored = EmbeddingIdentity.of(corpus.identity)
+        name = stored.model.split(":", 1)[1] if ":" in stored.model else stored.model
+        try:
+            engine = backend_for(backend, host=host)
+            # The backend's own identity, not a string rebuilt from the model name.
+            # Building it by hand dropped the backend prefix — `nomic-embed-text`
+            # against the stored `ollama:nomic-embed-text` — and the comparison
+            # correctly refused a corpus that was in fact the same one. The check
+            # was right and the thing it was handed was wrong.
+            embedded_identity = engine.identity(
+                name, projection_version=index.projection_version,
+                segmentation_scheme=scheme)
+            query_vector = engine.embed([query], name)[0]
+        except Exception as unreachable:                          # noqa: BLE001
+            channel = (f"lexical — could not embed the question ({unreachable}); "
+                       f"pass query_vector, or start the backend")
+
     if query_vector and corpus:
-        asked = EmbeddingIdentity(
+        asked = embedded_identity or EmbeddingIdentity(
             model=model or str(corpus.header.get("model") or "unstated"),
             dimensions=len(query_vector), revision=revision,
             projection_version=index.projection_version, segmentation_scheme=scheme)
