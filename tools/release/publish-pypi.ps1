@@ -1,0 +1,142 @@
+# Publish the built wheel and sdist to PyPI.
+#
+#   powershell -ExecutionPolicy Bypass -File tools\release\publish-pypi.ps1
+#
+# Why a script rather than `twine upload`: twine's own password prompt is hidden,
+# so a right-click paste gives no sign of whether anything arrived, and a token is
+# ninety characters of base64 that nobody can retype. This asks for it in a normal
+# prompt where paste works and shows a masked confirmation, then hands it to twine
+# through the environment of this process only.
+#
+# The token is never written to disk, never passed as a command-line argument
+# (which would put it in the process list), and the variable is cleared at the end.
+# `Read-Host` input does not enter PowerShell history.
+
+$ErrorActionPreference = "Stop"
+$repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$dist = Join-Path $repo "dist-release"
+
+Write-Host ""
+Write-Host "  Publish anla to PyPI" -ForegroundColor Cyan
+Write-Host "  --------------------"
+
+# --- 1. the artefacts, and that they are the ones that were verified -----------
+
+$files = @(
+    (Join-Path $dist "anla-0.1.0-py3-none-any.whl"),
+    (Join-Path $dist "anla-0.1.0.tar.gz")
+)
+foreach ($f in $files) {
+    if (-not (Test-Path $f)) {
+        Write-Host "  missing: $f" -ForegroundColor Red
+        Write-Host "  rebuild with:  cd python; python -m build --outdir ..\dist-release"
+        exit 1
+    }
+}
+
+# Checked against the manifest that was written when these were verified, so an
+# accidental rebuild between then and now cannot be published unnoticed.
+$sums = Join-Path $dist "SHA256SUMS"
+if (Test-Path $sums) {
+    $expected = @{}
+    Get-Content $sums | ForEach-Object {
+        $parts = $_ -split '\s+\*?', 2
+        if ($parts.Count -eq 2) { $expected[$parts[1].Trim()] = $parts[0].Trim() }
+    }
+    foreach ($f in $files) {
+        $name = Split-Path -Leaf $f
+        $have = (Get-FileHash -Algorithm SHA256 $f).Hash.ToLower()
+        if ($expected.ContainsKey($name) -and $expected[$name] -ne $have) {
+            Write-Host "  $name does not match SHA256SUMS." -ForegroundColor Red
+            Write-Host "  These are not the files that were verified. Stopping."
+            exit 1
+        }
+    }
+    Write-Host "  checksums match SHA256SUMS" -ForegroundColor Green
+}
+
+Write-Host "  twine check..." -NoNewline
+$check = & python -m twine check $files 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host " FAILED" -ForegroundColor Red
+    $check | Select-Object -Last 5
+    exit 1
+}
+Write-Host " passed" -ForegroundColor Green
+
+# --- 2. the token -------------------------------------------------------------
+
+Write-Host ""
+Write-Host "  Get a token at https://pypi.org/manage/account/token/"
+Write-Host "  First release of this name: scope must be " -NoNewline
+Write-Host "Entire account" -ForegroundColor Yellow
+Write-Host "  (a project-scoped token needs the project to exist already)."
+Write-Host ""
+Write-Host "  Paste it below -- right-click pastes in this window." -ForegroundColor Cyan
+Write-Host ""
+
+$token = Read-Host "  token"
+$token = $token.Trim()
+
+if ([string]::IsNullOrWhiteSpace($token)) {
+    Write-Host "  nothing pasted." -ForegroundColor Red
+    exit 1
+}
+if (-not $token.StartsWith("pypi-")) {
+    # Caught here rather than by a 403 forty seconds later, and it is the usual
+    # mistake: an account password where an API token belongs.
+    Write-Host "  that does not look like a PyPI token -- they begin with 'pypi-'." -ForegroundColor Red
+    Write-Host "  (a username and password will not work; PyPI requires a token)"
+    exit 1
+}
+
+$masked = $token.Substring(0, 9) + ("." * 12) + $token.Substring($token.Length - 6)
+Write-Host ""
+Write-Host "  got $($token.Length) characters: $masked"
+$ok = Read-Host "  upload anla 0.1.0 to PyPI with this token? (yes/no)"
+if ($ok -ne "yes") {
+    Write-Host "  stopped, nothing uploaded."
+    Remove-Variable token
+    exit 0
+}
+
+# --- 3. upload ----------------------------------------------------------------
+
+Write-Host ""
+$env:TWINE_USERNAME = "__token__"
+$env:TWINE_PASSWORD = $token
+try {
+    & python -m twine upload --non-interactive $files
+    $code = $LASTEXITCODE
+} finally {
+    # This process only; nothing was written anywhere.
+    $env:TWINE_PASSWORD = $null
+    $env:TWINE_USERNAME = $null
+    Remove-Variable token -ErrorAction SilentlyContinue
+}
+
+if ($code -ne 0) {
+    Write-Host ""
+    Write-Host "  upload failed with exit $code." -ForegroundColor Red
+    Write-Host "  403 usually means the token is wrong or its scope is too narrow."
+    Write-Host "  400 'File already exists' means this version is taken -- PyPI never"
+    Write-Host "  lets a version number be reused, so the fix is to bump the version."
+    exit $code
+}
+
+# --- 4. confirm it is actually there ------------------------------------------
+
+Write-Host ""
+Write-Host "  confirming on pypi.org..." -NoNewline
+Start-Sleep -Seconds 5
+try {
+    $meta = Invoke-RestMethod -Uri "https://pypi.org/pypi/anla/json" -TimeoutSec 30
+    Write-Host " anla $($meta.info.version) is live" -ForegroundColor Green
+    Write-Host "  https://pypi.org/project/anla/"
+    Write-Host ""
+    Write-Host "  a stranger can now run:  pip install anla"
+} catch {
+    Write-Host " not visible yet" -ForegroundColor Yellow
+    Write-Host "  the index can lag a minute; check https://pypi.org/project/anla/"
+}
+Write-Host ""

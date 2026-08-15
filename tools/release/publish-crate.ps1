@@ -1,0 +1,116 @@
+# Publish the anla1 crate to crates.io.
+#
+#   powershell -ExecutionPolicy Bypass -File tools\release\publish-crate.ps1
+#
+# Why a script rather than `cargo login`: `cargo login` prompts with the input
+# hidden, so a right-click paste gives no sign of whether anything arrived — and
+# passing the token as a command-line argument instead would put it in the process
+# list and in shell history. This asks for it in a normal prompt where paste works,
+# shows a masked confirmation, and hands it to cargo through the environment of
+# this process only.
+#
+# CARGO_REGISTRY_TOKEN is read by `cargo publish` directly, so `cargo login` is not
+# used at all and nothing is written to ~/.cargo/credentials.toml.
+
+$ErrorActionPreference = "Stop"
+$repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$rust = Join-Path $repo "rust"
+
+Write-Host ""
+Write-Host "  Publish anla1 to crates.io" -ForegroundColor Cyan
+Write-Host "  --------------------------"
+
+# --- 1. does it package, and is the tree clean --------------------------------
+
+Push-Location $rust
+try {
+    Write-Host "  cargo publish --dry-run..." -NoNewline
+    $dry = & cargo publish --dry-run 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host " FAILED" -ForegroundColor Red
+        $dry | Select-Object -Last 12
+        Write-Host ""
+        Write-Host "  If it complains about uncommitted changes, commit them first --"
+        Write-Host "  a published crate should correspond to a commit that exists."
+        exit 1
+    }
+    Write-Host " passed" -ForegroundColor Green
+    ($dry | Select-String "Packaged" | Select-Object -First 1) -replace '^\s+', '  '
+
+    # --- 2. the token ---------------------------------------------------------
+
+    Write-Host ""
+    Write-Host "  Get a token at https://crates.io/settings/tokens"
+    Write-Host "  Scope: " -NoNewline
+    Write-Host "publish-new" -ForegroundColor Yellow -NoNewline
+    Write-Host " (this crate does not exist yet)."
+    Write-Host ""
+    Write-Host "  Paste it below -- right-click pastes in this window." -ForegroundColor Cyan
+    Write-Host ""
+
+    $token = Read-Host "  token"
+    $token = $token.Trim()
+
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        Write-Host "  nothing pasted." -ForegroundColor Red
+        exit 1
+    }
+    if ($token.Length -lt 20) {
+        Write-Host "  that is too short to be a crates.io token." -ForegroundColor Red
+        exit 1
+    }
+
+    $masked = $token.Substring(0, 4) + ("." * 12) + $token.Substring($token.Length - 4)
+    Write-Host ""
+    Write-Host "  got $($token.Length) characters: $masked"
+    Write-Host ""
+    Write-Host "  crates.io is permanent: a published version can be yanked but never" -ForegroundColor Yellow
+    Write-Host "  deleted, and 0.1.0 can never be used again for this crate."
+    $ok = Read-Host "  publish anla1 0.1.0? (yes/no)"
+    if ($ok -ne "yes") {
+        Write-Host "  stopped, nothing published."
+        Remove-Variable token
+        exit 0
+    }
+
+    # --- 3. publish -----------------------------------------------------------
+
+    Write-Host ""
+    $env:CARGO_REGISTRY_TOKEN = $token
+    try {
+        & cargo publish
+        $code = $LASTEXITCODE
+    } finally {
+        $env:CARGO_REGISTRY_TOKEN = $null
+        Remove-Variable token -ErrorAction SilentlyContinue
+    }
+
+    if ($code -ne 0) {
+        Write-Host ""
+        Write-Host "  publish failed with exit $code." -ForegroundColor Red
+        Write-Host "  403 means the token is wrong or lacks the publish-new scope."
+        Write-Host "  'crate version is already uploaded' means 0.1.0 is taken and the"
+        Write-Host "  fix is to bump the version -- crates.io never reuses one."
+        exit $code
+    }
+} finally {
+    Pop-Location
+}
+
+# --- 4. confirm it is actually there ------------------------------------------
+
+Write-Host ""
+Write-Host "  confirming on crates.io..." -NoNewline
+Start-Sleep -Seconds 8
+try {
+    $headers = @{ "User-Agent" = "anla-release (kakon77777@gmail.com)" }
+    $meta = Invoke-RestMethod -Uri "https://crates.io/api/v1/crates/anla1" -Headers $headers -TimeoutSec 30
+    Write-Host " anla1 $($meta.crate.max_version) is live" -ForegroundColor Green
+    Write-Host "  https://crates.io/crates/anla1"
+    Write-Host ""
+    Write-Host "  a stranger can now run:  cargo install anla1"
+} catch {
+    Write-Host " not visible yet" -ForegroundColor Yellow
+    Write-Host "  the index can lag a minute; check https://crates.io/crates/anla1"
+}
+Write-Host ""
