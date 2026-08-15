@@ -17,14 +17,14 @@ $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $dist = Join-Path $repo "dist-release"
 
 Write-Host ""
-Write-Host "  Publish anla to PyPI" -ForegroundColor Cyan
-Write-Host "  --------------------"
+Write-Host "  Publish anla-archive to PyPI" -ForegroundColor Cyan
+Write-Host "  ----------------------------"
 
 # --- 1. the artefacts, and that they are the ones that were verified -----------
 
 $files = @(
-    (Join-Path $dist "anla-0.1.0-py3-none-any.whl"),
-    (Join-Path $dist "anla-0.1.0.tar.gz")
+    (Join-Path $dist "anla_archive-0.1.0-py3-none-any.whl"),
+    (Join-Path $dist "anla_archive-0.1.0.tar.gz")
 )
 foreach ($f in $files) {
     if (-not (Test-Path $f)) {
@@ -74,6 +74,9 @@ Write-Host " passed" -ForegroundColor Green
 # --- 2. the token -------------------------------------------------------------
 
 Write-Host ""
+Write-Host "  The distribution is anla-archive; the import packages stay anla/anla1."
+Write-Host "  ('anla' itself is refused: too similar to ania/anta/anda/anna/nala.)"
+Write-Host ""
 Write-Host "  Get a token at https://pypi.org/manage/account/token/"
 Write-Host "  First release of this name: scope must be " -NoNewline
 Write-Host "Entire account" -ForegroundColor Yellow
@@ -100,7 +103,7 @@ if (-not $token.StartsWith("pypi-")) {
 $masked = $token.Substring(0, 9) + ("." * 12) + $token.Substring($token.Length - 6)
 Write-Host ""
 Write-Host "  got $($token.Length) characters: $masked"
-$ok = Read-Host "  upload anla 0.1.0 to PyPI with this token? (yes/no)"
+$ok = Read-Host "  upload anla-archive 0.1.0 to PyPI with this token? (yes/no)"
 if ($ok -ne "yes") {
     Write-Host "  stopped, nothing uploaded."
     Remove-Variable token
@@ -158,13 +161,13 @@ Write-Host ""
 Write-Host "  confirming on pypi.org..." -NoNewline
 Start-Sleep -Seconds 5
 try {
-    $meta = Invoke-RestMethod -Uri "https://pypi.org/pypi/anla/json" -TimeoutSec 30
-    Write-Host " anla $($meta.info.version) is live" -ForegroundColor Green
-    Write-Host "  https://pypi.org/project/anla/"
+    $meta = Invoke-RestMethod -Uri "https://pypi.org/pypi/anla-archive/json" -TimeoutSec 30
+    Write-Host " anla-archive $($meta.info.version) is live" -ForegroundColor Green
+    Write-Host "  https://pypi.org/project/anla-archive/"
     Write-Host ""
-    Write-Host "  a stranger can now run:  pip install anla"
+    Write-Host "  a stranger can now run:  pip install anla-archive"
 } catch {
     Write-Host " not visible yet" -ForegroundColor Yellow
-    Write-Host "  the index can lag a minute; check https://pypi.org/project/anla/"
+    Write-Host "  the index can lag a minute; check https://pypi.org/project/anla-archive/"
 }
 Write-Host ""

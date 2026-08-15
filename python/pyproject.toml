@@ -3,7 +3,18 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "anla"
+# The *distribution* name, which is only what `pip install` types. The import
+# packages stay `anla` and `anla1` and the commands stay `anla` and `anla1` — those
+# are set by [tool.setuptools.packages.find] and [project.scripts] below, and PyPI
+# has no say in them.
+#
+# It is not `anla` because PyPI refuses that: "The name 'anla' is too similar to an
+# existing project." Its anti-squatting check rejects names close to existing ones,
+# and `ania`, `anta`, `anda`, `anna` and `nala` are all one character away. A
+# four-letter name was never going to clear that net. Worth knowing: querying
+# /pypi/<name>/json for a 404 does NOT establish that a name is usable — it only
+# says nothing holds that exact string.
+name = "anla-archive"
 version = "0.1.0"
 description = "Reference implementation of the Agent-Native Lossless Archive — readable, dependency-light, and slower than the Rust writer by design"
 readme = "README.md"

@@ -19,8 +19,16 @@ by a conformance suite and a differential fuzzer.
 ## Install
 
 ```bash
-pip install anla                 # reader, writer, verifier, both CLIs
-pip install "anla[speed,zstd]"   # the BLAKE3 and Zstandard fast paths
+pip install anla-archive                  # reader, writer, verifier, both CLIs
+pip install "anla-archive[speed,zstd]"    # the BLAKE3 and Zstandard fast paths
+```
+
+The distribution is `anla-archive`; the import packages and the commands are `anla`
+and `anla1`. PyPI refuses the bare name — it is one character from several existing
+projects — and the two names are independent anyway.
+
+```python
+import anla, anla1          # after pip install anla-archive
 ```
 
 Python 3.10+. No required dependencies: `blake3` and `zstandard` are optional, and
