@@ -230,11 +230,16 @@ fn pack_command(command: &str, path: &str, args: &[String])
         ))
 }
 
+/// Kept next to the dispatch below, because the version that lived inline had gone
+/// stale: it listed five commands while `pack` and `append` also worked.
+const USAGE: &str =
+    "usage: anla1-rs <pack|append|verify|list|snapshots|extract|selftest> <path>";
+
 fn run(args: &[String]) -> std::result::Result<String, Error> {
     let command = args
         .first()
         .map(String::as_str)
-        .ok_or_else(|| Error::new(Kind::InvalidInput, "usage: anla1-rs <verify|list|snapshots|extract|selftest> <archive>"))?;
+        .ok_or_else(|| Error::new(Kind::InvalidInput, USAGE))?;
 
     if command == "selftest" {
         return Ok(selftest());
@@ -249,6 +254,24 @@ fn run(args: &[String]) -> std::result::Result<String, Error> {
     // access-denied rather than the is-a-directory you would expect to see.
     if command == "pack" || command == "append" {
         return pack_command(command, path, &args[2..]);
+    }
+    // Read commands take an archive and nothing else. Until now they simply never
+    // looked at the rest of argv, so `anla1-rs extract archive.anla --to somewhere`
+    // ran and reported success while writing nothing — the caller's flag silently
+    // discarded. That is the same shape as the `--chunking anla-cdc-1` defect the
+    // inspector found in July: an option this program does not understand must be
+    // an error, not a preference. That fix was applied to the two flags that had
+    // just bitten, and never generalised; this is the general case.
+    if let Some(stray) = args[2..].iter().find(|a| *a != "--json") {
+        return Err(Error::new(
+            Kind::InvalidInput,
+            format!(
+                "unknown option for `{command}`: {stray}. A read command takes an \
+archive and nothing else. Note that `extract` here decodes and hashes rather than \
+writing files -- it exists for the cross-implementation comparison. To restore a \
+tree, use the Python CLI: `anla1 extract ARCHIVE --to DIR`."
+            ),
+        ));
     }
     let data = read_input(path)?;
 

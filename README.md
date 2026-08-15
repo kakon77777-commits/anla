@@ -108,10 +108,14 @@ still open. The rule has been met; the judgement about whether the design is rig
 is a different judgement and has not been made.
 
 ```bash
-cd rust && cargo build --release
-./target/release/anla1-rs pack   ../my-project -o project.anla --codec store
-./target/release/anla1-rs verify project.anla
+cargo install anla1
+anla1-rs pack   ./my-project -o project.anla --chunking cdc
+anla1-rs verify project.anla
 ```
+
+`anla1-rs` is the reader and writer used for the cross-implementation comparison; its
+`extract` decodes and hashes rather than writing files. To restore a tree, use the
+Python CLI's `anla1 extract ARCHIVE --to DIR`.
 
 ## A second thing this turned out to be: an agent's own memory
 

@@ -99,8 +99,8 @@ try {
 
     Write-Host ""
     Write-Host "  crates.io is permanent: a published version can be yanked but never" -ForegroundColor Yellow
-    Write-Host "  deleted, and 0.1.0 can never be used again for this crate."
-    $ok = Read-Host "  publish anla1 0.1.0? (yes/no)"
+    Write-Host "  deleted, and 0.1.1 can never be used again for this crate."
+    $ok = Read-Host "  publish anla1 0.1.1? (yes/no)"
     if ($ok -ne "yes") {
         Write-Host "  stopped, nothing published."
         Remove-Variable token

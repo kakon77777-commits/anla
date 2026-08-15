@@ -1,6 +1,6 @@
 [package]
 name = "anla1"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "An independent reader and writer for ANLA 1.0 (draft), written against SPEC-1.0-DRAFT.md — byte-identical to the Python implementation it shares no code with"
 license = "Apache-2.0"
