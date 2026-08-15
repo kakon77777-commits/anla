@@ -24,18 +24,31 @@ Write-Host "  --------------------------"
 
 Push-Location $rust
 try {
-    Write-Host "  cargo publish --dry-run..." -NoNewline
-    $dry = & cargo publish --dry-run 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host " FAILED" -ForegroundColor Red
-        $dry | Select-Object -Last 12
+    Write-Host "  cargo publish --dry-run..."
+    # Not `2>&1` into a variable. In Windows PowerShell 5.1 that wraps every stderr
+    # line from a native program in an ErrorRecord, and cargo writes its ordinary
+    # progress ("Updating crates.io index") to stderr — so with
+    # $ErrorActionPreference = "Stop" the script died on a dry run that had
+    # succeeded. The exit code is the thing to read; the output goes to a file so it
+    # can still be quoted back on failure.
+    $log = Join-Path $env:TEMP "anla-cargo-dryrun.log"
+    $prior = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & cargo publish --dry-run 2>$log | Out-Null
+    $dryCode = $LASTEXITCODE
+    $ErrorActionPreference = $prior
+    if ($dryCode -ne 0) {
+        Write-Host "  FAILED" -ForegroundColor Red
+        Get-Content $log -Tail 12 -ErrorAction SilentlyContinue
         Write-Host ""
         Write-Host "  If it complains about uncommitted changes, commit them first --"
         Write-Host "  a published crate should correspond to a commit that exists."
         exit 1
     }
-    Write-Host " passed" -ForegroundColor Green
-    ($dry | Select-String "Packaged" | Select-Object -First 1) -replace '^\s+', '  '
+    Write-Host "  passed" -ForegroundColor Green
+    $packaged = Get-Content $log -ErrorAction SilentlyContinue |
+                Select-String "Packaged" | Select-Object -First 1
+    if ($packaged) { Write-Host ("  " + $packaged.ToString().Trim()) }
 
     # --- 2. the token ---------------------------------------------------------
 
@@ -78,8 +91,11 @@ try {
     Write-Host ""
     $env:CARGO_REGISTRY_TOKEN = $token
     try {
+        $prior = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
         & cargo publish
         $code = $LASTEXITCODE
+        $ErrorActionPreference = $prior
     } finally {
         $env:CARGO_REGISTRY_TOKEN = $null
         Remove-Variable token -ErrorAction SilentlyContinue

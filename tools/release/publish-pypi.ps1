@@ -56,10 +56,17 @@ if (Test-Path $sums) {
 }
 
 Write-Host "  twine check..." -NoNewline
-$check = & python -m twine check $files 2>&1
+# stderr to a file rather than `2>&1` into a variable: PowerShell 5.1 turns a native
+# program's stderr into ErrorRecords, which with $ErrorActionPreference = "Stop"
+# aborts on output that was never an error. Read the exit code instead.
+$checkLog = Join-Path $env:TEMP "anla-twine-check.log"
+$prior = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& python -m twine check $files 2>$checkLog | Out-Null
+$ErrorActionPreference = $prior
 if ($LASTEXITCODE -ne 0) {
     Write-Host " FAILED" -ForegroundColor Red
-    $check | Select-Object -Last 5
+    Get-Content $checkLog -Tail 5 -ErrorAction SilentlyContinue
     exit 1
 }
 Write-Host " passed" -ForegroundColor Green
@@ -106,8 +113,11 @@ Write-Host ""
 $env:TWINE_USERNAME = "__token__"
 $env:TWINE_PASSWORD = $token
 try {
+    $prior = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & python -m twine upload --non-interactive $files
     $code = $LASTEXITCODE
+    $ErrorActionPreference = $prior
 } finally {
     # This process only; nothing was written anywhere.
     $env:TWINE_PASSWORD = $null
