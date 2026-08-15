@@ -104,9 +104,12 @@ try {
     if ($code -ne 0) {
         Write-Host ""
         Write-Host "  publish failed with exit $code." -ForegroundColor Red
-        Write-Host "  403 means the token is wrong or lacks the publish-new scope."
-        Write-Host "  'crate version is already uploaded' means 0.1.0 is taken and the"
-        Write-Host "  fix is to bump the version -- crates.io never reuses one."
+        Write-Host "  cargo prints the registry's own message above -- read that first."
+        Write-Host ""
+        Write-Host "  Common causes:"
+        Write-Host "    403  the token is wrong, or lacks the publish-new scope"
+        Write-Host "    403  the crates.io account has no verified email address"
+        Write-Host "    'already uploaded'  0.1.0 is taken; crates.io never reuses one"
         exit $code
     }
 } finally {

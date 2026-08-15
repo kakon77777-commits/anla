@@ -110,12 +110,18 @@ if ($ok -ne "yes") {
 # --- 3. upload ----------------------------------------------------------------
 
 Write-Host ""
+# Kept, not discarded. The first version of this printed a list of things the
+# failure *might* have been and threw away the sentence PyPI had actually sent —
+# which is the same mistake as publishing a number nobody can re-derive. `--verbose`
+# because twine's default failure line is often shorter than the server's reason.
+$uploadLog = Join-Path $env:TEMP "anla-twine-upload.log"
 $env:TWINE_USERNAME = "__token__"
 $env:TWINE_PASSWORD = $token
 try {
     $prior = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    & python -m twine upload --non-interactive $files
+    & python -m twine upload --non-interactive --verbose $files 2>&1 |
+        Tee-Object -FilePath $uploadLog
     $code = $LASTEXITCODE
     $ErrorActionPreference = $prior
 } finally {
@@ -127,10 +133,22 @@ try {
 
 if ($code -ne 0) {
     Write-Host ""
-    Write-Host "  upload failed with exit $code." -ForegroundColor Red
-    Write-Host "  403 usually means the token is wrong or its scope is too narrow."
-    Write-Host "  400 'File already exists' means this version is taken -- PyPI never"
-    Write-Host "  lets a version number be reused, so the fix is to bump the version."
+    Write-Host "  upload failed with exit $code. What PyPI actually said:" -ForegroundColor Red
+    Write-Host ""
+    $said = Get-Content $uploadLog -ErrorAction SilentlyContinue |
+            Where-Object { $_ -match "HTTPError|error|Error|refused|denied|403|400|401|429|Invalid|not allowed" } |
+            Select-Object -Last 8
+    if ($said) { $said | ForEach-Object { Write-Host "    $_" } }
+    else { Get-Content $uploadLog -Tail 10 -ErrorAction SilentlyContinue |
+           ForEach-Object { Write-Host "    $_" } }
+    Write-Host ""
+    Write-Host "  full log: $uploadLog"
+    Write-Host ""
+    Write-Host "  Common causes, in the order they actually happen:"
+    Write-Host "    401/403  the token is wrong, or its scope does not cover a NEW"
+    Write-Host "             project -- a first upload needs an 'Entire account' token"
+    Write-Host "    403      the account has no verified email address yet"
+    Write-Host "    400      that filename was already uploaded; PyPI never reuses one"
     exit $code
 }
 
