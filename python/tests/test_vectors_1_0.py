@@ -5,10 +5,11 @@ Two properties, and the second is the one that was missing:
 
 * the sidecar round-trips exactly (within float32) and refuses a corrupt or
   mislabelled file rather than reading garbage as vectors;
-* a search too large for the available backend **says so**. The pure-Python cosine
-  is 71 µs a pair, so 61,149 vectors is seventy-two minutes for one query — and an
-  agent that waits seventy-two minutes cannot tell a slow search from a hung one.
-  A refusal naming the fix is strictly better than an answer nobody receives.
+* a search projected to run past a stated time budget **says so**, and the
+  projection is arithmetic the reader can redo. That last part is not decoration:
+  the first version of this module defended its threshold with "73 minutes for one
+  query", which was 70.9 µs × 61,458 read as 4,357 s instead of **4.4 s**. The
+  threshold was wrong because nobody could multiply the number it rested on.
 """
 
 from __future__ import annotations
@@ -19,7 +20,8 @@ import random
 import pytest
 
 from anla1.vectors import (
-    MAGIC, PURE_PYTHON_LIMIT, VectorSet, read_vectors, write_vectors,
+    MAGIC, PURE_PYTHON_BUDGET_SECONDS, PURE_PYTHON_SECONDS_PER_ELEMENT, VectorSet,
+    pure_python_projection, read_vectors, write_vectors,
 )
 
 
@@ -87,28 +89,51 @@ def test_a_query_of_the_wrong_width_is_refused(tmp_path):
         loaded.search([0.1] * 4)
 
 
-def test_pure_python_refuses_a_corpus_it_cannot_search_in_time():
-    """The whole point of the file. Constructed rather than written to disk, so the
-    limit is drilled without producing a gigabyte of test fixture.
+def test_the_projection_is_arithmetic_anyone_can_check():
+    """The number the refusal is built on, stated so it can be disagreed with.
+
+    The first version of this module claimed the pure-Python search took 73 minutes
+    over 61,458 vectors. It takes about 4 seconds: 70.9 µs × 61,458 was read as
+    4,357 s instead of 4.4 s, and a refusal threshold was set to defend the wrong
+    figure. A constant nobody can multiply is a constant nobody can catch.
+    """
+    assert pure_python_projection(61_458, 768) == pytest.approx(11.3, rel=0.1)
+    assert pure_python_projection(8_000, 768) < 2.0, (
+        "the old 8,000-vector limit fired at about 1.5 s, which is not a hang")
+    # Linear in both arguments, so the message's arithmetic is the model's.
+    assert pure_python_projection(2000, 10) == pytest.approx(
+        2 * pure_python_projection(1000, 10))
+    assert pure_python_projection(1000, 20) == pytest.approx(
+        2 * pure_python_projection(1000, 10))
+
+
+def test_pure_python_refuses_only_past_the_stated_budget():
+    """Constructed rather than written to disk, so the budget is drilled without a
+    gigabyte of fixture.
 
     `data` is a plain list, so `hasattr(data, "shape")` is False and the NumPy path
     is not taken even where NumPy is installed — this asserts the fallback's own
     behaviour rather than whichever backend happens to be present.
     """
-    count = PURE_PYTHON_LIMIT + 1
-    fake = VectorSet(keys=[f"k{i}" for i in range(count)],
-                     data=[0.0] * (count * 4), width=4, header={})
+    width = 64
+    over = int(PURE_PYTHON_BUDGET_SECONDS
+               / (PURE_PYTHON_SECONDS_PER_ELEMENT * width)) + 1000
+    fake = VectorSet(keys=[f"k{i}" for i in range(over)],
+                     data=[0.0] * (over * width), width=width, header={})
     with pytest.raises(RuntimeError) as caught:
-        fake.search([0.1] * 4)
+        fake.search([0.1] * width)
     message = str(caught.value)
-    assert "numpy" in message and "minutes" in message
-    assert f"{count:,}" in message, "the refusal states the size that caused it"
+    assert "numpy" in message
+    assert f"{over:,}" in message, "the refusal states the size that caused it"
+    assert f"{PURE_PYTHON_BUDGET_SECONDS:.0f} s budget" in message, (
+        "the refusal states the budget it is comparing against")
 
 
-def test_just_under_the_limit_still_answers():
-    """The limit must be a limit, not a wall the tests never approach from below."""
+def test_just_under_the_budget_still_answers():
+    """The budget must be a budget, not a wall the tests never approach from below."""
     count = 64
     fake = VectorSet(keys=[f"k{i}" for i in range(count)],
                      data=[float(i % 7) for i in range(count * 4)], width=4,
                      header={})
+    assert pure_python_projection(count, 4) < PURE_PYTHON_BUDGET_SECONDS
     assert len(fake.search([1.0, 0.0, 0.0, 0.0], limit=3)) == 3

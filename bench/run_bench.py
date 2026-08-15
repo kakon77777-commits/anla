@@ -440,20 +440,37 @@ def scenario_throughput(work: Path) -> Result:
     binary = next((RUST_DIR / n for n in ("anla1-rs.exe", "anla1-rs")
                    if (RUST_DIR / n).exists()), None)
     if binary is not None:
+        # `cdc`, not `anla-cdc-1`. Neither CLI has ever accepted the profile's own
+        # name — Python refuses it outright and Rust used to *ignore* it and pick
+        # its default, which is **fixed** chunking. So every published
+        # `rust_pack_cdc` figure before this line changed was the Rust writer doing
+        # fixed chunking, compared against the Python writer doing CDC: the exact
+        # unfair comparison the comment thirty lines above warns about, in the row
+        # that comment is attached to.
+        #
+        # It surfaced only because the flag was changed from silently ignoring an
+        # unknown value to erroring on one, at which point this run stopped instead
+        # of quietly measuring the wrong thing — which is the argument for that
+        # change, arriving three weeks late.
         rust_target = work / "rust.anla"
         rates["rust_pack_cdc"] = round(megabytes / timed(
             lambda: subprocess.run(
                 [str(binary), "pack", str(source), "-o", str(rust_target),
-                 "--chunking", "anla-cdc-1", "--uuid", FIXED_UUID.hex(),
+                 "--chunking", "cdc", "--uuid", FIXED_UUID.hex(),
                  "--created-ns", "1"], check=True, capture_output=True)), 1)
 
+    # Computed, not written down. Both language versions of this note carried a
+    # hand-typed multiple and they had drifted apart from each other — one said
+    # sixteen times and the other twenty-two — while the measured ratio was neither.
+    factor = (f'{rates["rust_pack_cdc"] / rates["python_pack_cdc"]:.0f}'
+              if "rust_pack_cdc" in rates else "—")
     return Result(
         scenario="throughput",
         headline="64 MiB of incompressible data, packed and verified",
         note="MiB per second, on the machine that ran this. Content-defined chunking "
              "is the default because fixed chunking destroys deduplication — and in "
              "the Python writer it is also the slow path, by two orders of magnitude. "
-             "The Rust writer produces byte-identical archives at sixteen times the "
+             "The Rust writer produces byte-identical archives at {factor} times the "
              "rate, so this is an implementation number and not a format number. It "
              "is published because a project that measures only what it is good at is "
              "not measuring." + (
@@ -462,6 +479,9 @@ def scenario_throughput(work: Path) -> Result:
         inputs={"logical_bytes": 64 * 1024 * 1024, "files": 64},
         sizes={},
         detail={"mib_per_second": rates,
+                # Every language's note is rendered through these, so one measured
+                # value fills both and neither can drift from the other.
+                "note_values": {"factor": factor},
                 "hours_to_pack_one_tib": {
                     name: round(1024 * 1024 / rate / 3600, 2)
                     for name, rate in rates.items() if "pack" in name and rate}})

@@ -2,27 +2,32 @@
 """The vector plane, at the size one real conversation actually is.
 
 Written after measuring the thing it replaces, at full scale rather than by
-extrapolation. 61,458 vectors at 768 dimensions:
+extrapolation. 61,458 vectors at 768 dimensions, both formats written and read:
 
-    JSON array of decimals   978 MB   write 85.7 s   load 38.1 s
-    float32 + JSON header    192 MB   write 16.6 s   load  0.52 s   search 262 ms
+    JSON array of decimals   978 MB   write 85.7 s   load 24.3 s
+    float32 + JSON header    192 MB   write 16.6 s   load  0.10 s   search 152 ms
 
-and the search matters more than the size: a pure-Python cosine over that corpus
-takes **73 minutes for one query** — 70.9 µs per pair, measured, times 61,458. The
-loop closed at 6,000 segments and could not have closed at 61,458, which means the
-demonstration was quietly running on a tenth of the record and the design had a
-ceiling nobody had walked into yet.
-
-So the vector plane gets a format and a search:
+**5.1× smaller and it loads two orders of magnitude faster**, which is the whole
+case for the format: a JSON array of decimals is a gigabyte of text to parse before
+the first comparison.
 
 * **Format.** One JSON header line — identity, keys, width, dtype — then the raw
-  little-endian `float32` rows, loaded by `frombuffer` rather than by parsing a
-  gigabyte of decimal text.
+  little-endian `float32` rows, loaded by `frombuffer`.
 * **Search.** NumPy when it is installed, one matrix product; otherwise the pure
-  loop with a size limit and an error that says what to install. **Not** a silent
-  fallback that appears to hang: an agent given no answer for seventy minutes cannot
-  tell a slow search from a broken one, and that is the failure mode this file
-  exists to remove.
+  loop, which is projected from a measured per-element cost and refused when that
+  projection exceeds a stated budget.
+
+**A correction, because the first version of this file got it wrong by a factor of
+a thousand.** It said the pure-Python search was "73 minutes for one query" and
+refused above 8,000 vectors on that basis. The arithmetic was 70.9 µs × 61,458 read
+as 4,357 seconds; it is **4.4 seconds**. Under load the same corpus measures 186 µs
+a pair and **11 seconds** — slow, worth a warning, and nothing like a hang. The
+refusal at 8,000 vectors would have fired at **1.5 seconds**.
+
+So the limit is no longer a magic number defended by a wrong story. It is a time
+budget: project `count × width × PURE_PYTHON_SECONDS_PER_ELEMENT`, refuse only if
+that exceeds `PURE_PYTHON_BUDGET_SECONDS`, and put the projection in the message so
+the caller can judge it rather than take the threshold on trust.
 
 NumPy is optional on purpose. The preservation plane must never need it — this is
 the auxiliary plane, `D(P, I) = D(P, ∅)`, and a channel that cannot run says so
@@ -38,8 +43,9 @@ import pathlib
 import sys
 from typing import Iterable, Sequence
 
-__all__ = ["MAGIC", "PURE_PYTHON_LIMIT", "have_numpy", "write_vectors",
-           "read_vectors", "VectorSet"]
+__all__ = ["MAGIC", "PURE_PYTHON_BUDGET_SECONDS", "PURE_PYTHON_SECONDS_PER_ELEMENT",
+           "have_numpy", "pure_python_projection", "write_vectors", "read_vectors",
+           "VectorSet"]
 
 #: Imported here, at module import, and never inside a function.
 #:
@@ -61,14 +67,26 @@ except ImportError:                                             # pragma: no cov
 
 MAGIC = "anla:context:vectors:1"
 
-#: Above this many vectors, the pure-Python path refuses instead of running. 8,000
-#: pairs is about half a second per query; 61,458 is seventy-three minutes. The limit
-#: is where the answer stops arriving while the caller is still waiting for it.
-PURE_PYTHON_LIMIT = 8_000
+#: Measured, at width 768, on a loaded Windows host: 186 µs per pair ÷ 768 elements.
+#: Per *element* rather than per pair, because the cost scales with the width and a
+#: per-pair constant silently assumes one.
+PURE_PYTHON_SECONDS_PER_ELEMENT = 2.4e-7
+
+#: How long a search may take before the pure-Python path refuses instead of running.
+#: Thirty seconds is the point where a caller stops reading the answer as slow and
+#: starts reading it as broken. It is a *stated* budget: the refusal quotes its own
+#: projection, so a caller can disagree with the number rather than with a constant.
+PURE_PYTHON_BUDGET_SECONDS = 30.0
 
 
 def have_numpy() -> bool:
     return _np is not None
+
+
+def pure_python_projection(count: int, width: int) -> float:
+    """Seconds the pure-Python search is expected to take. Public, so a caller can
+    ask before committing to it rather than discovering it by waiting."""
+    return count * width * PURE_PYTHON_SECONDS_PER_ELEMENT
 
 
 class VectorSet:
@@ -132,13 +150,16 @@ class VectorSet:
             top = _np.argsort(-scores)[:limit]
             return [(self.keys[int(i)], float(scores[int(i)])) for i in top]
 
-        if len(self.keys) > PURE_PYTHON_LIMIT:
+        projected = pure_python_projection(len(self.keys), self.width)
+        if projected > PURE_PYTHON_BUDGET_SECONDS:
             raise RuntimeError(
-                f"{len(self.keys):,} vectors and no NumPy. The pure-Python search is "
-                f"~71 µs per pair, so this query would take about "
-                f"{len(self.keys) * 71e-6 / 60:.0f} minutes and would look like a "
-                f"hang rather than an answer. Install numpy, or search a corpus "
-                f"under {PURE_PYTHON_LIMIT:,} vectors.")
+                f"{len(self.keys):,} vectors × {self.width} without NumPy projects to "
+                f"about {projected:.0f} s for this one query, over the "
+                f"{PURE_PYTHON_BUDGET_SECONDS:.0f} s budget — long enough to read as "
+                f"a hang rather than an answer. Install numpy, or search a smaller "
+                f"corpus. The projection is "
+                f"{PURE_PYTHON_SECONDS_PER_ELEMENT * 1e9:.0f} ns per element, "
+                f"measured; disagree with it by measuring your own.")
         scored = []
         qn = math.sqrt(sum(x * x for x in centred_query))
         for i, key in enumerate(self.keys):

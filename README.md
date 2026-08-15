@@ -148,7 +148,7 @@ wrong**. Measured on this repository's own development transcript, 6,581 turns,
 | Preservation | digest **unchanged** through indexing, retrieval and expansion, across two coexisting schemes |
 | Expansion | every address resolved to digest-verified exact bytes of the authoritative turn |
 | Identity | a 768-wide corpus and a 64-wide query → `INCOMPARABLE: dimensions differs`, not a number |
-| Search | 61,458 vectors as `float32` = 192 MB, loaded in 0.52 s, ranked in 262 ms, whole call 3.7 s |
+| Search | 61,458 vectors as `float32` = 192 MB against 978 MB as JSON; loaded in 0.10 s against 24.3 s; ranked in 152 ms; **2.25 s median for a whole addressed query over MCP** |
 
 **Does the segmenting actually help?** Twelve labelled queries, ground truth located
 by an anchor string the retriever never sees, questions written to avoid the anchor —
@@ -268,7 +268,7 @@ archive.read('docs/readme.txt');
 python -m pytest python/tests -q
 ```
 
-804 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
+805 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
 without it. Everything runs on Linux, macOS and Windows in CI. Another 76
 assertions run in a browser on the [live test page](https://anla.evemisslab.com/demo/).
 

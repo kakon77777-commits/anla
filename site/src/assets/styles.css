@@ -423,3 +423,27 @@ h3 { font: 600 17px/1.35 var(--sans); margin: 0 0 6px; }
 }
 .bench-reading { margin: 0; padding-left: 1.1rem; display: grid; gap: 12px; }
 .bench-reading li { color: var(--ink-2); font-size: 0.95rem; line-height: 1.65; }
+
+/* the agent-memory page: a stat line, the winning row, and a wider table */
+/* `.feature p` is 0-1-1 and this was 0-1-0, so the headline numbers came out in
+   the card's secondary colour — the one thing on the card that must not. */
+.feature .ctx-stat, .ctx-stat { font: 500 1.35rem/1.45 var(--sans); color: var(--ink);
+  margin: 6px 0 10px; }
+.feature .ctx-stat.small, .ctx-stat.small { font-size: 1rem; color: var(--ink-2); }
+.ctx-stat b { font-weight: 650; }
+.ctx-table { margin: 18px 0 6px; font-size: 0.9rem; }
+.ctx-table td { vertical-align: top; line-height: 1.6; }
+.ctx-table tr.ctx-win td { color: var(--ink); font-weight: 550; }
+.codeblock { background: var(--paper-2); border: 1px solid var(--rule); border-radius: 8px;
+  padding: 16px 18px; overflow-x: auto; font: 13px/1.7 var(--mono); color: var(--ink-2); }
+@media (max-width: 720px) { .ctx-table { font-size: 0.82rem; } }
+/* A table wider than the phone scrolls inside its own box; the page never does.
+   The min-width on grid children is the load-bearing half: a grid item defaults to
+   min-width:auto, so it refuses to shrink below its content and a scroller inside
+   one clips nothing while the whole page grows instead. Measured on a 375px
+   viewport: 545px of horizontal overflow, all of it from one table inside a card. */
+.grid-2 > *, .grid-3 > * { min-width: 0; }
+.table-scroll { overflow-x: auto; max-width: 100%; margin: 18px 0 6px;
+  -webkit-overflow-scrolling: touch; }
+.table-scroll > table { margin: 0; }
+.table-scroll > table.ctx-table { min-width: 30rem; }

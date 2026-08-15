@@ -163,10 +163,10 @@ carrying a vector. Until vectors arrive they report `ABSENT` rather than substit
 word overlap under the same name.
 
 **Install NumPy for the search.** It is optional and the preservation plane never
-needs it, but the pure-Python cosine is 71 µs a pair: 61,458 vectors is 73 minutes
-for one query, which an agent cannot tell from a hang. Without NumPy the search
-refuses above 8,000 vectors and says what to install. With it, the same search is
-**262 ms**.
+needs it. Without it, 61,458 vectors at 768 dimensions is about **11 seconds** for
+one query — usable but slow; with it, **152 ms**. The pure-Python path refuses only
+when its projection passes a 30-second budget, and it quotes the projection so you
+can disagree with the estimate rather than with a constant.
 
 **The query needs a vector from the same model.** Embed the question with the model
 named above and pass it as `query_vector`; a query embedded by a different model is

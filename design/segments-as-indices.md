@@ -189,16 +189,23 @@ Three hazards found by running it, none of which the benchmark could have shown:
 
    | | size | write | load | search |
    |---|---|---|---|---|
-   | JSON array of decimals | 978 MB | 85.7 s | 38.1 s | — |
-   | `float32` behind a JSON header | **192 MB** | 16.6 s | **0.52 s** | **262 ms** |
+   | JSON array of decimals | 978 MB | 85.7 s | 24.3 s | — |
+   | `float32` behind a JSON header | **192 MB** | 16.6 s | **0.10 s** | **152 ms** |
 
-   And the search itself: pure-Python cosine is 70.9 µs a pair, so that corpus is
-   **73 minutes for one query** — which an agent cannot distinguish from a hang.
-   Without NumPy the search now **refuses** above 8,000 vectors and says what to
-   install, because a refusal naming the fix beats an answer nobody is still waiting
-   for. NumPy stays optional: the preservation plane must never need it, and a
-   channel that cannot run should say so rather than degrade into something
-   indistinguishable from working.
+   **5.1× smaller and two orders of magnitude faster to load.** NumPy stays
+   optional: the preservation plane must never need it, and the pure-Python search
+   is about **11 s** on that corpus — slow, but usable, and it refuses only when its
+   projection passes a stated 30-second budget.
+
+   **That last sentence is a correction.** The first version of this claimed the
+   pure-Python search was *73 minutes* and refused above 8,000 vectors on that
+   basis. The arithmetic was 70.9 µs × 61,458 read as 4,357 seconds when it is
+   **4.4 seconds** — wrong by a factor of a thousand, and the 8,000-vector refusal
+   would have fired at 1.5 seconds. It was caught by writing a harness that computes
+   the projection from a measured per-element cost instead of restating a number I
+   had multiplied in my head. **A constant nobody can re-derive is a constant nobody
+   can catch**, so the threshold is now a time budget and the refusal quotes its own
+   projection.
 
 ## On 相位
 

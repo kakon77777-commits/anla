@@ -75,7 +75,10 @@ from anla1.resonance import (  # noqa: E402
 from anla1.segment import (  # noqa: E402
     SCHEMES, SegmentIndex, build_index, digest_of, project_segment,
 )
-from anla1.vectors import have_numpy, read_vectors, write_vectors  # noqa: E402
+from anla1.vectors import (  # noqa: E402
+    PURE_PYTHON_BUDGET_SECONDS, have_numpy, pure_python_projection, read_vectors,
+    write_vectors,
+)
 from anla1.snapshot import (  # noqa: E402
     CODEC_STORE, CODEC_ZSTD, cdc_chunker, diff as snapshot_diff, extract_snapshot,
     list_snapshots, single_chunk, verify_archive, write_snapshot,
@@ -1010,8 +1013,10 @@ def context_attach_vectors(archive: str, vectors: str, model: str = "",
         "identity": identity.as_dict(),
         "identity_fingerprint": identity.fingerprint,
         "search_backend": "numpy" if have_numpy() else
-                          "pure python — refuses above 8,000 vectors rather than "
-                          "taking an hour per query; install numpy for more",
+                          (f"pure python — projected "
+                           f"{pure_python_projection(len(cleaned), width):.1f}s per "
+                           f"query for this corpus; refused past "
+                           f"{PURE_PYTHON_BUDGET_SECONDS:.0f}s, install numpy for more"),
         "plane": "auxiliary — a sidecar beside the archive, not a record inside it; "
                  "deleting this file discards the whole intelligence plane and the "
                  "archive's bytes are unchanged by construction",

@@ -31,7 +31,151 @@ STRINGS: dict[str, dict[str, str]] = {
         "nav_papers": "Papers",
         "nav_conformance": "Conformance",
         "nav_bench": "Numbers",
+        "nav_context": "Agent memory",
         "nav_repo": "Source",
+
+        # ---- the context / MCP page -------------------------------------
+        "ctx_kicker": "The second thing this turned out to be",
+        "ctx_h1": "An agent that remembers its own history, exactly",
+        "ctx_desc": "An archive that preserves bytes exactly and expands any part of "
+                    "itself on demand is also a description of what a model needs "
+                    "from its own context. The same package carries a context layer, "
+                    "reachable over MCP: remember losslessly, address semantically, "
+                    "and get the record itself back — not a summary of it.",
+        "ctx_loop_h": "The loop, and what each step has to hold up",
+        "ctx_loop_tool": "Tool",
+        "ctx_loop_claim": "The claim it has to hold up",
+        "ctx_loop_1": "Every byte of the transcript, or a refusal. A limit that "
+                      "would drop the front of a conversation is an error, not a "
+                      "quiet truncation.",
+        "ctx_loop_2": "An index family over the turns — and the archive is "
+                      "byte-identical before and after, which is checked rather "
+                      "than asserted.",
+        "ctx_loop_3": "The views to embed, with the identity that must come back "
+                      "with them, and a sample that names which part of the record "
+                      "it covered.",
+        "ctx_loop_4": "Vectors into the auxiliary plane: a sidecar beside the "
+                      "archive, never a record inside it.",
+        "ctx_loop_5": "A question in, (turn, start_byte, end_byte) out, with the "
+                      "turn's digest re-checked against what the index was built "
+                      "from.",
+        "ctx_idx_kicker": "The idea the design rests on",
+        "ctx_idx_h": "A segment is an index, never a stored fragment",
+        "ctx_idx_p": "From Neo.K's 同一性微積分: 切割 = 索引 — a cut adds a perspective "
+                     "and leaves the object whole. So a segment is (turn, "
+                     "start_byte, end_byte) in the auxiliary plane, several schemes "
+                     "coexist over one record, re-cutting rewrites nothing, and a "
+                     "segmenter is allowed to be wrong.",
+        "ctx_idx_a_h": "Ontological layer",
+        "ctx_idx_a_p": "The turn, stored whole in the preservation plane, untouched "
+                       "by any cutting. Its digest is the same before indexing, "
+                       "after two different schemes, and after every retrieval.",
+        "ctx_idx_b_h": "Presentation layer",
+        "ctx_idx_b_p": "Segments as raw byte offsets into that turn. A better "
+                       "segmenter later produces a new index family; the record is "
+                       "untouched, so choosing between schemes is a measurement "
+                       "rather than a migration.",
+        "ctx_m_kicker": "Measured on this repository's own development transcript",
+        "ctx_m_h": "What it costs and what it returns",
+        "ctx_m_desc": "Every figure below was produced by bench/context_bench.py "
+                      "into a JSON file this page is generated from, stamped with "
+                      "the revision and the corpus digest it was measured against.",
+        "ctx_m_record": "The record",
+        "ctx_m_index": "The index",
+        "ctx_m_vectors": "The vector plane",
+        "ctx_m_search": "The search",
+        "ctx_m_wire": "Over the wire",
+        "ctx_m_turns": "turns",
+        "ctx_m_lossless": "lossless — every byte of the transcript is in the archive",
+        "ctx_m_partial": "PARTIAL — the front of the transcript was dropped",
+        "ctx_m_segments": "segments",
+        "ctx_m_median": "median",
+        "ctx_m_coverage": "coverage",
+        "ctx_m_coverage_note": "no byte of any turn is unreachable through the "
+                               "index, and none is covered twice",
+        "ctx_m_unchanged": "preservation digest unchanged through indexing",
+        "ctx_m_changed": "PRESERVATION DIGEST CHANGED — the invariant is broken",
+        "ctx_m_json": "JSON array of decimals",
+        "ctx_m_binary": "float32 behind a JSON header",
+        "ctx_m_size": "size",
+        "ctx_m_load": "load",
+        # A whole phrase rather than a suffix: "5.1×" + "smaller" composes in
+        # English and doubles the multiplier in Chinese, where × already reads 倍.
+        "ctx_m_compare": "{smaller}× smaller · {faster}× faster to load",
+        "ctx_m_model": "Model",
+        "ctx_m_queries": "labelled queries",
+        "ctx_m_numpy": "with NumPy",
+        "ctx_m_pure": "pure Python",
+        "ctx_m_pure_note": "NumPy is optional and the preservation plane never needs "
+                           "it. The pure-Python path refuses only when its own "
+                           "projection passes a stated 30-second budget, and it "
+                           "quotes the projection so you can disagree with the "
+                           "estimate rather than with a constant.",
+        "ctx_m_median_query": "median for a whole addressed query",
+        "ctx_m_verified": "of them returned digest-verified exact bytes",
+        "ctx_m_incomparable": "A 64-wide query against a 768-wide corpus",
+        "ctx_r_kicker": "Does segmenting actually help?",
+        "ctx_r_h": "Twelve labelled queries, one pinned corpus",
+        "ctx_r_desc": "Ground truth is located by exact search for a distinctive "
+                      "anchor string — and the question is then written to avoid "
+                      "that anchor entirely. So the label comes from a match the "
+                      "retriever never sees, and the query is exactly the case "
+                      "lexical search cannot answer.",
+        "ctx_r_scheme": "Scheme",
+        "ctx_r_segments": "Segments",
+        "ctx_r_p95": "p95",
+        "ctx_r_median_rank": "Median rank",
+        "ctx_r_baseline": "baseline",
+        "ctx_r_control": "control",
+        "ctx_r_find_1_h": "The control beat the scheme it controls for.",
+        "ctx_r_find_1_p": "Cutting every ~900 bytes did better than reading the "
+                          "document's own headings, paragraph breaks and code "
+                          "fences. So that structure was not carrying the "
+                          "information, and the scheme that parses it earned nothing "
+                          "over arithmetic. What works is cutting where the "
+                          "vocabulary changes — the only one of the three that looks "
+                          "at content.",
+        "ctx_r_find_2_h": "The stated p95 gate failed on every row, including the "
+                          "winner.",
+        "ctx_r_find_2_p": "It wanted centred random-pair p95 below +0.15, calibrated "
+                          "against a baseline of +0.238 measured on a third of this "
+                          "corpus — where the baseline is now +0.443. The winning "
+                          "scheme halves the crowding, which is what the gate was "
+                          "reaching for, and the gate as written still failed. It is "
+                          "reported failed here and in the JSON, because a threshold "
+                          "re-read after the fact to mean whatever the result "
+                          "supports is not a threshold.",
+        "ctx_ref_kicker": "Three refusals",
+        "ctx_ref_h": "The load-bearing part is what it declines to answer",
+        "ctx_ref_1_h": "Identity before similarity",
+        "ctx_ref_1_p": "Two 768-wide vectors from different models — or one model "
+                       "over two different preprocessings — compare to a confident, "
+                       "meaningless number, and nothing downstream can tell. Model, "
+                       "revision, dimensions, projection version and segmentation "
+                       "scheme must all agree, or the answer is INCOMPARABLE rather "
+                       "than a value. Width is not identity.",
+        "ctx_ref_2_h": "A capture that would not be lossless",
+        "ctx_ref_2_p": "A byte limit that would drop the front of a transcript is "
+                       "refused. Taken deliberately, the result is reported as "
+                       "partial and names the byte range it dropped — because every "
+                       "downstream claim would otherwise be stated over a record the "
+                       "caller believes is whole.",
+        "ctx_ref_3_h": "A search over part of the record",
+        "ctx_ref_3_p": "A vectorised corpus covering a tenth of the index still "
+                       "returns its nearest hit, and that answer is indistinguishable "
+                       "from a complete search unless the share is stated. It is "
+                       "stated, on every call.",
+        "ctx_run_h": "Run it",
+        "ctx_run_p": "Twenty tools over stdio. Nothing here computes an embedding: "
+                     "the vectors come from whatever model the agent already has, "
+                     "and the identity travels with them so a local or browser model "
+                     "can replace the one used here without anything silently "
+                     "comparing across the two.",
+        "ctx_run_note": "The retrieval table needs an embedding model; everything "
+                        "else on this page runs offline.",
+        "ctx_cta_t": "Agent memory",
+        "ctx_cta_d": "Remember, index, address, expand — over MCP, measured",
+
         "bench_kicker": "Measured, not claimed",
         "bench_h1": "What ANLA does to real bytes",
         "bench_desc": "Five scenarios, run against this repository's own git history "
@@ -110,7 +254,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "Reference implementations",
         "fact_impl_v": "2, cross-verified",
         "fact_tests": "Conformance tests",
-        "fact_tests_v": "804 + fuzzing",
+        "fact_tests_v": "805 + fuzzing",
         "strip_1_t": "Local-first",
         "strip_1_d": "The workbench runs entirely in your tab: your files are read "
                      "into memory and never sent anywhere. The page makes no requests "
@@ -443,7 +587,126 @@ STRINGS: dict[str, dict[str, str]] = {
         "nav_papers": "論文",
         "nav_conformance": "一致性",
         "nav_bench": "實測數據",
+        "nav_context": "代理記憶",
         "nav_repo": "原始碼",
+
+        # ---- the context / MCP page -------------------------------------
+        "ctx_kicker": "這個專案後來變成的第二件事",
+        "ctx_h1": "讓代理精確地記得自己的歷史",
+        "ctx_desc": "一個能精確保存位元組、又能隨時把任何一段展開回來的封存格式，同時也就"
+                    "描述了一個模型對自己的上下文需要什麼。同一個套件因此帶了一層上下文，"
+                    "透過 MCP 使用：無損地記住、以語義定址、而拿回來的是記錄本身 —— "
+                    "不是它的摘要。",
+        "ctx_loop_h": "這個迴圈，以及每一步必須撐住的主張",
+        "ctx_loop_tool": "工具",
+        "ctx_loop_claim": "它必須撐住的主張",
+        "ctx_loop_1": "逐位元組地存下整份對話記錄，否則就拒絕。一個會砍掉對話前段的上限"
+                      "是錯誤，不是安靜的截斷。",
+        "ctx_loop_2": "在這些 turn 上建立一族索引 —— 而封存檔在前後是位元組完全相同的，"
+                      "這一點是被檢查的，不是被宣稱的。",
+        "ctx_loop_3": "要送去做 embedding 的視角，連同必須跟著回來的身分，以及一份會"
+                      "說明自己涵蓋了記錄哪一部分的取樣。",
+        "ctx_loop_4": "向量進入輔助平面：封存檔「旁邊」的一個附檔，永遠不是它「裡面」"
+                      "的一筆記錄。",
+        "ctx_loop_5": "問題進去，(turn, start_byte, end_byte) 出來，而且該 turn 的"
+                      "digest 會重新對照索引當初建立時的值。",
+        "ctx_idx_kicker": "整個設計立足的那個想法",
+        "ctx_idx_h": "segment 是索引，永遠不是被保存的新碎片",
+        "ctx_idx_p": "出自 Neo.K 的同一性微積分：切割 = 索引 —— 一刀下去只是多了一個"
+                     "視角，物件本身完好如初。所以 segment 是輔助平面裡的 "
+                     "(turn, start_byte, end_byte)，多個方案可以並存於同一份記錄之上，"
+                     "重新切割不改寫任何東西，而且切割器被允許是錯的。",
+        "ctx_idx_a_h": "本體層",
+        "ctx_idx_a_p": "turn 完整地存在保存平面裡，不被任何切割動到。它的 digest 在建立"
+                       "索引之前、兩個不同方案之後、以及每一次檢索之後，都是同一個。",
+        "ctx_idx_b_h": "呈現層",
+        "ctx_idx_b_p": "segment 是指進那個 turn 的原始位元組偏移量。之後更好的切割器只是"
+                       "產生新的一族索引；記錄沒被動過，所以在方案之間做選擇是一次量測，"
+                       "而不是一次遷移。",
+        "ctx_m_kicker": "在這個儲存庫自己的開發記錄上實測",
+        "ctx_m_h": "它的代價，以及它回傳什麼",
+        "ctx_m_desc": "下面每一個數字都由 bench/context_bench.py 產生並寫進一份 JSON，"
+                      "這個頁面就是從那份 JSON 生成的，並且蓋上了量測時的版本號與語料"
+                      "digest。",
+        "ctx_m_record": "記錄",
+        "ctx_m_index": "索引",
+        "ctx_m_vectors": "向量平面",
+        "ctx_m_search": "搜尋",
+        "ctx_m_wire": "走真正的通訊管道",
+        "ctx_m_turns": "個 turn",
+        "ctx_m_lossless": "無損 —— 對話記錄的每一個位元組都在封存檔裡",
+        "ctx_m_partial": "不完整 —— 對話記錄的前段被丟掉了",
+        "ctx_m_segments": "個 segment",
+        "ctx_m_median": "中位數",
+        "ctx_m_coverage": "覆蓋率",
+        "ctx_m_coverage_note": "沒有任何一個 turn 的任何一個位元組是索引不到的，也沒有"
+                               "任何一個被涵蓋兩次",
+        "ctx_m_unchanged": "建立索引前後，保存平面的 digest 未變",
+        "ctx_m_changed": "保存平面的 DIGEST 改變了 —— 這條不變式已經破了",
+        "ctx_m_json": "JSON 十進位陣列",
+        "ctx_m_binary": "float32 加一行 JSON 標頭",
+        "ctx_m_size": "大小",
+        "ctx_m_load": "載入",
+        "ctx_m_compare": "體積小 {smaller} 倍 · 載入快 {faster} 倍",
+        "ctx_m_model": "模型",
+        "ctx_m_queries": "個有標準答案的查詢",
+        "ctx_m_numpy": "有 NumPy",
+        "ctx_m_pure": "純 Python",
+        "ctx_m_pure_note": "NumPy 是選用的，保存平面永遠不需要它。純 Python 這條路只有在"
+                           "自己的推估超過明列的 30 秒預算時才會拒絕，而且它會把推估值"
+                           "寫在拒絕訊息裡 —— 你可以去反對那個估計值，而不是去反對一個"
+                           "常數。",
+        "ctx_m_median_query": "一次完整定址查詢的中位數",
+        "ctx_m_verified": "次回傳了經 digest 驗證的精確位元組",
+        "ctx_m_incomparable": "用 64 維的查詢去問 768 維的語料",
+        "ctx_r_kicker": "切段到底有沒有用？",
+        "ctx_r_h": "十二個有標準答案的查詢，一份釘死的語料",
+        "ctx_r_desc": "標準答案是用一個獨特的錨定字串精確搜尋出來的 —— 然後問題本身被"
+                      "刻意寫成完全避開那個錨。所以標籤來自一個檢索器永遠看不到的比對，"
+                      "而查詢正好就是詞彙比對答不出來的那一類。",
+        "ctx_r_scheme": "方案",
+        "ctx_r_segments": "segment 數",
+        "ctx_r_p95": "p95",
+        "ctx_r_median_rank": "排名中位數",
+        "ctx_r_baseline": "基線",
+        "ctx_r_control": "對照組",
+        "ctx_r_find_1_h": "對照組贏過了它本來要對照的那個方案。",
+        "ctx_r_find_1_p": "每 900 位元組切一刀，表現比讀取文件自己的標題、段落分隔與"
+                          "程式碼圍欄還好。所以那些結構並沒有在承載資訊，而讀取它的方案"
+                          "並沒有賺到它比算術多出來的複雜度。真正有效的是在詞彙改變的"
+                          "地方切 —— 三者之中唯一會去看內容的那一個。",
+        "ctx_r_find_2_h": "當初明訂的 p95 門檻，每一列都沒過，包含冠軍那一列。",
+        "ctx_r_find_2_p": "它要求置中後的隨機配對 p95 低於 +0.15，而校準它的基線是在只有"
+                          "這份語料三分之一大小時量到的 +0.238 —— 現在那個基線是 +0.443。"
+                          "獲勝的方案把擁擠程度砍了一半，那正是這道門檻真正想要的東西，"
+                          "而門檻照它寫的樣子仍然沒過。這裡和 JSON 裡都記為失敗，因為一個"
+                          "事後被重新解讀成剛好支持結果的門檻，就不是門檻了。",
+        "ctx_ref_kicker": "三種拒絕",
+        "ctx_ref_h": "真正承重的，是它拒絕回答的那些",
+        "ctx_ref_1_h": "先確認身分，再談相似度",
+        "ctx_ref_1_p": "兩個都是 768 維、但來自不同模型的向量 —— 或同一個模型但經過兩種"
+                       "不同前處理 —— 比對出來會是一個很有自信而毫無意義的數字，而且下游"
+                       "沒有任何東西分辨得出來。模型、版本、維度、投影版本與切段方案必須"
+                       "全部一致，否則答案是 INCOMPARABLE 而不是一個數值。維度寬度不等於"
+                       "身分。",
+        "ctx_ref_2_h": "一次不會是無損的擷取",
+        "ctx_ref_2_p": "一個會砍掉對話記錄前段的位元組上限會被拒絕。如果是刻意要這麼做，"
+                       "結果會被標記為不完整，並且指名它丟掉的位元組範圍 —— 否則下游的"
+                       "每一個主張，都是建立在一份呼叫者以為是完整的記錄上。",
+        "ctx_ref_3_h": "只涵蓋部分記錄的搜尋",
+        "ctx_ref_3_p": "一份只涵蓋索引十分之一的向量語料，一樣會回傳它範圍內最接近的結果，"
+                       "而那個答案跟一次完整搜尋是無法區分的 —— 除非把涵蓋比例講出來。"
+                       "每一次呼叫都會講。",
+        "ctx_run_h": "跑跑看",
+        "ctx_run_p": "二十個工具，走 stdio。這裡沒有任何東西會去算 embedding：向量來自"
+                     "代理本來就有的模型，而身分會跟著向量一起走，所以本地或瀏覽器端的"
+                     "模型可以取代這裡用的那一個，而不會有任何東西在無聲地跨兩個向量空間"
+                     "做比較。",
+        "ctx_run_note": "檢索那張表需要一個 embedding 模型；這個頁面上其他每一項都可以"
+                        "離線跑。",
+        "ctx_cta_t": "代理記憶",
+        "ctx_cta_d": "記住、索引、定址、展開 —— 走 MCP，有實測",
+
         "bench_kicker": "量出來的，不是宣稱的",
         "bench_h1": "ANLA 對真實位元組做了什麼",
         "bench_desc": "五個情境，跑在這個儲存庫自己的 git 歷史上，並且跟一般人真的會拿來用的"
@@ -506,7 +769,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "fact_impl": "參考實作",
         "fact_impl_v": "2 套，互相驗證",
         "fact_tests": "一致性測試",
-        "fact_tests_v": "804 項 + 模糊測試",
+        "fact_tests_v": "805 項 + 模糊測試",
         "strip_1_t": "本機優先",
         "strip_1_d": "工作台完全在你的分頁裡執行：檔案只讀進記憶體，不會被送到任何"
                      "地方。頁面本身不發出任何請求，其內容安全政策也禁止對外連線。",
@@ -833,7 +1096,7 @@ BENCH_ZH: dict[str, dict[str, str]] = {
                 "內容定義切塊是預設值——因為固定切塊會讓去重整個垮掉——"
                 "而在 Python writer 裡它同時也是慢路徑，慢兩個數量級。"
                 "Rust writer 做的是完全一樣的工作，產生逐位元相同的封裝，"
-                "速度是二十二倍；所以這是實作的數字，不是格式的數字。"
+                "速度是 {factor} 倍；所以這是實作的數字，不是格式的數字。"
                 "會publish 出來，是因為一個只量自己擅長的項目的專案，等於沒有在量。",
     },
     "metadata-cost": {

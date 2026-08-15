@@ -1,0 +1,55 @@
+{
+ "kind": "anla:bench:context-addressing:1",
+ "revision": "71a719f",
+ "generated_at_unix_ns": 1786770772053919300,
+ "corpus": {
+  "digest": "38c5455779cbe268f86aff0605e2e4c8",
+  "transcript_bytes": 17493702,
+  "turns": 6581,
+  "archive_bytes": 11529216,
+  "lossless": true,
+  "share_of_transcript": 0.659,
+  "capture_seconds": 6.26
+ },
+ "index": {
+  "scheme": "changepoint-v1",
+  "segments": 61458,
+  "median_segment_bytes": 249.0,
+  "coverage": 1.0,
+  "preservation_unchanged": true,
+  "turns_not_fully_reachable": 0,
+  "index_seconds": 6.26
+ },
+ "vector_plane": {
+  "vectors": 61458,
+  "dimensions": 768,
+  "json_bytes": 978051475,
+  "json_write_seconds": 82.02,
+  "json_load_seconds": 28.58,
+  "binary_bytes": 191831975,
+  "binary_write_seconds": 11.09,
+  "binary_load_seconds": 0.13,
+  "smaller_by": 5.1,
+  "loads_faster_by": 221.0
+ },
+ "search": {
+  "numpy_seconds": 0.183,
+  "pure_python_microseconds_per_pair": 215.7,
+  "pure_python_sampled_pairs": 2000,
+  "pure_python_projected_seconds": 13.3,
+  "pure_python_budget_seconds": 30.0,
+  "numpy_faster_by": 72.0
+ },
+ "wire": {
+  "queries": 5,
+  "median_seconds": 2.54,
+  "slowest_seconds": 2.62,
+  "self_retrieved": 5,
+  "digest_verified": 5,
+  "incomparable_on_width_mismatch": "INCOMPARABLE: dimensions differs — 64 against 768"
+ },
+ "honesty": {
+  "vectors": "random, not embeddings — this measures the transport, the formats and the search, and says nothing about retrieval quality",
+  "retrieval_quality": "bench/segment_retrieval.json, measured separately against twelve labelled queries"
+ }
+}

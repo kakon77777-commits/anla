@@ -89,9 +89,10 @@ Three refusals are the load-bearing part:
 * a query vector whose model, revision, dimensions, projection version or scheme
   disagrees with the corpus returns **`INCOMPARABLE`**, not a number. Width is not
   identity, and cosine will give a confident answer to two vector spaces;
-* a corpus too large for the available backend **says so**. Pure-Python cosine is
-  71 µs a pair, so 61,458 vectors is 73 minutes for one query — an agent cannot tell
-  that from a hang. With NumPy the same search is **262 ms**;
+* a search projected past a stated time budget **says so** rather than running.
+  61,458 vectors at 768 dimensions is **152 ms** with NumPy and about **11 s**
+  without, and the refusal quotes its own projection so a caller can disagree with
+  the estimate instead of with a magic number;
 * a search over a partially embedded index reports `semantic_corpus_share`, because
   the nearest hit inside a tenth of the record looks exactly like a complete search.
 

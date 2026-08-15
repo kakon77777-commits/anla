@@ -75,6 +75,7 @@ NAV = (
     ("nav_workbench", "workbench/", True),
     ("nav_demo", "demo/", True),
     ("nav_bench", "bench/", True),
+    ("nav_context", "context/", True),
     ("nav_spec", "/spec/", False),
     ("nav_papers", "papers/", True),
     ("nav_conformance", "/conformance/", False),
@@ -268,6 +269,7 @@ def page_home(lang: str) -> str:
     <h2>{esc(s['get_h2'])}</h2></div>
   <div class="filecards">
     {_filecard(f"{b}workbench/", s['cta_workbench_t'], s['cta_workbench_d'], 'HTML · no backend')}
+    {_filecard(f"{b}context/", s['ctx_cta_t'], s['ctx_cta_d'], 'MCP · 20 tools')}
     {_filecard(f"{b}demo/", s['cta_demo_t'], s['cta_demo_d'], '67 assertions')}
     {_filecard("/standalone.html" if lang == "en" else "/standalone.zh.html",
                s['cta_standalone_t'], s['cta_standalone_d'], 'single file')}
@@ -593,6 +595,22 @@ def page_bench(lang: str) -> str:
         else:
             headline, note = result["headline"], result["note"]
 
+        # Notes may carry measured placeholders so that one number fills every
+        # language. A missing key stops the build rather than printing a brace:
+        # the alternative is a page that says "{factor} times the rate".
+        values = result["detail"].get("note_values")
+        if values:
+            try:
+                note = note.format(**values)
+            except KeyError as missing:
+                raise SystemExit(
+                    f"{scenario} ({lang}) note wants {missing} and the harness "
+                    f"measured {sorted(values)}") from None
+        elif "{" in note:
+            raise SystemExit(
+                f"{scenario} ({lang}) note has a placeholder and the harness "
+                f"measured no note_values for it")
+
         sizes = {k: v for k, v in result["sizes"].items() if v}
         rates = result["detail"].get("mib_per_second")
         if not sizes and rates:
@@ -705,6 +723,236 @@ def page_bench(lang: str) -> str:
     return layout(lang, slug="bench/", title=f"{s['bench_h1']} — ANLA",
                   description=s["bench_desc"][:180], body=body,
                   alternate=f"{base(other(lang))}bench/")
+
+
+# --------------------------------------------------------------------------
+# context / MCP — the agent-memory page
+# --------------------------------------------------------------------------
+
+def _context_document() -> dict:
+    path = REPO / "bench" / "context_addressing.json"
+    if not path.exists():
+        raise SystemExit(
+            "bench/context_addressing.json is missing — run "
+            "`python bench/context_bench.py <transcript.jsonl>`. This page renders "
+            "measurements and there is no version of it that makes them up.")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _retrieval_document() -> dict | None:
+    path = REPO / "bench" / "segment_retrieval.json"
+    if not path.exists():
+        return None
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if not document.get("complete", True):
+        # A partial table would compare rows measured under different conditions,
+        # and comparison between rows is the entire content of that table.
+        raise SystemExit(
+            f"bench/segment_retrieval.json is incomplete "
+            f"({sorted(document['schemes'])} of "
+            f"{sorted(document.get('schemes_requested', []))}) — publish it whole or "
+            f"not at all")
+    return document
+
+
+#: Which retrieval row is the baseline and which is the control. Named here rather
+#: than inferred from the numbers, so the page cannot relabel whichever row happens
+#: to lose as "the control".
+RETRIEVAL_ROLES = {"whole-turn-v1": "ctx_r_baseline", "sized-900-v1": "ctx_r_control"}
+
+
+def page_context(lang: str) -> str:
+    s = strings(lang)
+    d = _context_document()
+    corpus, index = d["corpus"], d["index"]
+    vectors, search, wire = d["vector_plane"], d["search"], d["wire"]
+
+    if not corpus["lossless"] or not index["preservation_unchanged"]:
+        raise SystemExit(
+            "the measured run was not lossless or moved the preservation digest — "
+            "that is the claim this page is about, and it does not get published "
+            "as a qualified success")
+
+    loop = [
+        ("context_capture", s["ctx_loop_1"]),
+        ("context_segment", s["ctx_loop_2"]),
+        ("context_segment_export", s["ctx_loop_3"]),
+        ("context_attach_vectors", s["ctx_loop_4"]),
+        ("context_address", s["ctx_loop_5"]),
+    ]
+    loop_rows = "".join(
+        f'<tr><td><code>{esc(name)}</code></td><td>{esc(claim)}</td></tr>'
+        for name, claim in loop)
+
+    def stat(label: str, value: str, note: str = "") -> str:
+        return (f'<article class="feature"><h3>{esc(label)}</h3>'
+                f'<p class="ctx-stat">{value}</p>'
+                + (f'<p>{esc(note)}</p>' if note else "") + '</article>')
+
+    record = stat(
+        s["ctx_m_record"],
+        f'<b>{corpus["turns"]:,}</b> {esc(s["ctx_m_turns"])}<br>'
+        f'{esc(_kb(corpus["transcript_bytes"]))} &rarr; '
+        f'{esc(_kb(corpus["archive_bytes"]))} '
+        f'({corpus["share_of_transcript"]:.0%})',
+        s["ctx_m_lossless"] if corpus["lossless"] else s["ctx_m_partial"])
+
+    indexed = stat(
+        s["ctx_m_index"],
+        f'<b>{index["segments"]:,}</b> {esc(s["ctx_m_segments"])}<br>'
+        f'{esc(s["ctx_m_median"])} {index["median_segment_bytes"]:.0f} B · '
+        f'{esc(s["ctx_m_coverage"])} <b>{index["coverage"]:.4f}</b>',
+        s["ctx_m_coverage_note"] + " · "
+        + (s["ctx_m_unchanged"] if index["preservation_unchanged"]
+           else s["ctx_m_changed"]))
+
+    vector_rows = (
+        f'<tr><td>{esc(s["ctx_m_json"])}</td>'
+        f'<td>{esc(_kb(vectors["json_bytes"]))}</td>'
+        f'<td>{vectors["json_load_seconds"]:.1f} s</td></tr>'
+        f'<tr class="ctx-win"><td>{esc(s["ctx_m_binary"])}</td>'
+        f'<td><b>{esc(_kb(vectors["binary_bytes"]))}</b></td>'
+        f'<td><b>{vectors["binary_load_seconds"]:.2f} s</b></td></tr>')
+    vector_card = (
+        f'<article class="feature"><h3>{esc(s["ctx_m_vectors"])}</h3>'
+        f'<p>{vectors["vectors"]:,} &times; {vectors["dimensions"]}</p>'
+        f'<div class="table-scroll"><table class="bench-table"><thead><tr><th></th>'
+        f'<th>{esc(s["ctx_m_size"])}</th><th>{esc(s["ctx_m_load"])}</th>'
+        f'</tr></thead><tbody>{vector_rows}</tbody></table></div>'
+        f'<p class="ctx-stat small">'
+        + esc(s["ctx_m_compare"].format(smaller=f'{vectors["smaller_by"]:g}',
+                                        faster=f'{vectors["loads_faster_by"]:.0f}'))
+        + '</p></article>')
+
+    search_card = (
+        f'<article class="feature"><h3>{esc(s["ctx_m_search"])}</h3>'
+        f'<p class="ctx-stat"><b>{search["numpy_seconds"] * 1000:.0f} ms</b> '
+        f'{esc(s["ctx_m_numpy"])}<br>'
+        f'<b>{search["pure_python_projected_seconds"]:.0f} s</b> '
+        f'{esc(s["ctx_m_pure"])}</p>'
+        f'<p>{esc(s["ctx_m_pure_note"])}</p></article>')
+
+    wire_card = (
+        f'<article class="feature"><h3>{esc(s["ctx_m_wire"])}</h3>'
+        f'<p class="ctx-stat"><b>{wire["median_seconds"]:.2f} s</b> '
+        f'{esc(s["ctx_m_median_query"])}</p>'
+        f'<p><b>{wire["digest_verified"]}/{wire["queries"]}</b> '
+        f'{esc(s["ctx_m_verified"])}. {esc(s["ctx_m_incomparable"])} &rarr; '
+        f'<code>{esc(wire["incomparable_on_width_mismatch"])}</code></p></article>')
+
+    retrieval = _retrieval_document()
+    retrieval_section = ""
+    if retrieval:
+        rows = []
+        best = max(retrieval["schemes"].values(), key=lambda r: r["mrr"])
+        # Weakest first, so the table reads as a progression rather than as
+        # whichever order the harness happened to write its rows in.
+        ordered = sorted(retrieval["schemes"].items(), key=lambda kv: kv[1]["mrr"])
+        for name, row in ordered:
+            role = RETRIEVAL_ROLES.get(name)
+            tag = f' <small>({esc(s[role])})</small>' if role else ""
+            win = " ctx-win" if row is best else ""
+            rows.append(
+                f'<tr class="{win.strip()}"><td><code>{esc(name)}</code>{tag}</td>'
+                f'<td>{row["segments"]:,}</td>'
+                f'<td>{row["random_p95_centred"]:+.3f}</td>'
+                f'<td>{row["recall_at_1"]:.2f}</td>'
+                f'<td>{row["recall_at_5"]:.2f}</td>'
+                f'<td>{row["mrr"]:.3f}</td>'
+                f'<td>{row["median_rank"]:g}</td></tr>')
+        retrieval_section = f"""
+<section class="section"><div class="wrap">
+  <div class="section-head"><span class="kicker">{esc(s['ctx_r_kicker'])}</span>
+    <h2>{esc(s['ctx_r_h'])}</h2>
+    <p class="section-desc">{esc(s['ctx_r_desc'])}</p></div>
+  <div class="runbar">
+    <span class="badge">{esc(s['ctx_m_model'])}: {esc(retrieval['model'])} ·
+      {retrieval['dimensions']}d</span>
+    <span class="badge">{retrieval['turns']:,} {esc(s['ctx_m_turns'])} ·
+      {esc(retrieval['corpus_digest'][:16])}</span>
+    <span class="badge">{retrieval['queries']} {esc(s['ctx_m_queries'])}</span>
+  </div>
+  <div class="table-scroll"><table class="bench-table ctx-table"><thead><tr>
+    <th>{esc(s['ctx_r_scheme'])}</th><th>{esc(s['ctx_r_segments'])}</th>
+    <th>{esc(s['ctx_r_p95'])}</th><th>R@1</th><th>R@5</th><th>MRR</th>
+    <th>{esc(s['ctx_r_median_rank'])}</th>
+  </tr></thead><tbody>{''.join(rows)}</tbody></table></div>
+  <div class="callout"><strong>▸ {esc(s['ctx_r_find_1_h'])}</strong>
+    {esc(s['ctx_r_find_1_p'])}</div>
+  <div class="callout fail" style="font-weight:400;font-size:15px">
+    <strong>{esc(s['ctx_r_find_2_h'])}</strong> {esc(s['ctx_r_find_2_p'])}</div>
+</div></section>"""
+
+    stamp = time.strftime("%Y-%m-%d %H:%M UTC",
+                          time.gmtime(d["generated_at_unix_ns"] / 1e9))
+    body = f"""<main>
+<div class="wrap"><section class="section">
+  <div class="section-head"><span class="kicker">{esc(s['ctx_kicker'])}</span>
+    <h1>{esc(s['ctx_h1'])}</h1>
+    <p class="section-desc">{esc(s['ctx_desc'])}</p></div>
+
+  <h2 style="margin-top:12px">{esc(s['ctx_loop_h'])}</h2>
+  <div class="table-scroll"><table class="bench-table ctx-table"><thead><tr>
+    <th>{esc(s['ctx_loop_tool'])}</th><th>{esc(s['ctx_loop_claim'])}</th>
+  </tr></thead><tbody>{loop_rows}</tbody></table></div>
+</section></div>
+
+<section class="section"><div class="wrap">
+  <div class="section-head"><span class="kicker">{esc(s['ctx_idx_kicker'])}</span>
+    <h2>{esc(s['ctx_idx_h'])}</h2>
+    <p class="section-desc">{esc(s['ctx_idx_p'])}</p></div>
+  <div class="grid-2">
+    <article class="plane preserve"><h3>{esc(s['ctx_idx_a_h'])}</h3>
+      <p>{esc(s['ctx_idx_a_p'])}</p></article>
+    <article class="plane intel"><h3>{esc(s['ctx_idx_b_h'])}</h3>
+      <p>{esc(s['ctx_idx_b_p'])}</p></article>
+  </div>
+</div></section>
+
+<section class="section"><div class="wrap">
+  <div class="section-head"><span class="kicker">{esc(s['ctx_m_kicker'])}</span>
+    <h2>{esc(s['ctx_m_h'])}</h2>
+    <p class="section-desc">{esc(s['ctx_m_desc'])}</p></div>
+  <div class="runbar">
+    <span class="badge">{esc(s['bench_measured'])} {esc(stamp)} ·
+      {esc(d['revision'])}</span>
+    <span class="badge">{esc(corpus['digest'][:16])}</span>
+    <span class="badge">{esc(index['scheme'])}</span>
+  </div>
+  <div class="grid-2">{record}{indexed}{vector_card}{search_card}</div>
+  <div class="grid-2" style="margin-top:18px">{wire_card}</div>
+</div></section>
+{retrieval_section}
+<section class="section"><div class="wrap">
+  <div class="section-head"><span class="kicker">{esc(s['ctx_ref_kicker'])}</span>
+    <h2>{esc(s['ctx_ref_h'])}</h2></div>
+  <div class="grid-3">
+    <article class="feature"><span class="num">01</span>
+      <h3>{esc(s['ctx_ref_1_h'])}</h3><p>{esc(s['ctx_ref_1_p'])}</p></article>
+    <article class="feature"><span class="num">02</span>
+      <h3>{esc(s['ctx_ref_2_h'])}</h3><p>{esc(s['ctx_ref_2_p'])}</p></article>
+    <article class="feature"><span class="num">03</span>
+      <h3>{esc(s['ctx_ref_3_h'])}</h3><p>{esc(s['ctx_ref_3_p'])}</p></article>
+  </div>
+</div></section>
+
+<section class="section"><div class="wrap">
+  <div class="section-head"><h2>{esc(s['ctx_run_h'])}</h2>
+    <p class="section-desc">{esc(s['ctx_run_p'])}</p></div>
+  <pre class="codeblock"><code>pip install "mcp&gt;=1.10,&lt;2"
+python tools/mcp/anla_mcp.py
+
+python bench/context_bench.py &lt;transcript.jsonl&gt;
+python bench/segment_retrieval.py &lt;transcript.jsonl&gt;</code></pre>
+  <p class="section-desc">{esc(s['ctx_run_note'])}
+    <a href="{C.REPO}/blob/main/tools/mcp/README.md" rel="noreferrer">tools/mcp ↗</a>
+    · <a href="{C.REPO}/blob/main/design/segments-as-indices.md"
+      rel="noreferrer">design/segments-as-indices.md ↗</a></p>
+</div></section>
+</main>"""
+    return layout(lang, slug="context/", title=f"{s['ctx_h1']} — ANLA",
+                  description=s["ctx_desc"][:180], body=body, wide=True,
+                  alternate=f"{base(other(lang))}context/")
 
 
 def build_standalone(lang: str) -> tuple[str, str]:
@@ -969,6 +1217,7 @@ def main() -> int:
         emit(f"{prefix}workbench/index.html", page_workbench(lang))
         emit(f"{prefix}demo/index.html", page_demo(lang))
         emit(f"{prefix}bench/index.html", page_bench(lang))
+        emit(f"{prefix}context/index.html", page_context(lang))
         emit(f"{prefix}papers/index.html", page_papers(lang))
         for slug, spec in PAPERS.items():
             s = strings(lang)
