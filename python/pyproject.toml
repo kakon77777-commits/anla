@@ -28,10 +28,14 @@ dependencies = []
 #
 # The cost is measured and published at https://anla.evemisslab.com/bench/ :
 # with content-defined chunking, which is the default because fixed chunking
-# destroys deduplication, this writer packs at **3.9 MiB/s** where the Rust writer
-# does the identical work — byte-identical, checked in CI — at **87.5 MiB/s**.
-# Reading is unaffected at ~500 MiB/s, because verification hashes whole chunks
+# destroys deduplication, this writer packs at **3.8 MiB/s** where the Rust writer
+# does the identical work — byte-identical, checked in CI — at **107.3 MiB/s**.
+# Reading is unaffected at ~538 MiB/s, because verification hashes whole chunks
 # rather than walking bytes.
+#
+# The Rust figure was 87.5 here until 2026-08-15, and it was wrong: the benchmark
+# invoked that writer with `--chunking anla-cdc-1`, a value neither CLI has ever
+# accepted, so it measured Rust doing *fixed* chunking against Python doing CDC.
 #
 # So: use this to read archives, to check the format, to embed in Python, and for
 # trees measured in megabytes. Use `anla1-rs` from the same repository for volume.

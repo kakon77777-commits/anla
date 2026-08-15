@@ -2,8 +2,13 @@
 name = "anla1"
 version = "0.1.0"
 edition = "2021"
-description = "An independent reader for ANLA 1.0 (draft), written against SPEC-1.0-DRAFT.md"
+description = "An independent reader and writer for ANLA 1.0 (draft), written against SPEC-1.0-DRAFT.md — byte-identical to the Python implementation it shares no code with"
 license = "Apache-2.0"
+repository = "https://github.com/kakon77777-commits/anla"
+homepage = "https://anla.evemisslab.com"
+readme = "README.md"
+keywords = ["archive", "lossless", "deduplication", "cbor"]
+categories = ["compression", "filesystem"]
 
 [[bin]]
 name = "anla1-rs"
