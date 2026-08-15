@@ -129,8 +129,56 @@ information; the scheme that reads them earned none of its extra complexity over
 ruler. What does work is cutting where the *vocabulary* changes, which is the only
 one of the three that looks at content.
 
-**The stated p95 gate failed — for every scheme, including the winner.** It is
-reported as failed and the JSON records `gate_p95: false` on all four rows.
+## The same twelve queries, on a model that runs on this machine
+
+`nomic-embed-text` through Ollama — 137M parameters, Apache-2.0, 768 dimensions,
+which is the width this vector plane already used. Identical ground: same corpus
+digest `38c5455779cbe268`, same twelve labelled queries, same four schemes, same
+5,000-segment budget.
+
+| scheme | R@1 hosted → local | MRR hosted → local | p95 hosted → local |
+|---|---|---|---|
+| `whole-turn-v1` | 0.17 → **0.42** | 0.280 → **0.569** | +0.443 → +0.500 |
+| `structural-v1` | 0.50 → **0.58** | 0.545 → **0.704** | +0.356 → +0.351 |
+| `sized-900-v1` | 0.58 → 0.50 | 0.656 → 0.631 | +0.361 → **+0.315** |
+| **`changepoint-v1`** | 0.75 → 0.75 | 0.847 → **0.861** | +0.219 → **+0.203** |
+
+**Where it counts, the local model matches the hosted one.** On the winning scheme
+the two are level at Recall@1 0.75 and Recall@5 1.00, and the local model is
+marginally ahead on MRR and on crowding. A 262 MB file that runs offline, costs
+nothing, and can pin its own weights by digest is not a compromise against a hosted
+API here; it is the better artefact for this job, because a hosted name can be
+re-pointed and a local hash cannot.
+
+### This qualifies yesterday's headline
+
+Segmentation's *benefit* is not a property of the unit alone. It is a joint property
+of the unit and the model:
+
+    hosted:  R@1 0.17 → 0.75   4.5× from segmenting
+    local:   R@1 0.42 → 0.75   1.8× from segmenting
+
+Both land in the same place. They start in very different ones, because the local
+model handles a whole turn far better than the hosted one does. So "segmenting takes
+Recall@1 from 0.17 to 0.75" was true and is *narrower* than it sounded: with a model
+that reads long inputs well, most of that gap is already closed before any cutting
+happens. What survives both backends is the ranking of the schemes and the identity
+of the winner.
+
+### And the p95 gate is refuted a second time, independently
+
+The `whole-turn-v1` row is the cleanest evidence yet that p95 was the wrong proxy.
+The local model is **more** crowded there — +0.500 against +0.443 — and retrieves
+**much** better: Recall@1 0.42 against 0.17, MRR 0.569 against 0.280.
+
+So the quantity the gate measures moved in the opposite direction from the quantity
+the gate existed to predict. That is worse for the gate than being mis-calibrated:
+a threshold set at the wrong level can be re-set, and one that points the wrong way
+cannot be repaired by choosing a better number.
+
+**The stated p95 gate failed — for every scheme, on both backends, including the
+winner.** It is reported as failed and both JSON files record `gate_p95: false` on
+all four rows.
 
 What the gate got wrong is worth stating precisely, because the temptation is to
 relabel it. It required p95 below +0.15, calibrated against a turn-level baseline of

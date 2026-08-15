@@ -739,8 +739,8 @@ def _context_document() -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _retrieval_document() -> dict | None:
-    path = REPO / "bench" / "segment_retrieval.json"
+def _retrieval_document(name: str = "segment_retrieval.json") -> dict | None:
+    path = REPO / "bench" / name
     if not path.exists():
         return None
     document = json.loads(path.read_text(encoding="utf-8"))
@@ -841,6 +841,15 @@ def page_context(lang: str) -> str:
         f'<code>{esc(wire["incomparable_on_width_mismatch"])}</code></p></article>')
 
     retrieval = _retrieval_document()
+    local = _retrieval_document("segment_retrieval_local.json")
+    # Two backends only mean something against each other if they measured the same
+    # thing. Different corpora would make the comparison a comparison of corpora.
+    if local and retrieval and local["corpus_digest"] != retrieval["corpus_digest"]:
+        raise SystemExit(
+            f"the two retrieval runs are on different corpora "
+            f"({retrieval['corpus_digest'][:16]} and {local['corpus_digest'][:16]}) "
+            f"— published side by side that would compare the corpora, not the "
+            f"models")
     retrieval_section = ""
     if retrieval:
         rows = []
@@ -860,6 +869,35 @@ def page_context(lang: str) -> str:
                 f'<td>{row["recall_at_5"]:.2f}</td>'
                 f'<td>{row["mrr"]:.3f}</td>'
                 f'<td>{row["median_rank"]:g}</td></tr>')
+        local_block = ""
+        if local:
+            order = sorted(retrieval["schemes"], key=lambda k:
+                           retrieval["schemes"][k]["mrr"])
+            rows_local = "".join(
+                f'<tr class="{"ctx-win" if name == order[-1] else ""}">'
+                f'<td><code>{esc(name)}</code></td>'
+                f'<td>{retrieval["schemes"][name]["recall_at_1"]:.2f} &rarr; '
+                f'<b>{local["schemes"][name]["recall_at_1"]:.2f}</b></td>'
+                f'<td>{retrieval["schemes"][name]["mrr"]:.3f} &rarr; '
+                f'<b>{local["schemes"][name]["mrr"]:.3f}</b></td>'
+                f'<td>{retrieval["schemes"][name]["random_p95_centred"]:+.3f} &rarr; '
+                f'<b>{local["schemes"][name]["random_p95_centred"]:+.3f}</b></td>'
+                f'</tr>'
+                for name in order if name in local["schemes"])
+            local_block = (
+                f'<div class="section-head" style="margin-top:34px">'
+                f'<h3>{esc(s["ctx_l_h"])}</h3>'
+                f'<p class="section-desc">{esc(s["ctx_l_p"])}</p></div>'
+                f'<div class="runbar"><span class="badge">{esc(local["model"])}</span>'
+                f'<span class="badge">{local["dimensions"]}d</span>'
+                f'<span class="badge">{esc(local["corpus_digest"][:16])}</span></div>'
+                f'<div class="table-scroll"><table class="bench-table ctx-table">'
+                f'<thead><tr><th>{esc(s["ctx_r_scheme"])}</th>'
+                f'<th>R@1</th><th>MRR</th><th>{esc(s["ctx_r_p95"])}</th></tr></thead>'
+                f'<tbody>{rows_local}</tbody></table></div>'
+                f'<div class="callout"><strong>▸ {esc(s["ctx_l_find_h"])}</strong> '
+                f'{esc(s["ctx_l_find_p"])}</div>')
+
         retrieval_section = f"""
 <section class="section"><div class="wrap">
   <div class="section-head"><span class="kicker">{esc(s['ctx_r_kicker'])}</span>
@@ -877,6 +915,7 @@ def page_context(lang: str) -> str:
     <th>{esc(s['ctx_r_p95'])}</th><th>R@1</th><th>R@5</th><th>MRR</th>
     <th>{esc(s['ctx_r_median_rank'])}</th>
   </tr></thead><tbody>{''.join(rows)}</tbody></table></div>
+  {local_block}
   <div class="callout"><strong>▸ {esc(s['ctx_r_find_1_h'])}</strong>
     {esc(s['ctx_r_find_1_p'])}</div>
   <div class="callout fail" style="font-weight:400;font-size:15px">

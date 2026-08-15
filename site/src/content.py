@@ -145,6 +145,26 @@ STRINGS: dict[str, dict[str, str]] = {
                           "reported failed here and in the JSON, because a threshold "
                           "re-read after the fact to mean whatever the result "
                           "supports is not a threshold.",
+        "ctx_l_h": "The same twelve queries, on a model that runs on this machine",
+        "ctx_l_p": "nomic-embed-text through Ollama — 137M parameters, Apache-2.0, "
+                   "768 dimensions, which is the width this vector plane already "
+                   "used. Identical ground: the same corpus digest, the same "
+                   "queries, the same schemes, the same budget. Hosted → local.",
+        "ctx_l_find_h": "Where it counts they are level, and the local model can do "
+                        "one thing the hosted one cannot.",
+        "ctx_l_find_p": "On the winning scheme both reach Recall@1 0.75 and "
+                        "Recall@5 1.00, with the local model marginally ahead on MRR "
+                        "and on crowding. It also pins its own weights: Ollama "
+                        "reports a content digest, so a query is comparable with a "
+                        "corpus only if the weights are the same bytes. A hosted "
+                        "model is a name, and a name can be re-pointed without "
+                        "changing. Two things follow that the hosted run alone could "
+                        "not show — segmentation's benefit is a joint property of "
+                        "the unit and the model (4.5× hosted, 1.8× local, same "
+                        "destination), and the p95 gate is refuted a second time: at "
+                        "whole-turn the local model is more crowded and retrieves "
+                        "much better, so the quantity the gate measures moved "
+                        "opposite to the one it existed to predict.",
         "ctx_ref_kicker": "Three refusals",
         "ctx_ref_h": "The load-bearing part is what it declines to answer",
         "ctx_ref_1_h": "Identity before similarity",
@@ -681,6 +701,20 @@ STRINGS: dict[str, dict[str, str]] = {
                           "獲勝的方案把擁擠程度砍了一半，那正是這道門檻真正想要的東西，"
                           "而門檻照它寫的樣子仍然沒過。這裡和 JSON 裡都記為失敗，因為一個"
                           "事後被重新解讀成剛好支持結果的門檻，就不是門檻了。",
+        "ctx_l_h": "同樣那十二個查詢，跑在一個在這台機器上執行的模型上",
+        "ctx_l_p": "透過 Ollama 的 nomic-embed-text —— 137M 參數、Apache-2.0、768 維，"
+                   "正好是這個向量平面本來就在用的寬度。完全相同的立足點：同一份語料 "
+                   "digest、同樣的查詢、同樣的方案、同樣的預算。雲端 → 本地。",
+        "ctx_l_find_h": "在關鍵的那一列兩者打平，而本地模型能做一件雲端做不到的事。",
+        "ctx_l_find_p": "在獲勝的方案上，兩者都達到 Recall@1 0.75 與 Recall@5 1.00，"
+                        "本地模型在 MRR 與擁擠度上還略微領先。它同時能釘住自己的權重："
+                        "Ollama 會回報 content digest，所以一個查詢只有在權重是同樣的"
+                        "位元組時才與語料可比。雲端模型是一個「名字」，而名字可以在不改變"
+                        "的情況下被重新指向。另外兩件事是單靠雲端那次跑不出來的 —— "
+                        "切段的收益是「單位」與「模型」的共同性質（雲端 4.5 倍、本地 "
+                        "1.8 倍，終點相同），以及 p95 門檻第二次被推翻：在整個 turn 的"
+                        "那一列，本地模型更擁擠、檢索卻好得多，也就是說門檻量的那個東西，"
+                        "動的方向跟它本來要預測的東西相反。",
         "ctx_ref_kicker": "三種拒絕",
         "ctx_ref_h": "真正承重的，是它拒絕回答的那些",
         "ctx_ref_1_h": "先確認身分，再談相似度",

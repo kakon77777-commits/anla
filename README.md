@@ -193,6 +193,32 @@ reaching for, and the gate as written still failed. It is reported failed, in th
 JSON and here, because a threshold re-read after the fact to mean whatever the result
 supports is not a threshold.
 
+**The same twelve queries, on a model that runs on this machine.** `nomic-embed-text`
+through Ollama — 137M parameters, Apache-2.0, 768 dimensions — on identical ground:
+same corpus digest, same queries, same schemes, same budget.
+
+| scheme | R@1 hosted → local | MRR hosted → local | p95 hosted → local |
+|---|---|---|---|
+| `whole-turn-v1` | 0.17 → **0.42** | 0.280 → **0.569** | +0.443 → +0.500 |
+| `structural-v1` | 0.50 → **0.58** | 0.545 → **0.704** | +0.356 → +0.351 |
+| `sized-900-v1` | 0.58 → 0.50 | 0.656 → 0.631 | +0.361 → **+0.315** |
+| **`changepoint-v1`** | 0.75 → 0.75 | 0.847 → **0.861** | +0.219 → **+0.203** |
+
+On the winning scheme they are level at R@1 0.75 and R@5 1.00, with the local model
+marginally ahead on MRR and crowding. A 262 MB file that runs offline and pins its
+own weights by digest is not a compromise here — a hosted *name* can be re-pointed
+without changing, and a local hash cannot.
+
+Two things follow that the hosted run alone could not have shown. **Segmentation's
+benefit is a joint property of the unit and the model**: 4.5× on the hosted model
+(0.17 → 0.75), 1.8× on the local one (0.42 → 0.75), same destination from very
+different starting points — so "0.17 to 0.75" was true and narrower than it sounded.
+And **the p95 gate is refuted a second time, independently**: at `whole-turn-v1` the
+local model is *more* crowded (+0.500 against +0.443) and retrieves *much* better
+(R@1 0.42 against 0.17). The quantity the gate measures moved opposite to the
+quantity it existed to predict, which is worse than being set at the wrong level —
+a bad level can be re-set; pointing the wrong way cannot be fixed by a better number.
+
 Nothing in this package computes an embedding. The vectors come from whatever model
 the agent has — the OpenAI backend in `bench/` is a *test* backend, and the identity
 travels with the vectors precisely so that a local or browser model can replace it
