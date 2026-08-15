@@ -78,6 +78,43 @@ try {
     $masked = $token.Substring(0, 4) + ("." * 12) + $token.Substring($token.Length - 4)
     Write-Host ""
     Write-Host "  got $($token.Length) characters: $masked"
+
+    # Ask the registry what this token is, before spending a publish attempt on it.
+    # Two rounds were lost to "403: this token does not have the required
+    # permissions" with nothing to distinguish a missing scope from an unverified
+    # email, and both are answerable here: /api/v1/me needs authentication, so
+    # reaching it proves the token is valid, and the reply carries the email state.
+    Write-Host "  asking crates.io what this token can do..." -NoNewline
+    $who = $null
+    try {
+        $who = Invoke-RestMethod -Uri "https://crates.io/api/v1/me" -Headers @{
+            "Authorization" = $token
+            "User-Agent"    = "anla-release (kakon77777@gmail.com)"
+        } -TimeoutSec 30
+        Write-Host ""
+        Write-Host "    account        : $($who.user.login)"
+        $verified = $who.user.email_verified
+        if ($null -eq $verified) { $verified = "(not reported)" }
+        Write-Host "    email verified : $verified"
+        if ($verified -eq $false) {
+            Write-Host ""
+            Write-Host "  crates.io will refuse to publish until that address is verified." -ForegroundColor Red
+            Write-Host "  https://crates.io/settings/profile"
+            Remove-Variable token
+            exit 1
+        }
+        Write-Host "    the token authenticates, so a 403 from here on is SCOPE:" -ForegroundColor Yellow
+        Write-Host "    it must include publish-new, and must not be restricted to"
+        Write-Host "    crate names other than anla1."
+    } catch {
+        Write-Host " failed" -ForegroundColor Red
+        Write-Host "    $($_.Exception.Message)"
+        Write-Host ""
+        Write-Host "  A 401/403 here means the token itself is not valid -- it was"
+        Write-Host "  mistyped, revoked, or belongs to a different registry."
+        Remove-Variable token
+        exit 1
+    }
     Write-Host ""
     Write-Host "  crates.io is permanent: a published version can be yanked but never" -ForegroundColor Yellow
     Write-Host "  deleted, and 0.1.0 can never be used again for this crate."
