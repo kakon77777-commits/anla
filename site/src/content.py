@@ -145,6 +145,37 @@ STRINGS: dict[str, dict[str, str]] = {
                           "reported failed here and in the JSON, because a threshold "
                           "re-read after the fact to mean whatever the result "
                           "supports is not a threshold.",
+        "ctx_g_kicker": "relation edges",
+        "ctx_g_h": "The graph, and what it turned out to be",
+        "ctx_g_desc": "Typed edges the record states outright — a reply's parent, a "
+                      "tool call matched to its result, the same file named twice. "
+                      "Each carries a kind and its evidence, never a score. Measured "
+                      "against two controls: random pairs, and merely adjacent turns, "
+                      "which is what conversation order gives for free.",
+        "ctx_g_random": "floor",
+        "ctx_g_adjacent": "free baseline",
+        "ctx_g_relation": "relation",
+        "ctx_g_cosine": "mean cosine",
+        "ctx_g_ratio": "vs adjacency",
+        "ctx_g_adjshare": "already adjacent",
+        "ctx_g_edges": "edges",
+        "ctx_g_find_1_h": "Two of the three are adjacency with a label.",
+        "ctx_g_find_1_p": "90.6% of replies-to edges connect turns that are already "
+                          "next to each other, and the tenth that do not score below "
+                          "plain ordering — +0.089 against adjacency's +0.185. "
+                          "tool-result-of has the same shape. Only mentions-path "
+                          "survives the split: 76% long-range, reaching 5,103 turns "
+                          "apart, and still 2.42× adjacency with its adjacent edges "
+                          "removed. Of 9,050 edges, 2,035 link a pair that ordering "
+                          "does not already put side by side.",
+        "ctx_g_find_2_h": "On retrieval it is smaller than the instrument resolves.",
+        "ctx_g_find_2_p": "A graph bonus over the twelve labelled queries moved "
+                          "{moved} of {queries} — {up} up, {down} down — for MRR "
+                          "{delta:+.3f}, where one query is {resolution:.3f}. The "
+                          "control at β = 0 reproduces the published baseline exactly, "
+                          "so the harness is wired right and the answer is simply that "
+                          "twelve queries cannot resolve this. It is two-sided: at one "
+                          "setting the bonus pushed a correct answer out of the top five.",
         "ctx_l_h": "The same twelve queries, on a model that runs on this machine",
         "ctx_l_p": "nomic-embed-text through Ollama — 137M parameters, Apache-2.0, "
                    "768 dimensions, which is the width this vector plane already "
@@ -186,7 +217,7 @@ STRINGS: dict[str, dict[str, str]] = {
                        "from a complete search unless the share is stated. It is "
                        "stated, on every call.",
         "ctx_run_h": "Run it",
-        "ctx_run_p": "Twenty tools over stdio. Nothing here computes an embedding: "
+        "ctx_run_p": "{mcp_tools} tools over stdio. Nothing here computes an embedding: "
                      "the vectors come from whatever model the agent already has, "
                      "and the identity travels with them so a local or browser model "
                      "can replace the one used here without anything silently "
@@ -701,6 +732,32 @@ STRINGS: dict[str, dict[str, str]] = {
                           "獲勝的方案把擁擠程度砍了一半，那正是這道門檻真正想要的東西，"
                           "而門檻照它寫的樣子仍然沒過。這裡和 JSON 裡都記為失敗，因為一個"
                           "事後被重新解讀成剛好支持結果的門檻，就不是門檻了。",
+        "ctx_g_kicker": "關係邊",
+        "ctx_g_h": "這張圖，以及它實際上是什麼",
+        "ctx_g_desc": "紀錄裡直接寫著的帶型別邊 —— 一個回覆的父節點、一次工具呼叫跟它的"
+                      "結果、同一個檔名被兩邊都提到。每條邊帶的是型別跟依據，永遠不帶"
+                      "分數。對照兩個基準量：隨機配對，以及兩個只是相鄰的回合 —— 後者是"
+                      "對話順序本來就免費送的那一份。",
+        "ctx_g_random": "地板",
+        "ctx_g_adjacent": "免費基準",
+        "ctx_g_relation": "關係",
+        "ctx_g_cosine": "平均餘弦",
+        "ctx_g_ratio": "對相鄰的倍數",
+        "ctx_g_adjshare": "本來就相鄰",
+        "ctx_g_edges": "條邊",
+        "ctx_g_find_1_h": "三種裡有兩種，只是換了個名字的「相鄰」。",
+        "ctx_g_find_1_p": "replies-to 裡有 90.6% 的邊，兩端本來就緊鄰著；而剩下那十分之"
+                          "一的分數還低於純順序 —— +0.089 對上相鄰的 +0.185。"
+                          "tool-result-of 是一模一樣的形狀。只有 mentions-path 撐過這個"
+                          "切分：76% 是遠距離，最遠跨 5,103 個回合，把相鄰的那些拿掉之後"
+                          "依然是相鄰的 2.42 倍。9,050 條邊裡，只有 2,035 條連的是順序"
+                          "沒有已經排在一起的配對。",
+        "ctx_g_find_2_h": "在檢索上，它小於這把尺子量得出來的度。",
+        "ctx_g_find_2_p": "對那十二個標註查詢加上圖的加權，{queries} 個裡動了 {moved} 個"
+                          " —— {up} 個往上，{down} 個往下 —— MRR {delta:+.3f}，而一個"
+                          "查詢就是 {resolution:.3f}。β = 0 的對照組完全重現了已發布的"
+                          "基線，所以架構是接對的，答案就只是十二個查詢分不出來。而且它"
+                          "是雙向的：在某一組參數下，這個加權把一個正確答案擠出了前五名。",
         "ctx_l_h": "同樣那十二個查詢，跑在一個在這台機器上執行的模型上",
         "ctx_l_p": "透過 Ollama 的 nomic-embed-text —— 137M 參數、Apache-2.0、768 維，"
                    "正好是這個向量平面本來就在用的寬度。完全相同的立足點：同一份語料 "
@@ -732,7 +789,7 @@ STRINGS: dict[str, dict[str, str]] = {
                        "而那個答案跟一次完整搜尋是無法區分的 —— 除非把涵蓋比例講出來。"
                        "每一次呼叫都會講。",
         "ctx_run_h": "跑跑看",
-        "ctx_run_p": "二十個工具，走 stdio。這裡沒有任何東西會去算 embedding：向量來自"
+        "ctx_run_p": "{mcp_tools} 個工具，走 stdio。這裡沒有任何東西會去算 embedding：向量來自"
                      "代理本來就有的模型，而身分會跟著向量一起走，所以本地或瀏覽器端的"
                      "模型可以取代這裡用的那一個，而不會有任何東西在無聲地跨兩個向量空間"
                      "做比較。",

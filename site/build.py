@@ -269,7 +269,7 @@ def page_home(lang: str) -> str:
     <h2>{esc(s['get_h2'])}</h2></div>
   <div class="filecards">
     {_filecard(f"{b}workbench/", s['cta_workbench_t'], s['cta_workbench_d'], 'HTML · no backend')}
-    {_filecard(f"{b}context/", s['ctx_cta_t'], s['ctx_cta_d'], 'MCP · 20 tools')}
+    {_filecard(f"{b}context/", s['ctx_cta_t'], s['ctx_cta_d'], f'MCP · {mcp_tool_count()} tools')}
     {_filecard(f"{b}demo/", s['cta_demo_t'], s['cta_demo_d'], '67 assertions')}
     {_filecard("/standalone.html" if lang == "en" else "/standalone.zh.html",
                s['cta_standalone_t'], s['cta_standalone_d'], 'single file')}
@@ -729,6 +729,24 @@ def page_bench(lang: str) -> str:
 # context / MCP — the agent-memory page
 # --------------------------------------------------------------------------
 
+def mcp_tool_count() -> int:
+    """Counted from the server, not typed into the page.
+
+    It was typed in, as `MCP · 20 tools`, and by the time anyone looked there were
+    23 — a figure whose only artefact is prose cannot go stale loudly, so it goes
+    stale quietly. Raises rather than returning a guess: a page that renders
+    `MCP · 0 tools` because a regex stopped matching is worse than a build that stops.
+    """
+    source = (REPO / "tools" / "mcp" / "anla_mcp.py").read_text(encoding="utf-8")
+    found = source.count("\n@mcp.tool()")
+    if found < 10:
+        raise SystemExit(
+            f"counted {found} MCP tools in tools/mcp/anla_mcp.py, which cannot be "
+            f"right — the decorator or the file moved, and this page states the "
+            f"number as a fact about the server.")
+    return found
+
+
 def _context_document() -> dict:
     path = REPO / "bench" / "context_addressing.json"
     if not path.exists():
@@ -737,6 +755,85 @@ def _context_document() -> dict:
             "`python bench/context_bench.py <transcript.jsonl>`. This page renders "
             "measurements and there is no version of it that makes them up.")
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+#: The row order the relation table reads in: the free baseline first, then each kind
+#: beside its own long-range remainder, because the pairing is the finding.
+RELATION_ROWS = (
+    ("random", "ctx_g_random"),
+    ("adjacent", "ctx_g_adjacent"),
+    ("mentions-path", None),
+    ("mentions-path (gap>1)", None),
+    ("tool-result-of", None),
+    ("tool-result-of (gap>1)", None),
+    ("replies-to", None),
+    ("replies-to (gap>1)", None),
+)
+
+
+def _relation_section(s: dict) -> str:
+    """The relation-edge result, or nothing at all.
+
+    Returns empty when the measurement has not been run, rather than rendering a
+    section with blanks in it: this page states measured numbers, and a heading with
+    no numbers under it reads as a feature that was built and never checked.
+    """
+    path = REPO / "bench" / "relation_retrieval.json"
+    if not path.exists():
+        return ""
+    d = json.loads(path.read_text(encoding="utf-8"))
+    a = d["part_a_pair_similarity"]
+    baseline = a["adjacent"]["mean"]
+
+    rows = []
+    for name, role in RELATION_ROWS:
+        row = a.get(name)
+        if not row or not row["n"]:
+            continue
+        ratio = row["mean"] / baseline
+        # The whole point of the table: a kind whose long-range half sits below plain
+        # ordering is ordering with a label, and the class says so without a caption.
+        tone = ("ctx-win" if ratio >= 2 else "ctx-weak" if ratio < 1 else "")
+        tag = f' <small>({esc(s[role])})</small>' if role else ""
+        share = row.get("adjacent_share")
+        rows.append(
+            f'<tr class="{tone}"><td><code>{esc(name)}</code>{tag}</td>'
+            f'<td>{row["n"]:,}</td>'
+            f'<td>{row["mean"]:+.4f}</td>'
+            f'<td>{ratio:.2f}&times;</td>'
+            f'<td>{share:.1%}</td></tr>' if share is not None else
+            f'<tr class="{tone}"><td><code>{esc(name)}</code>{tag}</td>'
+            f'<td>{row["n"]:,}</td>'
+            f'<td>{row["mean"]:+.4f}</td>'
+            f'<td>{ratio:.2f}&times;</td><td>&mdash;</td></tr>')
+
+    moved = d.get("part_b_queries_that_moved") or {}
+    up = sum(1 for v in moved.values() if v["best"] < v["control"])
+    down = sum(1 for v in moved.values() if v["best"] > v["control"])
+    return f"""
+<section class="section"><div class="wrap">
+  <div class="section-head"><span class="kicker">{esc(s['ctx_g_kicker'])}</span>
+    <h2>{esc(s['ctx_g_h'])}</h2>
+    <p class="section-desc">{esc(s['ctx_g_desc'])}</p></div>
+  <div class="runbar">
+    <span class="badge">{d['edges']:,} {esc(s['ctx_g_edges'])}</span>
+    <span class="badge">{esc(d['model'])} &middot; {d['dimensions']}d</span>
+    <span class="badge">{d['turns']:,} {esc(s['ctx_m_turns'])} &middot;
+      {esc(d['corpus_digest'][:16])}</span>
+  </div>
+  <div class="table-scroll"><table class="bench-table ctx-table"><thead><tr>
+    <th>{esc(s['ctx_g_relation'])}</th><th>n</th>
+    <th>{esc(s['ctx_g_cosine'])}</th><th>{esc(s['ctx_g_ratio'])}</th>
+    <th>{esc(s['ctx_g_adjshare'])}</th>
+  </tr></thead><tbody>{''.join(rows)}</tbody></table></div>
+  <div class="callout fail" style="font-weight:400;font-size:15px">
+    <strong>{esc(s['ctx_g_find_1_h'])}</strong> {esc(s['ctx_g_find_1_p'])}</div>
+  <div class="callout"><strong>▸ {esc(s['ctx_g_find_2_h'])}</strong>
+    {esc(s['ctx_g_find_2_p'].format(moved=len(moved), queries=d['queries'],
+                                    up=up, down=down,
+                                    delta=d['part_b_best_minus_control_mrr'],
+                                    resolution=d['resolution_of_one_query']))}</div>
+</div></section>"""
 
 
 def _retrieval_document(name: str = "segment_retrieval.json") -> dict | None:
@@ -922,6 +1019,8 @@ def page_context(lang: str) -> str:
     <strong>{esc(s['ctx_r_find_2_h'])}</strong> {esc(s['ctx_r_find_2_p'])}</div>
 </div></section>"""
 
+    relation_section = _relation_section(s)
+
     stamp = time.strftime("%Y-%m-%d %H:%M UTC",
                           time.gmtime(d["generated_at_unix_ns"] / 1e9))
     body = f"""<main>
@@ -962,6 +1061,7 @@ def page_context(lang: str) -> str:
   <div class="grid-2" style="margin-top:18px">{wire_card}</div>
 </div></section>
 {retrieval_section}
+{relation_section}
 <section class="section"><div class="wrap">
   <div class="section-head"><span class="kicker">{esc(s['ctx_ref_kicker'])}</span>
     <h2>{esc(s['ctx_ref_h'])}</h2></div>
@@ -977,7 +1077,7 @@ def page_context(lang: str) -> str:
 
 <section class="section"><div class="wrap">
   <div class="section-head"><h2>{esc(s['ctx_run_h'])}</h2>
-    <p class="section-desc">{esc(s['ctx_run_p'])}</p></div>
+    <p class="section-desc">{esc(s['ctx_run_p'].format(mcp_tools=mcp_tool_count()))}</p></div>
   <pre class="codeblock"><code>pip install "mcp&gt;=1.10,&lt;2"
 python tools/mcp/anla_mcp.py
 

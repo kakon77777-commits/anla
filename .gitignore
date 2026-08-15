@@ -26,3 +26,8 @@ python/dist/
 
 # Built release artefacts, verified and attached to the GitHub release; not source.
 dist-release/
+
+# The relation benchmark's embedding cache: 11,600 vectors at 768d, 104 MB of JSON.
+# Derived from the transcript and the model identity, both of which are recorded in
+# bench/relation_retrieval.json, so it is reproducible rather than source.
+bench/*.vectors.json

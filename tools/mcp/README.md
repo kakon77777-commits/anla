@@ -83,6 +83,8 @@ several index families coexist over one record, and re-cutting rewrites nothing.
 | `context_segment_export` | The views `π_σ(m)` to embed, with the identity that must come back with them. A `limit` samples across the whole record by default and names which part it covered. |
 | `context_attach_vectors` | Vectors into the auxiliary plane, keyed by segment. `float32` behind a JSON header: 61,458 × 768 measures **978 MB as JSON and 192 MB here**, and loads in 0.52 s instead of 38.1 s. |
 | `context_address` | A question in, `(turn, start_byte, end_byte)` out, digest verified against the record. |
+| `context_relate` | Typed relation edges onto the index: `replies-to` from `parentUuid`, `tool-result-of` from matching tool ids, `mentions-path` from a literal path in both turns. Each edge carries a kind and its evidence, never a score. Re-derived and compared before it is written, so a graph that has drifted from its record fails rather than being believed. |
+| `context_relations` | What the record says is related to a turn, and why. Reads the stored edges; derives them in memory when none are stored — the normal case under `--share` — and says which it did. Neighbours come back unranked. |
 
 Three refusals are the load-bearing part:
 

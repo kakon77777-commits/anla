@@ -27,6 +27,7 @@ import hashlib
 import json
 import time
 import uuid
+from collections import namedtuple
 from pathlib import Path
 
 from anla.errors import InvalidInput
@@ -44,6 +45,12 @@ from .snapshot import (
     CODEC_ZSTD, cdc_chunker, extract_snapshot, list_snapshots, write_snapshot,
 )
 from .vectors import have_numpy, read_vectors, write_vectors
+
+
+#: A turn read back out of an archive rather than parsed from a transcript. Enough
+#: of `context.Turn` for the relation layer, which wants only the stored path and
+#: the bytes under it.
+_Stored = namedtuple("_Stored", "path raw")
 
 
 def _read(path: str) -> bytes:
@@ -275,6 +282,65 @@ def cmd_segment(args, emit) -> int:
           + ("unchanged" if before == after
              else "CHANGED — the invariant is broken")])
     return 0 if before == after else 1
+
+
+def cmd_relate(args, emit) -> int:
+    """Derive the relation graph, attach it to the index, and re-check it.
+
+    Written back into the same sidecar the segments live in: the edges are auxiliary
+    like everything in the context layer, and the archive is opened read-only.
+    """
+    from .relations import DERIVED_KINDS, EDGE_KINDS, derive_edges, verify_edges
+
+    path = Path(args.archive).expanduser()
+    data = path.read_bytes()
+    before = hashlib.blake2b(data, digest_size=16).hexdigest()
+    restored = extract_snapshot(data, _latest(data))
+    # From the archive, so the path is the stored one rather than one recomputed
+    # from a role and an index — the edges must name turns the way the record does.
+    turns = [_Stored(path, raw) for path, raw in sorted(restored.items())]
+
+    index = _load_index(args.archive, args.scheme)
+    index.edges = derive_edges(turns)
+    report = verify_edges(turns, None, index.edges)
+    after = hashlib.blake2b(path.read_bytes(), digest_size=16).hexdigest()
+
+    where = _index_path(args.archive, args.scheme)
+    where.write_text(json.dumps(index.as_dict(), ensure_ascii=False),
+                     encoding="utf-8")
+
+    counts: dict[str, int] = {k: 0 for k in DERIVED_KINDS}
+    for edge in index.edges:
+        counts[edge["kind"]] = counts.get(edge["kind"], 0) + 1
+    ok = report["identical"] and before == after
+    emit({"archive": args.archive, "sidecar": str(where), "scheme": args.scheme,
+          "turns": len(turns), "edges": len(index.edges), "by_kind": counts,
+          # Two different reasons, kept apart. `same-turn` is a fact the record
+          # states and is left out because the segment tuple already carries it;
+          # `supersedes` is not a fact the record states at all. Reporting both
+          # under one heading would say the graph is missing three kinds it could
+          # have had, when three of the six are simply not worth storing.
+          "not_stored_because_implied": {k: v for k, v in EDGE_KINDS.items()
+                                         if v.startswith("not stored")},
+          "not_derivable": {k: v for k, v in EDGE_KINDS.items()
+                            if v.startswith("not derivable")},
+          "reproducible": report["identical"], "vacuous": report["vacuous"],
+          "preservation_digest": before, "preservation_unchanged": before == after},
+         [f"{where}",
+          f"  {len(index.edges):,} edges over {len(turns):,} turns"]
+         + [f"    {k:<16} {n:>7,}" for k, n in sorted(counts.items())]
+         + [f"  re-derived identical: {report['identical']}"
+            + ("" if report["identical"]
+               else f" — {report['missing_total']} missing, "
+                    f"{report['unexplained_total']} unexplained, "
+                    f"{report['duplicate_keys']} duplicated"),
+            "  not derivable from the record, so not stored: "
+            + ", ".join(k for k, v in EDGE_KINDS.items()
+                        if v.startswith("not derivable")),
+            f"  preservation digest {before[:16]} "
+            + ("unchanged" if before == after
+               else "CHANGED — the invariant is broken")])
+    return 0 if ok else 1
 
 
 def cmd_address(args, emit) -> int:
@@ -521,6 +587,14 @@ def add_parser(sub, common) -> None:
                            choices=sorted(SCHEMES))
     common(segmented)
     segmented.set_defaults(func=cmd_segment)
+
+    related = inner.add_parser(
+        "relate", help="derive typed relation edges onto an existing index")
+    related.add_argument("archive")
+    related.add_argument("--scheme", default="changepoint-v1",
+                         choices=sorted(SCHEMES))
+    common(related)
+    related.set_defaults(func=cmd_relate)
 
     addressed = inner.add_parser(
         "address", help="a question in, the exact bytes of a turn out")

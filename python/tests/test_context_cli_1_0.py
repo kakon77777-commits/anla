@@ -349,3 +349,89 @@ def test_address_refuses_a_corpus_from_a_model_that_has_changed(
                                 "--embed", "--host", stub_backend)
     assert "INCOMPARABLE" in (refused_out["incomparable"] or "")
     assert "revision" in refused_out["incomparable"]
+
+
+# ---------------------------------------------------------------------------
+# relate
+# ---------------------------------------------------------------------------
+
+#: The fixture above predates the relation layer and carries no `uuid`, no
+#: `parentUuid` and no tool blocks — so `derive_edges` would correctly return
+#: nothing from it, and a test written on it would assert an empty graph while
+#: looking like it had checked one. This transcript has the shape the real records
+#: have.
+LINKED = "\n".join(json.dumps(row, ensure_ascii=False) for row in [
+    {"type": "user", "uuid": "u1", "parentUuid": None,
+     "message": {"role": "user",
+                 "content": "look at bench/segment_retrieval.py " + "padding. " * 40}},
+    {"type": "assistant", "uuid": "a1", "parentUuid": "u1",
+     "message": {"role": "assistant", "content": [
+         {"type": "text", "text": "reading it. " + "padding for size. " * 40},
+         {"type": "tool_use", "id": "call_9", "name": "Read",
+          "input": {"file_path": "bench/segment_retrieval.py"}}]}},
+    {"type": "user", "uuid": "u2", "parentUuid": "a1",
+     "message": {"role": "user", "content": [
+         {"type": "tool_result", "tool_use_id": "call_9",
+          "content": "the file's contents. " + "padding. " * 40}]}},
+    {"type": "assistant", "uuid": "a2", "parentUuid": "u2",
+     "message": {"role": "assistant",
+                 "content": "bench/segment_retrieval.py holds the gate. "
+                            + "padding. " * 40}},
+]) + "\n"
+
+
+@pytest.fixture()
+def linked(tmp_path):
+    path = tmp_path / "linked.jsonl"
+    path.write_text(LINKED, encoding="utf-8")
+    return path
+
+
+def test_relate_derives_edges_without_touching_the_record(tmp_path, linked, capsys):
+    archive = tmp_path / "m.anla"
+    payload(capsys, "context", "capture", str(archive), "--transcript", str(linked))
+    payload(capsys, "context", "segment", str(archive), "--scheme", "structural-v1")
+    before = archive.read_bytes()
+
+    code, got = payload(capsys, "context", "relate", str(archive),
+                        "--scheme", "structural-v1")
+    assert code == 0
+    assert got["preservation_unchanged"] is True
+    assert archive.read_bytes() == before, "the archive is byte-identical after"
+    assert got["reproducible"] is True and got["vacuous"] is False
+    # three parent links, one tool pairing, and a chain over one shared path
+    assert got["by_kind"] == {"replies-to": 3, "tool-result-of": 1,
+                              "mentions-path": 2}
+    assert set(got["not_derivable"]) == {"supersedes", "supports", "contradicts"}
+    # a separate heading, because "implied by the tuple" and "the record cannot
+    # say it" are different reasons and one label would conflate them
+    assert set(got["not_stored_because_implied"]) == {"same-turn", "next-in-turn",
+                                                      "next-turn"}
+
+
+def test_relate_writes_the_edges_into_the_index_sidecar(tmp_path, linked, capsys):
+    from pathlib import Path
+
+    archive = tmp_path / "m.anla"
+    payload(capsys, "context", "capture", str(archive), "--transcript", str(linked))
+    code, seg = payload(capsys, "context", "segment", str(archive),
+                        "--scheme", "structural-v1")
+    assert json.loads(Path(seg["sidecar"]).read_text(encoding="utf-8"))["edges"] == []
+
+    code, got = payload(capsys, "context", "relate", str(archive),
+                        "--scheme", "structural-v1")
+    reloaded = json.loads(Path(got["sidecar"]).read_text(encoding="utf-8"))
+    assert len(reloaded["edges"]) == got["edges"] > 0
+    assert reloaded["segments"], "the segments survive being written alongside edges"
+    # every stored edge is typed and carries evidence, and none carries a score
+    for edge in reloaded["edges"]:
+        assert set(edge) == {"kind", "from", "to", "evidence"}
+        assert edge["evidence"]
+
+
+def test_relate_refuses_before_an_index_exists(tmp_path, linked, capsys):
+    archive = tmp_path / "m.anla"
+    payload(capsys, "context", "capture", str(archive), "--transcript", str(linked))
+    code, message = refused(capsys, "context", "relate", str(archive),
+                            "--scheme", "structural-v1")
+    assert code != 0

@@ -118,11 +118,11 @@ class SegmentIndex:
     scheme_version: int
     projection_version: str
     segments: list[Segment] = field(default_factory=list)
-    #: Relations between segments, reserved and populated by callers rather than
-    #: inferred here: same-turn, adjacency, tool-call/result, quote, same-file,
-    #: supersedes/supports/contradicts. Held so relation work does not require a
-    #: schema change — and *not* used by anything yet, because a relation nobody
-    #: computed is not a relation.
+    #: Typed relations between turns, from `relations.derive_edges` — the
+    #: context/index base, never a phase. Populated by the caller rather than by
+    #: `build_index`, because the edges are a fact about the record and re-deriving
+    #: them per scheme would make them a fact about the segmenter instead.
+    #: `relations.EDGE_KINDS` lists which kinds are derivable and which are not.
     edges: list[dict] = field(default_factory=list)
 
     def as_dict(self) -> dict:

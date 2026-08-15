@@ -164,10 +164,26 @@ the other side.
 
 ## 6. The order this implies
 
-1. **Relation edges, typed, no phase vocabulary.** They are the index base; they are
-   independently useful for retrieval; and they are a prerequisite for anything else.
-2. **Measure whether they help**, on the existing labelled set, against the current
-   no-edges baseline. If they do not, that is the answer.
+1. ~~**Relation edges, typed, no phase vocabulary.**~~ **Built** —
+   `python/anla1/relations.py`, 9,050 edges over the pinned corpus, three derivable
+   kinds and six named-but-not-stored with the reason each is absent.
+2. ~~**Measure whether they help.**~~ **Measured, and the answer is mostly no** —
+   [`relation-edges-measured.md`](relation-edges-measured.md).
+
+   90.6% of `replies-to` edges connect turns that are already adjacent, and the tenth
+   that do not score **+0.089 against adjacency's +0.185** — half of what conversation
+   order gives for free. `tool-result-of` has the same shape. Only `mentions-path` is
+   a real relation: 76% long-range, reaching 5,103 turns, and still 2.42× adjacency
+   when its adjacent edges are excluded.
+
+   On retrieval the graph moves three of twelve queries — two up, one down, net +1 at
+   R@1, MRR +0.056 where one query is 0.083. Smaller than the instrument resolves.
+
+   So the claim above that edges are "independently useful for retrieval" was written
+   before there was a measurement, and the measurement does not support it in general.
+   It supports it for one kind of the three. The consequence for the layer is that
+   `mentions-path` is the semantic relation and the other two are navigation, which is
+   a distinction the index base should carry rather than a reason to delete them.
 3. **Transport only if a composition law is written down** — and then holonomy is
    available as a word, and Theorem 28.1 says a zero result is the *expected* one
    under a global trivialization, so a non-zero result needs the seven-way

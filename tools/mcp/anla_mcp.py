@@ -42,6 +42,7 @@ import sys
 import tempfile
 import time
 import uuid
+from collections import namedtuple
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
@@ -74,6 +75,9 @@ from anla1.context import (  # noqa: E402
 )
 from anla1.backends import DEFAULT_OLLAMA, backend_for  # noqa: E402
 from anla1.embedding import EmbeddingIdentity, comparable  # noqa: E402
+from anla1.relations import (  # noqa: E402
+    EDGE_KINDS, derive_edges, neighbours, verify_edges,
+)
 from anla1.resonance import (  # noqa: E402
     Candidate, classify_persistence, resonant_domain,
 )
@@ -131,6 +135,7 @@ WRITING_TOOLS = frozenset({
     "anla_pack", "anla_append", "anla_extract",
     "context_capture", "context_segment", "context_segment_export",
     "context_attach_vectors", "context_export_for_embedding", "context_embed",
+    "context_relate",
 })
 
 
@@ -1094,6 +1099,11 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
+#: A turn read back out of an archive: the stored path and the bytes under it,
+#: which is all the relation layer needs.
+_Stored = namedtuple("_Stored", "path raw")
+
+
 def _preserved(archive: str) -> tuple[pathlib.Path, dict[str, bytes]]:
     target = _archive(archive)
     data = target.read_bytes()
@@ -1191,6 +1201,114 @@ def context_segment(archive: str, scheme: str = "changepoint-v1",
         "plane": "auxiliary — 切割 = 索引; the record was read, not rewritten",
         "next": "context_segment_export → embed → context_attach_vectors(scheme=...) "
                 "→ context_address",
+    }
+
+
+@mcp.tool()
+@_guard
+def context_relate(archive: str, scheme: str = "changepoint-v1") -> dict:
+    """Derive typed relation edges onto an existing index. Writes nothing to the record.
+
+    The edges are the **context/index base** of EveMissLab's Phase Canon — the graph a
+    transport would later be defined over — and nothing here is a phase. Each edge
+    carries a *kind* and the evidence that produced it, never a score: Paper 02 §9 puts
+    scalarization after the structure as a task choice, so a weight stored on the edge
+    would collapse exactly what the graph is for.
+
+    Only what the record states outright: `replies-to` from `parentUuid`,
+    `tool-result-of` from matching tool ids, `mentions-path` from a literal path in
+    both turns. `supersedes`, `supports` and `contradicts` are judgements about content
+    that the record cannot yield, so they are reported as unavailable rather than
+    guessed by a model and shipped looking the same as the derived ones.
+    """
+    target, preserved = _preserved(archive)
+    before = hashlib.blake2b(target.read_bytes(), digest_size=16).hexdigest()
+    turns = [_Stored(path, raw) for path, raw in sorted(preserved.items())]
+
+    sidecar = _segment_sidecar(target, scheme)
+    if not sidecar.exists():
+        return {"error": f"no index for scheme {scheme!r}; run context_segment first",
+                "code": "ANLA_NO_SEGMENT_INDEX", "archive": str(target)}
+    index = SegmentIndex.of(json.loads(sidecar.read_text(encoding="utf-8")))
+    index.edges = derive_edges(turns)
+    report = verify_edges(turns, None, index.edges)
+    after = hashlib.blake2b(target.read_bytes(), digest_size=16).hexdigest()
+    sidecar.write_text(json.dumps(index.as_dict(), ensure_ascii=False),
+                       encoding="utf-8")
+
+    counts: dict[str, int] = {}
+    for edge in index.edges:
+        counts[edge["kind"]] = counts.get(edge["kind"], 0) + 1
+    return {
+        "archive": str(target), "sidecar": str(sidecar), "scheme": scheme,
+        "turns": len(turns), "edges": len(index.edges), "by_kind": counts,
+        "kinds": dict(EDGE_KINDS),
+        "reproducible": report["identical"],
+        "reproducibility_detail": {k: report[k] for k in
+                                   ("missing_total", "unexplained_total",
+                                    "duplicate_keys", "vacuous")},
+        "preservation_digest": before,
+        "preservation_unchanged": before == after,
+        "plane": "auxiliary — the edges describe the record and do not touch it",
+        "not_a_phase": "context/index base I_sem; no transport, no holonomy, and "
+                       "the phase channel stays ABSENT",
+        "next": "context_relations(turn=...) to walk it",
+    }
+
+
+@mcp.tool()
+@_guard
+def context_relations(archive: str, turn: str = "", kinds: list[str] | None = None,
+                      scheme: str = "changepoint-v1", limit: int = 40) -> dict:
+    """What the record says is related to a turn, and why.
+
+    Reads the edges `context_relate` stored. If none are stored — which is the normal
+    case under `--share`, where every writing tool is withdrawn — they are derived in
+    memory instead and the answer says so, because a caller comparing two responses
+    should be able to see that one of them cost a full pass over the archive.
+
+    Neighbours come back in derivation order and are not ranked. Which one matters is
+    the caller's question, and answering it here would be the scalarization §9 keeps
+    outside the structure.
+    """
+    target, preserved = _preserved(archive)
+    turns = [_Stored(path, raw) for path, raw in sorted(preserved.items())]
+
+    sidecar = _segment_sidecar(target, scheme)
+    stored, source = [], "derived in memory — no index sidecar holds edges"
+    if sidecar.exists():
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+        stored = list(payload.get("edges") or [])
+        if stored:
+            source = str(sidecar)
+    edges = stored or derive_edges(turns)
+
+    if turn and turn not in preserved:
+        near = [p for p in preserved if turn in p][:5]
+        return {"error": f"no turn {turn!r} in this archive", "code": "ANLA_NO_TURN",
+                "did_you_mean": near, "turns": len(preserved)}
+
+    wanted = set(kinds) if kinds else None
+    if wanted and not wanted <= set(EDGE_KINDS):
+        return {"error": f"unknown kind(s) {sorted(wanted - set(EDGE_KINDS))}",
+                "code": "ANLA_UNKNOWN_EDGE_KIND", "kinds": dict(EDGE_KINDS)}
+
+    selected = [e for e in edges
+                if (not turn or turn in (e["from"], e["to"]))
+                and (not wanted or e["kind"] in wanted)]
+    counts: dict[str, int] = {}
+    for edge in selected:
+        counts[edge["kind"]] = counts.get(edge["kind"], 0) + 1
+    return {
+        "archive": str(target), "scheme": scheme, "turn": turn or None,
+        "edges_source": source, "edges_in_graph": len(edges),
+        "matched": len(selected), "by_kind": counts,
+        "edges": selected[:limit],
+        "truncated": len(selected) > limit,
+        "neighbours": neighbours(selected, turn, kinds or ()) if turn else [],
+        "unavailable_kinds": {k: v for k, v in EDGE_KINDS.items()
+                              if v.startswith("not derivable")},
+        "ranking": "none — the edges are typed, not weighted (Paper 02 §9)",
     }
 
 

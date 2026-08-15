@@ -1,0 +1,561 @@
+{
+ "model": "ollama:nomic-embed-text:latest",
+ "revision": "0a109f422b47e3a30ba2b10eca18548e",
+ "dimensions": 768,
+ "corpus_digest": "38c5455779cbe268f86aff0605e2e4c8",
+ "turns": 6581,
+ "edges": 9050,
+ "edges_by_kind": {
+  "mentions-path": 2069,
+  "replies-to": 5244,
+  "tool-result-of": 1737
+ },
+ "scheme": "changepoint-v1",
+ "queries": 12,
+ "resolution_of_one_query": 0.083,
+ "part_a_pair_similarity": {
+  "random": {
+   "n": 7999,
+   "mean": 0.0074,
+   "median": -0.0253,
+   "p05": -0.3954,
+   "p95": 0.52
+  },
+  "adjacent": {
+   "n": 6580,
+   "mean": 0.185,
+   "median": 0.1684,
+   "p05": -0.2672,
+   "p95": 0.7163
+  },
+  "mentions-path": {
+   "n": 2069,
+   "mean": 0.4723,
+   "median": 0.4435,
+   "p05": -0.0154,
+   "p95": 0.9519,
+   "adjacent_share": 0.238
+  },
+  "mentions-path (gap>1)": {
+   "n": 1576,
+   "mean": 0.4473,
+   "median": 0.4089,
+   "p05": -0.0154,
+   "p95": 0.9535,
+   "max_gap": 5103
+  },
+  "replies-to": {
+   "n": 5244,
+   "mean": 0.1974,
+   "median": 0.1618,
+   "p05": -0.1648,
+   "p95": 0.7478,
+   "adjacent_share": 0.906
+  },
+  "replies-to (gap>1)": {
+   "n": 495,
+   "mean": 0.0887,
+   "median": 0.0599,
+   "p05": -0.1829,
+   "p95": 0.4031,
+   "max_gap": 21
+  },
+  "tool-result-of": {
+   "n": 1737,
+   "mean": 0.2785,
+   "median": 0.2091,
+   "p05": -0.1112,
+   "p95": 0.9115,
+   "adjacent_share": 0.906
+  },
+  "tool-result-of (gap>1)": {
+   "n": 164,
+   "mean": 0.1324,
+   "median": 0.145,
+   "p05": -0.1379,
+   "p95": 0.3726,
+   "max_gap": 5
+  }
+ },
+ "part_b_grid": {
+  "k=1,beta=0.0": {
+   "seeds": 1,
+   "beta": 0.0,
+   "recall_at_1": 0.75,
+   "recall_at_5": 1.0,
+   "mrr": 0.861,
+   "queries_at_rank_1": 9,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 3,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 2,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=1,beta=0.02": {
+   "seeds": 1,
+   "beta": 0.02,
+   "recall_at_1": 0.75,
+   "recall_at_5": 1.0,
+   "mrr": 0.861,
+   "queries_at_rank_1": 9,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 3,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 2,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=1,beta=0.05": {
+   "seeds": 1,
+   "beta": 0.05,
+   "recall_at_1": 0.833,
+   "recall_at_5": 1.0,
+   "mrr": 0.903,
+   "queries_at_rank_1": 10,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 3,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 2,
+    "the test for whether a cut belongs to this framework at all": 1,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=1,beta=0.1": {
+   "seeds": 1,
+   "beta": 0.1,
+   "recall_at_1": 0.833,
+   "recall_at_5": 1.0,
+   "mrr": 0.889,
+   "queries_at_rank_1": 10,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 3,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 3,
+    "the test for whether a cut belongs to this framework at all": 1,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=1,beta=0.2": {
+   "seeds": 1,
+   "beta": 0.2,
+   "recall_at_1": 0.833,
+   "recall_at_5": 1.0,
+   "mrr": 0.903,
+   "queries_at_rank_1": 10,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 3,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 2,
+    "the test for whether a cut belongs to this framework at all": 1,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=1,beta=0.4": {
+   "seeds": 1,
+   "beta": 0.4,
+   "recall_at_1": 0.833,
+   "recall_at_5": 0.917,
+   "mrr": 0.885,
+   "queries_at_rank_1": 10,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 8,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 2,
+    "the test for whether a cut belongs to this framework at all": 1,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=3,beta=0.0": {
+   "seeds": 3,
+   "beta": 0.0,
+   "recall_at_1": 0.75,
+   "recall_at_5": 1.0,
+   "mrr": 0.861,
+   "queries_at_rank_1": 9,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 3,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 2,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=3,beta=0.02": {
+   "seeds": 3,
+   "beta": 0.02,
+   "recall_at_1": 0.75,
+   "recall_at_5": 1.0,
+   "mrr": 0.861,
+   "queries_at_rank_1": 9,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 3,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 2,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=3,beta=0.05": {
+   "seeds": 3,
+   "beta": 0.05,
+   "recall_at_1": 0.75,
+   "recall_at_5": 1.0,
+   "mrr": 0.861,
+   "queries_at_rank_1": 9,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 3,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 2,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=3,beta=0.1": {
+   "seeds": 3,
+   "beta": 0.1,
+   "recall_at_1": 0.75,
+   "recall_at_5": 1.0,
+   "mrr": 0.861,
+   "queries_at_rank_1": 9,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 3,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 1,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 2,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=3,beta=0.2": {
+   "seeds": 3,
+   "beta": 0.2,
+   "recall_at_1": 0.833,
+   "recall_at_5": 1.0,
+   "mrr": 0.917,
+   "queries_at_rank_1": 10,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 1,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 1,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 2,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=3,beta=0.4": {
+   "seeds": 3,
+   "beta": 0.4,
+   "recall_at_1": 0.833,
+   "recall_at_5": 1.0,
+   "mrr": 0.917,
+   "queries_at_rank_1": 10,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 1,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 1,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 2,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=5,beta=0.0": {
+   "seeds": 5,
+   "beta": 0.0,
+   "recall_at_1": 0.75,
+   "recall_at_5": 1.0,
+   "mrr": 0.861,
+   "queries_at_rank_1": 9,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 3,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 2,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=5,beta=0.02": {
+   "seeds": 5,
+   "beta": 0.02,
+   "recall_at_1": 0.75,
+   "recall_at_5": 1.0,
+   "mrr": 0.861,
+   "queries_at_rank_1": 9,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 3,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 1,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 2,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=5,beta=0.05": {
+   "seeds": 5,
+   "beta": 0.05,
+   "recall_at_1": 0.75,
+   "recall_at_5": 1.0,
+   "mrr": 0.847,
+   "queries_at_rank_1": 9,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 3,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 3,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 1,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=5,beta=0.1": {
+   "seeds": 5,
+   "beta": 0.1,
+   "recall_at_1": 0.75,
+   "recall_at_5": 1.0,
+   "mrr": 0.847,
+   "queries_at_rank_1": 9,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 3,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 3,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 1,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=5,beta=0.2": {
+   "seeds": 5,
+   "beta": 0.2,
+   "recall_at_1": 0.833,
+   "recall_at_5": 1.0,
+   "mrr": 0.903,
+   "queries_at_rank_1": 10,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 1,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 3,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 1,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  },
+  "k=5,beta=0.4": {
+   "seeds": 5,
+   "beta": 0.4,
+   "recall_at_1": 0.833,
+   "recall_at_5": 1.0,
+   "mrr": 0.903,
+   "queries_at_rank_1": 10,
+   "median_rank": 1.0,
+   "ranks": {
+    "how was the rolling-hash constant table produced instead of copied": 1,
+    "what was the writer's throughput with content-defined boundaries": 1,
+    "why did every tool end up advertising the wrong parameters": 1,
+    "what did Windows refuse to do to a file that was mapped into memory": 3,
+    "the broken archive that both readers said was fine": 1,
+    "what does an unchanged checkpoint cost per turn": 1,
+    "how similar were two unrelated pieces of this conversation": 1,
+    "why are odd nodes promoted rather than duplicated in the tree": 1,
+    "the distinction between throwing something away and folding it up": 1,
+    "the test for whether a cut belongs to this framework at all": 2,
+    "what happened when the fuzzer's mutations never got past the hash": 1,
+    "why did the benchmark's own numbers stop being comparable between runs": 1
+   }
+  }
+ },
+ "part_b_control_beta_zero": {
+  "seeds": 1,
+  "beta": 0.0,
+  "recall_at_1": 0.75,
+  "recall_at_5": 1.0,
+  "mrr": 0.861,
+  "queries_at_rank_1": 9,
+  "median_rank": 1.0,
+  "ranks": {
+   "how was the rolling-hash constant table produced instead of copied": 3,
+   "what was the writer's throughput with content-defined boundaries": 1,
+   "why did every tool end up advertising the wrong parameters": 1,
+   "what did Windows refuse to do to a file that was mapped into memory": 1,
+   "the broken archive that both readers said was fine": 1,
+   "what does an unchanged checkpoint cost per turn": 1,
+   "how similar were two unrelated pieces of this conversation": 1,
+   "why are odd nodes promoted rather than duplicated in the tree": 1,
+   "the distinction between throwing something away and folding it up": 2,
+   "the test for whether a cut belongs to this framework at all": 2,
+   "what happened when the fuzzer's mutations never got past the hash": 1,
+   "why did the benchmark's own numbers stop being comparable between runs": 1
+  }
+ },
+ "part_b_best_cell": {
+  "seeds": 3,
+  "beta": 0.2,
+  "recall_at_1": 0.833,
+  "recall_at_5": 1.0,
+  "mrr": 0.917,
+  "queries_at_rank_1": 10,
+  "median_rank": 1.0,
+  "ranks": {
+   "how was the rolling-hash constant table produced instead of copied": 1,
+   "what was the writer's throughput with content-defined boundaries": 1,
+   "why did every tool end up advertising the wrong parameters": 1,
+   "what did Windows refuse to do to a file that was mapped into memory": 1,
+   "the broken archive that both readers said was fine": 1,
+   "what does an unchanged checkpoint cost per turn": 1,
+   "how similar were two unrelated pieces of this conversation": 1,
+   "why are odd nodes promoted rather than duplicated in the tree": 1,
+   "the distinction between throwing something away and folding it up": 1,
+   "the test for whether a cut belongs to this framework at all": 2,
+   "what happened when the fuzzer's mutations never got past the hash": 2,
+   "why did the benchmark's own numbers stop being comparable between runs": 1
+  }
+ },
+ "part_b_queries_that_moved": {
+  "how was the rolling-hash constant table produced instead of copied": {
+   "control": 3,
+   "best": 1
+  },
+  "the distinction between throwing something away and folding it up": {
+   "control": 2,
+   "best": 1
+  },
+  "what happened when the fuzzer's mutations never got past the hash": {
+   "control": 1,
+   "best": 2
+  }
+ },
+ "part_b_cells_where_recall_at_5_got_worse": [
+  "k=1,beta=0.4"
+ ],
+ "part_b_best_minus_control_mrr": 0.056,
+ "part_b_within_noise": true
+}

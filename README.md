@@ -159,6 +159,8 @@ The loop, and what each step is required to prove:
 | `context_segment_export` | the views `π_σ(m)` to embed, with the identity that must come back with them |
 | `context_attach_vectors` | vectors into the *auxiliary* plane — `D(P, I) = D(P, ∅)` |
 | `context_address` | a question in, `(turn, start_byte, end_byte)` out, digest verified against the record |
+| `context_relate` | typed relation edges over the index — a kind and its evidence, never a score |
+| `context_relations` | what the record says is related to a turn, and why; unranked |
 
 The last row is the whole point. A segment is an **index**, never a stored fragment:
 from Neo's 同一性微積分, 切割 = 索引 — a cut adds a perspective and leaves the object
