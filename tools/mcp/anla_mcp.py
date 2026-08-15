@@ -69,7 +69,8 @@ from anla.fastcdc import CdcProfile  # noqa: E402
 from anla1 import container as C  # noqa: E402
 from anla1.fs import restore_tree, scan_tree  # noqa: E402
 from anla1.context import (  # noqa: E402
-    expand, project, projection_manifest, read_jsonl, turn_entries,
+    expand, newest_sessions, project, projection_manifest, read_jsonl,
+    turn_entries,
 )
 from anla1.embedding import EmbeddingIdentity, comparable  # noqa: E402
 from anla1.resonance import (  # noqa: E402
@@ -693,8 +694,10 @@ def anla_compare_writers(source: str) -> dict:
 # back byte for byte, from the archive, with no model involved in the returning.
 
 def _sessions(root: str = "") -> list[pathlib.Path]:
-    where = pathlib.Path(root).expanduser() if root else pathlib.Path.home() / ".claude/projects"
-    return sorted(where.rglob("*.jsonl"), key=lambda f: -f.stat().st_mtime)
+    # One definition, in the library, because the `anla1 context` commands need the
+    # same answer and "the newest session" written twice is two definitions that
+    # agree right up until one of them is edited.
+    return newest_sessions(root)
 
 
 @mcp.tool()

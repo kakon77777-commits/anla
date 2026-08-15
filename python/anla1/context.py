@@ -45,8 +45,24 @@ from .snapshot import SourceEntry, extract_snapshot, list_snapshots
 
 __all__ = [
     "Turn", "LEVELS", "read_jsonl", "turn_entries", "Projection", "project",
-    "expand", "projection_manifest",
+    "expand", "projection_manifest", "newest_sessions",
 ]
+
+
+def newest_sessions(root: str = "") -> list:
+    """Session transcripts on this machine, newest first.
+
+    Here rather than in the MCP server because the command line needs the same
+    answer, and "the newest session" defined twice is two definitions that agree
+    until one of them is edited. Returns paths; deciding what to do with them —
+    including whether taking the newest one is appropriate — is the caller's.
+    """
+    import pathlib
+    where = (pathlib.Path(root).expanduser() if root
+             else pathlib.Path.home() / ".claude/projects")
+    if not where.exists():
+        return []
+    return sorted(where.rglob("*.jsonl"), key=lambda f: -f.stat().st_mtime)
 
 #: MNVP §6.1's four levels, named for context rather than for numbers.
 #:

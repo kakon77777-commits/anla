@@ -120,10 +120,30 @@ therefore carries a context layer, reachable over MCP, and the target is **an AI
 natively compressing its own history** — remembering it losslessly, addressing it
 semantically, and getting the record itself back rather than a summary of it.
 
+Two front doors on one implementation. **From a terminal**, because a layer that is
+about looking at a record and getting an exact piece of it back is a strange thing to
+make unavailable to the person who owns the record:
+
+```bash
+anla1 context capture  memory.anla            # this machine's newest session
+anla1 context project  memory.anla --level L1 # 0.18% of it, every omission expandable
+anla1 context expand   memory.anla turns/000978-assistant.json
+anla1 context segment  memory.anla --scheme changepoint-v1
+anla1 context address  memory.anla "how was the gear table produced"
+```
+
+**Or over MCP**, for an agent — stdio for one client, HTTP when Claude Code and Codex
+should share one server. `--share DIR` makes it read-only and confined to one
+directory, which is what a public URL should be given:
+
 ```bash
 pip install "mcp>=1.10,<2"
-python tools/mcp/anla_mcp.py          # stdio; 20 tools
+python tools/mcp/anla_mcp.py                          # stdio; 20 tools
+python tools/mcp/anla_mcp.py --http                   # http://127.0.0.1:8791/mcp
+python tools/mcp/anla_mcp.py --http --share ./shared  # 12 tools, read-only
 ```
+
+[`tools/mcp/SETUP.md`](tools/mcp/SETUP.md) has the registration for each client.
 
 The loop, and what each step is required to prove:
 
@@ -268,7 +288,7 @@ archive.read('docs/readme.txt');
 python -m pytest python/tests -q
 ```
 
-805 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
+815 tests. The cross-implementation tests need `node` on `PATH` and skip themselves
 without it. Everything runs on Linux, macOS and Windows in CI. Another 76
 assertions run in a browser on the [live test page](https://anla.evemisslab.com/demo/).
 

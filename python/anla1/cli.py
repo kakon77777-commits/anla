@@ -446,12 +446,26 @@ def build_parser() -> argparse.ArgumentParser:
     common(p_diff)
     p_diff.set_defaults(func=cmd_diff)
 
+    # The context layer. Registered from its own module because it is a different
+    # layer of the system rather than another verb on the same one: these commands
+    # read and index a record, they do not describe an archive of files.
+    from .context_cli import add_parser as add_context
+    add_context(sub, common)
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    def emit(payload: dict, lines: list[str]) -> None:
+        _emit(payload, args.json, lines)
+
     try:
+        # The context commands take the emitter, so one flag (`--json`) means the
+        # same thing across both layers and neither has to reimplement it.
+        if getattr(args, "context_command", None):
+            return args.func(args, emit)
         return args.func(args)
     except AnlaError as exc:
         json.dump(exc.as_dict(), sys.stderr, ensure_ascii=False, indent=2, sort_keys=True)
